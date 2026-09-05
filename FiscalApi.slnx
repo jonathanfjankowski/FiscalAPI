@@ -1,0 +1,14 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Fiscal.Adapters.Unimake/Fiscal.Adapters.Unimake.csproj" />
+    <Project Path="src/Fiscal.Api/Fiscal.Api.csproj" />
+    <Project Path="src/Fiscal.Core/Fiscal.Core.csproj" />
+    <Project Path="src/Fiscal.Pdf/Fiscal.Pdf.csproj" />
+    <Project Path="src/Fiscal.Persistence/Fiscal.Persistence.csproj" />
+    <Project Path="src/Fiscal.Worker/Fiscal.Worker.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Fiscal.Api.Tests/Fiscal.Api.Tests.csproj" />
+    <Project Path="tests/Fiscal.Core.Tests/Fiscal.Core.Tests.csproj" />
+  </Folder>
+</Solution>

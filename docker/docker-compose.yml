@@ -1,0 +1,54 @@
+services:
+  api:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: api-final
+    ports:
+      - "8080:8080"
+    environment:
+      - ASPNETCORE_ENVIRONMENT=Development
+      - ASPNETCORE_URLS=http://+:8080
+      - ConnectionStrings__Postgres=Host=postgres;Database=fiscal;Username=fiscal;Password=${DB_PASSWORD:-fiscal}
+      - Certificados__ChaveMestraKEK=${KEK_MASTER_KEY}
+      - Fiscal__ModoSandbox=${MODO_SANDBOX:-true}
+      # Painel admin (seed do primeiro operador + assinatura de JWT).
+      # ADMIN_JWT_SECRET sem valor = login do painel fica desabilitado até configurar.
+      - ADMIN_EMAIL=${ADMIN_EMAIL:-}
+      - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
+      - ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET:-}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  worker:
+    build:
+      context: ..
+      dockerfile: docker/Dockerfile
+      target: worker-final
+    environment:
+      - DOTNET_ENVIRONMENT=Development
+      - ConnectionStrings__Postgres=Host=postgres;Database=fiscal;Username=fiscal;Password=${DB_PASSWORD:-fiscal}
+      - Certificados__ChaveMestraKEK=${KEK_MASTER_KEY}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      - POSTGRES_DB=fiscal
+      - POSTGRES_USER=fiscal
+      - POSTGRES_PASSWORD=${DB_PASSWORD:-fiscal}
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U fiscal -d fiscal"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+    ports:
+      - "5432:5432"
+
+volumes:
+  pgdata:

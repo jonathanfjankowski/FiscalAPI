@@ -1,0 +1,32 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Api referencia Worker (para os jobs/fila) e ambos carregam appsettings;
+         sem isso o dotnet publish falha com NETSDK1152. -->
+    <ErrorOnDuplicatePublishOutputFiles>false</ErrorOnDuplicatePublishOutputFiles>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="AspNetCore.HealthChecks.NpgSql" Version="9.0.0" />
+    <PackageReference Include="FluentValidation.AspNetCore" Version="11.3.1" />
+    <PackageReference Include="Hangfire.AspNetCore" Version="1.8.20" />
+    <PackageReference Include="Hangfire.Core" Version="1.8.20" />
+    <PackageReference Include="Hangfire.PostgreSql" Version="1.20.10" />
+    <PackageReference Include="Microsoft.AspNetCore.Authentication.JwtBearer" Version="10.0.11" />
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" Version="10.0.11" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.11" />
+    <PackageReference Include="Serilog.AspNetCore" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Fiscal.Core\Fiscal.Core.csproj" />
+    <ProjectReference Include="..\Fiscal.Pdf\Fiscal.Pdf.csproj" />
+    <ProjectReference Include="..\Fiscal.Persistence\Fiscal.Persistence.csproj" />
+    <ProjectReference Include="..\Fiscal.Adapters.Unimake\Fiscal.Adapters.Unimake.csproj" />
+    <ProjectReference Include="..\Fiscal.Worker\Fiscal.Worker.csproj" />
+  </ItemGroup>
+
+</Project>
