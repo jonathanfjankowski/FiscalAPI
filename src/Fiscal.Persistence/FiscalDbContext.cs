@@ -34,6 +34,7 @@ public class FiscalDbContext : DbContext
             b.Property(x => x.RegimeTributario).HasColumnName("regime_tributario");
             b.Property(x => x.AmbientePadrao).HasColumnName("ambiente_padrao");
             b.Property(x => x.InscricaoEstadual).HasColumnName("inscricao_estadual").HasMaxLength(20);
+            b.Property(x => x.InscricaoMunicipal).HasColumnName("inscricao_municipal").HasMaxLength(20);
             b.Property(x => x.Logradouro).HasColumnName("logradouro").HasMaxLength(100);
             b.Property(x => x.Numero).HasColumnName("numero").HasMaxLength(10);
             b.Property(x => x.Complemento).HasColumnName("complemento").HasMaxLength(100);

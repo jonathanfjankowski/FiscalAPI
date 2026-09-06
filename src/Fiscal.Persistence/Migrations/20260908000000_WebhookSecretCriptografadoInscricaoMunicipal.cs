@@ -12,10 +12,11 @@ namespace Fiscal.Persistence.Migrations
     /// (DEK por registro + KEK) usado pelo CSC e pelos certificados. Valores
     /// legados em texto plano são migrados em voo pelo ProcessarWebhookJob e
     /// a coluna antiga é esvaziada.
+    /// NFS-e Nacional (DPS): inscrição municipal do prestador (prest.IM).
     /// </summary>
     [DbContext(typeof(FiscalDbContext))]
-    [Migration("20260908000000_WebhookSecretCriptografado")]
-    public partial class WebhookSecretCriptografado : Migration
+    [Migration("20260908000000_WebhookSecretCriptografadoInscricaoMunicipal")]
+    public partial class WebhookSecretCriptografadoInscricaoMunicipal : Migration
     {
         protected override void Up(MigrationBuilder migrationBuilder)
         {
@@ -24,12 +25,23 @@ namespace Fiscal.Persistence.Migrations
                 table: "tenants",
                 type: "bytea",
                 nullable: true);
+
+            migrationBuilder.AddColumn<string>(
+                name: "inscricao_municipal",
+                table: "tenants",
+                type: "character varying(20)",
+                maxLength: 20,
+                nullable: true);
         }
 
         protected override void Down(MigrationBuilder migrationBuilder)
         {
             migrationBuilder.DropColumn(
                 name: "webhook_secret_criptografado",
+                table: "tenants");
+
+            migrationBuilder.DropColumn(
+                name: "inscricao_municipal",
                 table: "tenants");
         }
     }

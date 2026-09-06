@@ -666,6 +666,11 @@ namespace Fiscal.Persistence.Migrations
                         .HasColumnType("character varying(20)")
                         .HasColumnName("inscricao_estadual");
 
+                    b.Property<string>("InscricaoMunicipal")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("inscricao_municipal");
+
                     b.Property<string>("Logradouro")
                         .HasMaxLength(100)
                         .HasColumnType("character varying(100)")

@@ -433,6 +433,68 @@ Idêntico ao anterior, para **NFC-e** (modelo 65). Mesmo corpo (`EmissaoRequest`
 
 > NFC-e exige o CSC (código de segurança do consumidor) fornecido pela SEFAZ do estado — configure-o junto com o perfil fiscal do emitente via `PUT /v1/tenants/perfil` (o CSC fica cifrado com a KEK).
 
+#### `POST /v1/documentos-fiscais/nfse/dps` 🔒
+
+NFS-e padrão Nacional com **transmissão DPS real** (layout 1.01, autorização
+síncrona). Header `Idempotency-Key` obrigatório. Corpo próprio:
+
+```json
+{
+  "ambiente": "homologacao",
+  "serie": 1,
+  "dataCompetencia": "2026-09-05",
+  "tomador": {
+    "cnpjCpf": "11122233000144",
+    "nome": "Cliente Serviço Ltda",
+    "endereco": {
+      "codigoMunicipioIbge": "3550308", "cep": "01001000",
+      "logradouro": "Praça da Sé", "numero": "1", "bairro": "Sé"
+    }
+  },
+  "servico": {
+    "codigoTributarioNacional": "010701",
+    "descricaoServico": "Desenvolvimento de software",
+    "codigoNbs": "112011000"
+  },
+  "valores": {
+    "valorServicos": 1000,
+    "tributacaoIssqn": 1,
+    "retencaoIssqn": 1,
+    "aliquotaIssqn": 5
+  },
+  "ibscbs": {
+    "finalidade": 0,
+    "indicadorFinal": 1,
+    "codigoIndicadorOperacao": "000001",
+    "indicadorDestinatario": 0,
+    "gibbsCbs": { "cst": "101", "cClassTrib": "000001" }
+  },
+  "informacoesComplementares": "texto livre"
+}
+```
+
+Regras: `valorServicos` ≥ 0; `cTribNac` e `xDescServ` obrigatórios; cNBS 9
+dígitos; bloco `ibscbs` (RTC) validado quando informado. O prestador é o
+perfil fiscal do tenant (`PUT /v1/tenants/perfil` — inscrição municipal
+obrigatória na prática). Autorização síncrona: `chaveAcesso` de 50 dígitos
+(prefixo `NFS`). Fora de sandbox exige certificado A1 e credenciamento na
+SEFAZ Nacional.
+
+#### `POST /v1/documentos-fiscais/{id}/substituicao` 🔒
+
+Substituição de NFS-e autorizada: emite o DPS **substituto** (corpo:
+`{ "dps": { ...mesmo formato de /nfse/dps... }, "cMotivo": 5,
+"xMotivo": "Rejeitada pelo tomador" }`). A SEFAZ desativa a original quando
+autoriza a substituta; o novo documento segue o fluxo normal (consulta por
+`GET /{id}` do novo id). `cMotivo` aceita 1–5 e 99 (99 exige `xMotivo`).
+
+| Código | Quando |
+|---|---|
+| `202 Accepted` | Substituta aceita e enfileirada (`substituidaId` + novo `id`). |
+| `400` | `Idempotency-Key` ausente. |
+| `409` | Documento do path não está AUTORIZADA. |
+| `422` | Documento não é NFS-e; `cMotivo` inválido; DPS inconsistente. |
+
 #### `GET /v1/documentos-fiscais/{id}`
 
 Consulta o estado atual do documento. `id` é o GUID retornado no `202`.

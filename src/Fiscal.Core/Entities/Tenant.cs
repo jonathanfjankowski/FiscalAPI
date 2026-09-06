@@ -14,6 +14,9 @@ public class Tenant
 
     // Dados do emitente exigidos pelo layout da NFe (grupo emit/enderEmit).
     public string? InscricaoEstadual { get; set; }
+
+    /// <summary>Inscrição municipal — exigida pela NFS-e Nacional (prest.IM).</summary>
+    public string? InscricaoMunicipal { get; set; }
     public string? Logradouro { get; set; }
     public string? Numero { get; set; }
     public string? Complemento { get; set; }

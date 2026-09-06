@@ -74,6 +74,7 @@ builder.Services.AddScoped<IRepositorioNsu, RepositorioNsu>();
 // --- Validador de consistência (puro, sem deps externas) ---
 builder.Services.AddSingleton<ValidadorConsistenciaFiscal>();
 builder.Services.AddSingleton<ValidadorImpostosV2>();
+builder.Services.AddSingleton<ValidadorNfseDps>();
 
 // --- PDF (DANFE/DANFCe via QuestPDF) ---
 builder.Services.AddSingleton<IGeradorPdf, GeradorPdfQuestPdf>();

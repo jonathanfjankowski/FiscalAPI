@@ -342,10 +342,11 @@ para `FALHA` (terminal, visível na tabela `outbox_webhooks`).
   estadual + endereço) e falha alto sem isso — configure via
   `PUT /v1/tenants/perfil`. Em dev/sandbox, `MODO_SANDBOX=true` (EmissorMock)
   dispensa certificado, CSC e perfil.
-- **NFS-e (padrão Nacional/DPS)**: envelope completo (rota, numeração
-  interna, fila, sandbox, PDF simplificado, cancelamento 409 com orientação
-  de substituição). A **transmissão DPS real** à SEFAZ Nacional é a próxima
-  sprint (fora de sandbox falha alto).
+- **NFS-e (padrão Nacional/DPS)**: transmissão DPS real implementada
+  (`POST /nfse/dps`, layout 1.01 síncrono) + **substituição**
+  (`POST {id}/substituicao`); a rota legada (`POST /nfse`) segue só para
+  sandbox. A bateria de homologação exige certificado A1 e **credenciamento
+  do prestador** na SEFAZ Nacional.
 - **Distribuição DFe sincroniza por NSU** a cada 60 s no Worker; em produção
   exige certificado A1; em sandbox a consulta responde "sem documentos" (mock).
 - **PDF (DANFE/DANFCe/DANFSe)** em layout **simplificado** — sem código de

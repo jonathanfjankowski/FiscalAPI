@@ -1,5 +1,36 @@
 # Changelog
 
+## [1.5.0-alpha] — 2026-09-06
+
+### Adicionado — NFS-e Nacional com transmissão DPS real
+- **`POST /v1/documentos-fiscais/nfse/dps`** — novo contrato próprio da
+  NFS-e Nacional (`NfseDpsRequest`: tomador, serviço com cTribNac/cNBS,
+  valores com ISS/PIS/COFINS/retenções, bloco RTC IBS/CBS da reforma).
+  Autorização **síncrona** via webservice "GerarNfse" (REST gzip) da SEFAZ
+  Nacional, com assinatura do DPS e chave de 50 dígitos ("NFS...").
+- **`POST /v1/documentos-fiscais/{id}/substituicao`** — substituição de
+  NFS-e: emite DPS substituto com grupo `<subst>` (chave da substituída +
+  cMotivo/xMotivo); a SEFAZ desativa a original quando autoriza a
+  substituta. Exige NFS-e AUTORIZADA (409 caso contrário) e ambiente igual
+  ao da original.
+- `MapperDps` (Unimake NACIONAL layout 1.01): Id determinístico
+  "DPS + cLocEmi + CNPJ + série(5) + nDPS(15)", prest com regime do tenant,
+  toma (CPF/CNPJ), serv, valores (tribMun/tribFed/totTrib), IBSCBS.
+- `ValidadorNfseDps`: campos mínimos do DPS → 422 com `campo` exato.
+- Tenant ganha `inscricao_municipal` (prest.IM — exigido na NFS-e real;
+  configurável via `PUT /v1/tenants/perfil`). Migration
+  `WebhookSecretCriptografadoInscricaoMunicipal`.
+- Rota legada `POST /nfse` (EmissaoRequest) segue funcionando **apenas em
+  sandbox**; fora dela falha alto com orientação para a rota nova.
+- Transmissão real contra a SEFAZ Nacional (produção/homologação) depende
+  de credenciamento + certificado A1 — trilha de homologação do README.
+
+### Testes
+- **144/144** (96 + 48). Novos: 15 unitários de DPS/substituição (Id, XML
+  prest/toma/serv/valores/IBSCBS/subst, validação declarativa) e 7 de
+  integração (nfse/dps 202 → AUTORIZADA em sandbox, 422s, substituição
+  ponta a ponta, 409/422 das guardas).
+
 ## [1.4.0-alpha] — 2026-09-06
 
 ### Adicionado — contrato v2 F1: ICMS completo + CSOSN (Simples Nacional emite!)

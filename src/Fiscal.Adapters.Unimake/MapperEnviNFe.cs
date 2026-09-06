@@ -25,7 +25,7 @@ namespace Fiscal.Adapters.Unimake;
 /// </summary>
 public static class MapperEnviNFe
 {
-    private const string VerProc = "FiscalAPI 1.4.0";
+    private const string VerProc = "FiscalAPI 1.5.0";
 
     public static EnviNFe Criar(DocumentoFiscal doc, Tenant tenant, EmissaoRequest req, Ambiente ambiente)
     {

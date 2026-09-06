@@ -1,18 +1,18 @@
 # Status atual — FiscalAPI
 
-> Snapshot de 2026-09-06, gerado a partir do `CHANGELOG.md`, `docs/roadmap.md`
-> e `README.md`. Este documento resume **o que está pronto, o que falta e
-> onde o projeto está** — para a lista cronológica detalhada, veja o
-> `CHANGELOG.md`; para o que vem depois do 1.0, veja `docs/roadmap.md`.
+> Snapshot de 2026-09-06 (2ª revisão), gerado a partir do `CHANGELOG.md`,
+> `docs/roadmap.md` e `README.md`. Este documento resume **o que está pronto,
+> o que falta e onde o projeto está** — para a lista cronológica detalhada,
+> veja o `CHANGELOG.md`; para o que vem depois do 1.0, veja `docs/roadmap.md`.
 
 ## Identidade
 
 | | |
 |---|---|
-| **Versão atual** | `1.4.0-alpha` (2026-09-06) |
-| **Estágio** | Alpha — funcional ponta a ponta em sandbox; emissão real NF-e/NFC-e implementada, homologação contra SEFAZ pendente de certificado A1 |
+| **Versão atual** | `1.5.0-alpha` (2026-09-06) |
+| **Estágio** | Alpha — funcional ponta a ponta em sandbox; emissão real NF-e/NFC-e/NFS-e(DPS) implementada, homologação contra SEFAZ pendente de certificado A1 |
 | **Stack** | .NET 10 (API + Worker Hangfire), PostgreSQL/EF Core, React 19 + Vite + Tailwind v4 (painel admin), Unimake.DFe (adapters SEFAZ), QuestPDF (DANFE/DANFCe) |
-| **Testes** | 122/122 (81 unitários em `Fiscal.Core.Tests`, 41 de integração em `Fiscal.Api.Tests`) |
+| **Testes** | 144/144 (96 unitários em `Fiscal.Core.Tests`, 48 de integração em `Fiscal.Api.Tests`) |
 | **Licença** | MIT — **sujeito à confirmação da licença da `Unimake.DFe`** (bloqueio do release público) |
 | **Repositório** | https://github.com/jonathanfjankowski/FiscalAPI |
 
@@ -28,8 +28,9 @@
   adapter Unimake.
 - **NFS-e padrão Nacional (DPS)** — envelope REST completo (numeração
   interna modelo 115, fila, idempotência, PDF simplificado, sandbox via
-  mock). **Transmissão DPS real à SEFAZ Nacional ainda pendente** (fora de
-  sandbox falha alto, por design).
+  mock) **e transmissão DPS real** (layout 1.01 síncrono, rota
+  `POST /nfse/dps`) com **substituição** (`POST {id}/substituicao`).
+  Credenciamento + homologação ficam na trilha manual do README.
 - **Eventos** — cancelamento (110111), carta de correção (110110) e
   inutilização de faixa transmitidos de verdade (`TransmissorEventoUnimake`)
   com ciclo `PENDENTE → PROCESSANDO → PROCESSADO/REJEITADO/ERRO` e backoff.
@@ -72,18 +73,15 @@
 
 Em ordem de prioridade (detalhes em `docs/roadmap.md`):
 
-1. **Transmissão DPS real da NFS-e Nacional** — última integração
-   pendente; o envelope já está coberto pelo sandbox.
-2. **Homologação real NF-e/NFC-e/eventos contra SEFAZ** — exige
+1. **Homologação real NF-e/NFC-e/eventos/NFS-e contra SEFAZ** — exige
    certificado A1; checklist no README (`### Checklist de homologação real`).
-3. **Confirmação da licença da `Unimake.DFe`** — bloqueio burocrático do
+   A NFS-e Nacional exige também credenciamento do prestador.
+2. **Confirmação da licença da `Unimake.DFe`** — bloqueio burocrático do
    release público (o MIT do projeto depende dessa checagem).
-4. **Substituição de NFS-e**
-   (`POST /v1/documentos-fiscais/{id}/substituicao`).
-5. **OpenTelemetry/Prometheus** (taxa de rejeição por UF, latência
+3. **OpenTelemetry/Prometheus** (taxa de rejeição por UF, latência
    `PENDENTE → AUTORIZADA`, docs em contingência) + alertas.
-6. **Rate limiting distribuído (Redis)** + cache compartilhado.
-7. **PITR (WAL archiving)** para RPO ≤ 5 min + secret manager plugável.
+4. **Rate limiting distribuído (Redis)** + cache compartilhado.
+5. **PITR (WAL archiving)** para RPO ≤ 5 min + secret manager plugável.
 
 ## Evolução do contrato (v2) — F1 concluída, F2–F6 planejadas
 
@@ -108,7 +106,8 @@ As principais:
   alto** em vez de transmitir errado.
 - PDF **simplificado** (sem código de barras/QR do leiaute oficial) — F6.
 - Certificado **A1 apenas** (A3/HSM fora de escopo).
-- NFS-e real exige a transmissão DPS (item 1 das pendências).
+- NFS-e real exige credenciamento do prestador na SEFAZ Nacional +
+  certificado A1 (homologação manual).
 - Sem página de reenvio manual de webhooks (consultável via
   `outbox_webhooks`).
 - Homologação real exige certificado A1 válido (não existe certificado
@@ -119,8 +118,8 @@ As principais:
 | Indicador | Estado |
 |---|---|
 | Build + testes no CI | ✅ verde (`build-and-test.yml`) |
-| Cobertura de testes automatizados | 122 testes — segurança, ICMS/CSOSN, contingência, DFe, webhooks, painel |
+| Cobertura de testes automatizados | 144 testes — segurança, ICMS/CSOSN, DPS/substituição, contingência, DFe, webhooks, painel |
 | `dotnet format --verify-no-changes` | ✅ exigido no CI |
 | Migrations | Aplicadas automaticamente no startup (hand-written com atributos `[Migration]`/`[DbContext]`) |
-| Documentação | README + 17 docs em `docs/` + CHANGELOG completo 0.1 → 1.4 |
-| Dívida documentada | EPEC/NFC-e offline, OTel, Redis, PITR, substituição NFS-e, contrato v2 F2–F6 |
+| Documentação | README + 17 docs em `docs/` + CHANGELOG completo 0.1 → 1.5 |
+| Dívida documentada | EPEC/NFC-e offline, OTel, Redis, PITR, contrato v2 F2–F6 |

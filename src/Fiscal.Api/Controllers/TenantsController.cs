@@ -10,6 +10,7 @@ namespace Fiscal.Api.Controllers;
 
 public record PerfilTenantRequest(
     string? InscricaoEstadual,
+    string? InscricaoMunicipal,
     string? Logradouro,
     string? Numero,
     string? Complemento,
@@ -55,6 +56,7 @@ public class TenantsController : ControllerBase
             tenant.CodigoMunicipioIbge,
             tenant.RegimeTributario,
             tenant.InscricaoEstadual,
+            tenant.InscricaoMunicipal,
             tenant.Logradouro,
             tenant.Numero,
             tenant.Complemento,
@@ -79,6 +81,7 @@ public class TenantsController : ControllerBase
         if (tenant is null) return NotFound();
 
         tenant.InscricaoEstadual = req.InscricaoEstadual ?? tenant.InscricaoEstadual;
+        tenant.InscricaoMunicipal = req.InscricaoMunicipal ?? tenant.InscricaoMunicipal;
         tenant.Logradouro = req.Logradouro ?? tenant.Logradouro;
         tenant.Numero = req.Numero ?? tenant.Numero;
         tenant.Complemento = req.Complemento ?? tenant.Complemento;
