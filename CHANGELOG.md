@@ -1,5 +1,25 @@
 # Changelog
 
+## [1.7.0-alpha] — 2026-09-06
+
+### Adicionado — OpenTelemetry/Prometheus + Redis (roadmap itens 4 e 5)
+- **Métricas de negócio** (meter `FiscalAPI`): `fiscal_documentos`
+  (tipo/status/UF/ambiente), `fiscal_latencia_autorizacao` (histograma
+  PENDENTE→AUTORIZADA), `fiscal_eventos`, `fiscal_webhooks` (evento ×
+  resultado) e `fiscal_contingencia` (modo) — instrumentados nos jobs do
+  Worker. Docs de alertas sugeridos em `docs/observabilidade.md`.
+- **`GET /metrics`** (Prometheus) na API + instrumentação
+  ASP.NET/HttpClient/runtime; Worker expõe por **OTLP** quando
+  `Fiscal:Observabilidade:OtlpEndpoint` está configurado.
+- **Redis opcional** (`Fiscal:Redis:ConnectionString`):
+  rate limiting **distribuído** de janela fixa (INCR+PEXPIRE atômicos,
+  fail-open) **particionado por API key** caindo para IP — pendência 3 de
+  `docs/revisao-seguranca.md`; **cache compartilhado** do status-serviço
+  via `IDistributedCache` (antes in-memory). Sem Redis, tudo segue
+  in-memory (single-node, como no alpha).
+- `docker-compose`: serviço `redis` + volume (`REDIS_CONNECTION_STRING`).
+- **159/159 testes** (108 + 51): smoke de métricas + `/metrics`.
+
 ## [1.6.0-alpha] — 2026-09-06
 
 ### Adicionado — contrato v2 F2 (item rico + totais) e F3 (IPI/PIS/COFINS)

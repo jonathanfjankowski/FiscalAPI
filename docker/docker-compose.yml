@@ -17,6 +17,8 @@ services:
       - ADMIN_EMAIL=${ADMIN_EMAIL:-}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET:-}
+      # Redis (opcional) — rate limit distribuído + cache compartilhado.
+      - Fiscal__Redis__ConnectionString=${REDIS_CONNECTION_STRING:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -33,6 +35,17 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   postgres:
     image: postgres:16-alpine
@@ -52,3 +65,4 @@ services:
 
 volumes:
   pgdata:
+  redisdata:

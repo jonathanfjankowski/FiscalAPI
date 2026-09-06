@@ -357,4 +357,17 @@ public class ImpostosV2WebhooksIntegracaoTests(EmissaoIntegracaoTests.Factory fa
 
         resp.StatusCode.Should().Be(HttpStatusCode.Accepted);
     }
+    // ---------- observabilidade (Fase 4) ----------
+
+    [Fact]
+    public async Task Metrics_endpoint_responde_com_metricas_de_negocio()
+    {
+        var client = factory.CreateClient();
+
+        var resp = await client.GetAsync("/metrics");
+
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var conteudo = await resp.Content.ReadAsStringAsync();
+        conteudo.Should().NotBeEmpty();
+    }
 }

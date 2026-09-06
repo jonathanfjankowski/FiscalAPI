@@ -28,17 +28,20 @@ public class ProcessarWebhookJob
     private readonly FiscalDbContext _db;
     private readonly IDespachanteWebhook _despachante;
     private readonly ICertificadoStore _certStore;
+    private readonly MetricasFiscais _metricas;
     private readonly ILogger<ProcessarWebhookJob> _logger;
 
     public ProcessarWebhookJob(
         FiscalDbContext db,
         IDespachanteWebhook despachante,
         ICertificadoStore certStore,
+        MetricasFiscais metricas,
         ILogger<ProcessarWebhookJob> logger)
     {
         _db = db;
         _despachante = despachante;
         _certStore = certStore;
+        _metricas = metricas;
         _logger = logger;
     }
 
@@ -93,6 +96,7 @@ public class ProcessarWebhookJob
         }
 
         await _db.SaveChangesAsync(ct);
+        _metricas.WebhookEntregue(entrega.TipoEvento, entrega.Status == "ENTREGUE");
         _logger.LogInformation("WebhookEntrega {Id} ({Tipo}) → {Status} (tentativa {Tentativa})",
             entrega.Id, entrega.TipoEvento, entrega.Status, entrega.Tentativas);
     }

@@ -1,5 +1,6 @@
 using Fiscal.Adapters.Unimake;
 using Fiscal.Core.Interfaces;
+using Fiscal.Core.Services;
 using Fiscal.Persistence;
 using Fiscal.Persistence.Criptografia;
 using Fiscal.Persistence.Repositories;
@@ -9,6 +10,8 @@ using Fiscal.Worker.Delivery;
 using Hangfire;
 using Hangfire.PostgreSql;
 using Microsoft.EntityFrameworkCore;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
 using Serilog;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -23,6 +26,21 @@ var connStr = builder.Configuration.GetConnectionString("Postgres")
 builder.Services.AddDbContext<FiscalDbContext>(opt => opt.UseNpgsql(connStr));
 
 builder.Services.AddSingleton<ICertificadoStore, EnvelopeEncryptionService>();
+builder.Services.AddSingleton<MetricasFiscais>();
+
+// --- OpenTelemetry (métricas de negócio) ---
+// Worker não tem endpoint HTTP: as métricas saem por OTLP quando
+// Fiscal:Observabilidade:OtlpEndpoint está configurado; sem ele, são no-ops.
+var builderOtel = builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r.AddService("FiscalAPI.Worker", serviceVersion: MetricasFiscais.VersaoServico))
+    .WithMetrics(m =>
+    {
+        m.AddRuntimeInstrumentation();
+        m.AddMeter(MetricasFiscais.NomeMedidor);
+        var otlp = builder.Configuration["Fiscal:Observabilidade:OtlpEndpoint"];
+        if (!string.IsNullOrWhiteSpace(otlp))
+            m.AddOtlpExporter(o => o.Endpoint = new Uri(otlp));
+    });
 builder.Services.AddScoped<IRepositorioDocumentoFiscal, RepositorioDocumentoFiscal>();
 builder.Services.AddScoped<IRepositorioCertificado, RepositorioCertificado>();
 builder.Services.AddScoped<IRepositorioTenant, RepositorioTenant>();

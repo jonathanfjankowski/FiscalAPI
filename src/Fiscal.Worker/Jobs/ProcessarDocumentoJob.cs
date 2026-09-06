@@ -34,6 +34,7 @@ public class ProcessarDocumentoJob
     private readonly IRepositorioAuditoria _auditoria;
     private readonly IEnumerable<IEmissorFiscal> _emissores;
     private readonly ICertificadoStore _certStore;
+    private readonly MetricasFiscais _metricas;
     private readonly bool _sandbox;
     private readonly ILogger<ProcessarDocumentoJob> _logger;
 
@@ -44,6 +45,7 @@ public class ProcessarDocumentoJob
         IRepositorioAuditoria auditoria,
         IEnumerable<IEmissorFiscal> emissores,
         ICertificadoStore certStore,
+        MetricasFiscais metricas,
         IConfiguration configuration,
         ILogger<ProcessarDocumentoJob> logger)
     {
@@ -53,6 +55,7 @@ public class ProcessarDocumentoJob
         _auditoria = auditoria;
         _emissores = emissores;
         _certStore = certStore;
+        _metricas = metricas;
         _sandbox = configuration.GetValue("Fiscal:ModoSandbox", false);
         _logger = logger;
     }
@@ -181,6 +184,7 @@ public class ProcessarDocumentoJob
             case ResultadoEmissaoStatus.ErroTransmissao:
                 doc.Status = StatusDocumento.CONTINGENCIA;
                 doc.ProximaTentativaEm = DateTimeOffset.UtcNow + ProximoBackoff(doc.Tentativas);
+                _metricas.ContingenciaAcionada(doc.ModoContingencia ?? "fila");
                 break;
 
             default:
@@ -193,6 +197,13 @@ public class ProcessarDocumentoJob
 
         await _docRepo.AtualizarAsync(doc, ct);
         await _db.SaveChangesAsync(ct);
+
+        _metricas.DocumentoProcessado(doc.Tipo, doc.Status, tenant.Uf, doc.Ambiente == (short)Ambiente.Producao);
+        if (doc.Status == StatusDocumento.AUTORIZADA)
+        {
+            _metricas.LatenciaAutorizacao(
+                (doc.AtualizadoEm - doc.CriadoEm).TotalSeconds, doc.Tipo, tenant.Uf);
+        }
 
         _logger.LogInformation("DocumentoFiscal {Id} processado → {Status} (tentativa {Tentativa})",
             doc.Id, doc.Status, doc.Tentativas);

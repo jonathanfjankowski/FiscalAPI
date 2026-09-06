@@ -1,10 +1,11 @@
+using System.Text.Json;
 using Fiscal.Api.Authentication;
 using Fiscal.Core.Enums;
 using Fiscal.Core.Interfaces;
 using Fiscal.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Caching.Distributed;
 
 namespace Fiscal.Api.Controllers;
 
@@ -17,7 +18,7 @@ public class StatusServicoController : ControllerBase
     private readonly IRepositorioCertificado _certRepo;
     private readonly ICertificadoStore _certStore;
     private readonly IRepositorioTenant _tenantRepo;
-    private readonly IMemoryCache _cache;
+    private readonly IDistributedCache _cache;
     private readonly bool _sandbox;
 
     public StatusServicoController(
@@ -25,7 +26,7 @@ public class StatusServicoController : ControllerBase
         IRepositorioCertificado certRepo,
         ICertificadoStore certStore,
         IRepositorioTenant tenantRepo,
-        IMemoryCache cache,
+        IDistributedCache cache,
         IConfiguration configuration)
     {
         _consulta = consulta;
@@ -37,7 +38,8 @@ public class StatusServicoController : ControllerBase
     }
 
     /// <summary>
-    /// Status do serviço SEFAZ para a UF do tenant (cache de 60 s).
+    /// Status do serviço SEFAZ para a UF do tenant (cache de 60 s, compartilhado
+    /// via Redis quando Fiscal:Redis:ConnectionString está configurado).
     /// Query: modelo=55|65 (default 55), ambiente=homologacao|producao.
     /// </summary>
     [HttpGet]
@@ -62,8 +64,9 @@ public class StatusServicoController : ControllerBase
 
         var tenantId = HttpContext.GetTenantId();
         var cacheKey = $"status-servico:{tenantId}:{modelo}:{ambienteEfetivo}";
-        if (_cache.TryGetValue(cacheKey, out StatusServico? cached) && cached is not null)
-            return Ok(ParaResponse(cached, true));
+        var cachedJson = await _cache.GetStringAsync(cacheKey, ct);
+        if (cachedJson is not null)
+            return Ok(ParaResponse(JsonSerializer.Deserialize<StatusServico>(cachedJson)!, true));
 
         var tenant = await _tenantRepo.ObterPorIdAsync(tenantId, ct);
         if (tenant is null) return NotFound();
@@ -77,7 +80,11 @@ public class StatusServicoController : ControllerBase
         try
         {
             var status = await _consulta.ConsultarAsync(tenant, modelo, x509, ambienteEfetivo, ct);
-            _cache.Set(cacheKey, status, TimeSpan.FromSeconds(60));
+            await _cache.SetStringAsync(cacheKey, JsonSerializer.Serialize(status),
+                new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60)
+                }, ct);
             return Ok(ParaResponse(status, false));
         }
         catch (Exception ex)

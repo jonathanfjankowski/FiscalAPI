@@ -23,17 +23,15 @@ Tudo abaixo de "Feito" está implementado e coberto por testes automatizados;
 | v2-F1 + Infra | **ICMS completo + CSOSN** (`impostosV2`: CST 00–90, CSOSN 101–900, ST, FCP, DIFAL — Simples Nacional emite) + `PUT /v1/tenants/webhooks` self-service + secret cifrado em repouso | 1.4 |
 | 1.0-1.3 | **NFS-e Nacional DPS real** (`POST /nfse/dps`, layout 1.01 síncrono) + **substituição de NFS-e** (`POST {id}/substituicao`) | 1.5 |
 | v2-F2 + F3 | **Item rico + totais** (GTIN, CEST, unidade, desconto, frete/seguro/outras, fórmula v2 do `valorNota`) + **IPI/PIS/COFINS** por item com totais | 1.6 |
+| 1.0-4/5 | **OTel/Prometheus** (`/metrics`, métricas de negócio, alertas em `docs/observabilidade.md`) + **Redis** (rate limit distribuído por API key + cache compartilhado) | 1.7 |
 
 ## Próximo (antes do 1.0 público)
 
 1. **Homologação real NFe/NFC-e/eventos/NFS-e** contra SEFAZ (exige
    certificado A1 — checklist no README) + ajustes de default por UF que
    ela revelar. A NFS-e Nacional exige ainda credenciamento do prestador.
-2. **OpenTelemetry/Prometheus** (taxa de rejeição por UF, latência
-   PENDENTE→AUTORIZADA, docs em contingência) + alertas.
-3. **Rate limiting distribuído (Redis)** + cache compartilhado (status/PDF).
-4. **PITR (WAL archiving)** para RPO ≤ 5 min + secret manager plugável.
-5. **Confirmação da licença da `Unimake.DFe`** (o MIT do projeto depende
+2. **PITR (WAL archiving)** para RPO ≤ 5 min + secret manager plugável.
+3. **Confirmação da licença da `Unimake.DFe`** (o MIT do projeto depende
    dessa checagem).
 
 ## Como votar/propor

@@ -20,8 +20,13 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
 using Serilog;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -70,6 +75,30 @@ builder.Services.AddScoped<IRepositorioEventoFiscal, RepositorioEventoFiscal>();
 builder.Services.AddScoped<IRepositorioNotaRecebida, RepositorioNotaRecebida>();
 builder.Services.AddScoped<IRepositorioManifestacao, RepositorioManifestacao>();
 builder.Services.AddScoped<IRepositorioNsu, RepositorioNsu>();
+
+var limitePorMinuto = builder.Configuration.GetValue("Fiscal:RateLimit:PorMinuto", 100);
+
+// --- Métricas de negócio (OTel/Prometheus) ---
+builder.Services.AddSingleton<MetricasFiscais>();
+
+// --- Redis (opcional): rate limit distribuído + cache compartilhado ---
+// Sem Fiscal:Redis:ConnectionString, tudo cai para in-memory (alpha single-node).
+var redisConn = builder.Configuration.GetValue<string?>("Fiscal:Redis:ConnectionString");
+if (!string.IsNullOrWhiteSpace(redisConn))
+{
+    builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisConn));
+    builder.Services.AddStackExchangeRedisCache(o => o.Configuration = redisConn);
+    // Sobrescreve o GlobalLimiter in-memory pelo particionado em Redis
+    // (partição = API key, caindo para IP — pendência 3 de revisao-seguranca.md).
+    var limiteRedis = limitePorMinuto;
+    builder.Services.AddSingleton<IPostConfigureOptions<RateLimiterOptions>>(sp =>
+        new ConfiguradorLimitadorRedis(
+            sp.GetRequiredService<IConnectionMultiplexer>(), limiteRedis));
+}
+else
+{
+    builder.Services.AddDistributedMemoryCache();
+}
 
 // --- Validador de consistência (puro, sem deps externas) ---
 builder.Services.AddSingleton<ValidadorConsistenciaFiscal>();
@@ -208,7 +237,6 @@ builder.Services.AddCors(o => o.AddPolicy("frontend", p => p
 // --- Controllers + Rate Limiting (in-memory por enquanto; Redis entra na F3.1) ---
 builder.Services.AddControllers();
 builder.Services.AddValidatorsFromAssemblyContaining<EmissaoRequestValidator>();
-var limitePorMinuto = builder.Configuration.GetValue("Fiscal:RateLimit:PorMinuto", 100);
 builder.Services.AddRateLimiter(opt =>
 {
     opt.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -229,6 +257,16 @@ builder.Services.AddRateLimiter(opt =>
         o.QueueLimit = 0;
     });
 });
+
+// --- OpenTelemetry (métricas + exportador Prometheus em /metrics) ---
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r.AddService("FiscalAPI", serviceVersion: MetricasFiscais.VersaoServico))
+    .WithMetrics(m => m
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddRuntimeInstrumentation()
+        .AddMeter(MetricasFiscais.NomeMedidor)
+        .AddPrometheusExporter());
 
 // --- Health checks ---
 var healthConn = builder.Configuration.GetConnectionString("Postgres")!;
@@ -273,6 +311,7 @@ if (!app.Environment.IsEnvironment("Testing"))
     });
 }
 
+app.MapPrometheusScrapingEndpoint("/metrics");
 app.MapHealthChecks("/health/live");
 app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {

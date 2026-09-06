@@ -60,7 +60,9 @@ análise de dependências em runtime.** Repetir a revisão antes do 1.0 público
 2. ~~Cifrar `webhook_secret` em repouso (reusar o envelope da KEK).~~
    **Feito (1.4.0-alpha)** — envelope AES-GCM + migração em voo dos
    segredos legados.
-3. Rate limit por API key (além do IP) com Redis para múltiplas instâncias.
+3. ~~Rate limit por API key (além do IP) com Redis para múltiplas
+   instâncias.~~ **Feito (1.7.0-alpha)** — janela fixa em Redis
+   (`LimitadorRedis`), partição por API key caindo para IP, fail-open.
 4. `dotnet format` + oxlint no CI (hoje só build/test).
 5. Revisar logs: XMLs completos nunca devem ser logados em nível Info.
 6. Substituir o e-mail placeholder do SECURITY.md e confirmar a licença da

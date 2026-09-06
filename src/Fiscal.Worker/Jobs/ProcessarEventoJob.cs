@@ -36,6 +36,7 @@ public class ProcessarEventoJob
     private readonly IRepositorioAuditoria _auditoria;
     private readonly IEnumerable<ITransmissorEventoFiscal> _transmissores;
     private readonly ICertificadoStore _certStore;
+    private readonly MetricasFiscais _metricas;
     private readonly bool _sandbox;
     private readonly ILogger<ProcessarEventoJob> _logger;
 
@@ -45,6 +46,7 @@ public class ProcessarEventoJob
         IRepositorioAuditoria auditoria,
         IEnumerable<ITransmissorEventoFiscal> transmissores,
         ICertificadoStore certStore,
+        MetricasFiscais metricas,
         IConfiguration configuration,
         ILogger<ProcessarEventoJob> logger)
     {
@@ -53,6 +55,7 @@ public class ProcessarEventoJob
         _auditoria = auditoria;
         _transmissores = transmissores;
         _certStore = certStore;
+        _metricas = metricas;
         _sandbox = configuration.GetValue("Fiscal:ModoSandbox", false);
         _logger = logger;
     }
@@ -174,6 +177,7 @@ public class ProcessarEventoJob
         }
 
         await _db.SaveChangesAsync(ct);
+        _metricas.EventoProcessado(evento.TipoEvento, evento.Status);
         _logger.LogInformation("EventoFiscal {Id} ({Tipo}) processado → {Status} (tentativa {Tentativa})",
             evento.Id, evento.TipoEvento, evento.Status, evento.Tentativas);
     }

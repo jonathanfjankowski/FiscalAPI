@@ -9,10 +9,10 @@
 
 | | |
 |---|---|
-| **Versão atual** | `1.6.0-alpha` (2026-09-06) |
+| **Versão atual** | `1.7.0-alpha` (2026-09-06) |
 | **Estágio** | Alpha — funcional ponta a ponta em sandbox; emissão real NF-e/NFC-e/NFS-e(DPS) implementada, homologação contra SEFAZ pendente de certificado A1 |
 | **Stack** | .NET 10 (API + Worker Hangfire), PostgreSQL/EF Core, React 19 + Vite + Tailwind v4 (painel admin), Unimake.DFe (adapters SEFAZ), QuestPDF (DANFE/DANFCe) |
-| **Testes** | 158/158 (107 unitários em `Fiscal.Core.Tests`, 51 de integração em `Fiscal.Api.Tests`) |
+| **Testes** | 159/159 (108 unitários em `Fiscal.Core.Tests`, 51 de integração em `Fiscal.Api.Tests`) |
 | **Licença** | MIT — **sujeito à confirmação da licença da `Unimake.DFe`** (bloqueio do release público) |
 | **Repositório** | https://github.com/jonathanfjankowski/FiscalAPI |
 
@@ -63,6 +63,11 @@
   (100/min default), dashboard `/hangfire` protegido por JWT de admin,
   idempotência com guarda de tamanho. Revisão completa em
   `docs/revisao-seguranca.md`.
+- **Observabilidade** — OpenTelemetry com `GET /metrics` (Prometheus),
+  métricas de negócio (documentos, latência de autorização, webhooks,
+  contingência, eventos) e alertas sugeridos em `docs/observabilidade.md`.
+- **Redis (opcional)** — rate limiting distribuído por API key (fail-open)
+  e cache compartilhado do status-serviço; sem Redis, in-memory.
 - **Operações** — Docker multi-stage (API + Worker, amd64/arm64), backup
   `pg_dump` com retenção (7+4), restore com confirmação, checklist de
   go-live e estratégia DR em `docs/backup-dr.md` (RPO ≤ 24 h, RTO ≤ 1 h).
@@ -78,10 +83,7 @@ Em ordem de prioridade (detalhes em `docs/roadmap.md`):
    A NFS-e Nacional exige também credenciamento do prestador.
 2. **Confirmação da licença da `Unimake.DFe`** — bloqueio burocrático do
    release público (o MIT do projeto depende dessa checagem).
-3. **OpenTelemetry/Prometheus** (taxa de rejeição por UF, latência
-   `PENDENTE → AUTORIZADA`, docs em contingência) + alertas.
-4. **Rate limiting distribuído (Redis)** + cache compartilhado.
-5. **PITR (WAL archiving)** para RPO ≤ 5 min + secret manager plugável.
+3. **PITR (WAL archiving)** para RPO ≤ 5 min + secret manager plugável.
 
 ## Evolução do contrato (v2) — F1 concluída, F2–F6 planejadas
 
@@ -118,8 +120,8 @@ As principais:
 | Indicador | Estado |
 |---|---|
 | Build + testes no CI | ✅ verde (`build-and-test.yml`) |
-| Cobertura de testes automatizados | 158 testes — segurança, ICMS/CSOSN, IPI/PIS/COFINS, DPS/substituição, contingência, DFe, webhooks, painel |
+| Cobertura de testes automatizados | 159 testes — segurança, ICMS/CSOSN, IPI/PIS/COFINS, DPS/substituição, contingência, DFe, webhooks, painel, métricas |
 | `dotnet format --verify-no-changes` | ✅ exigido no CI |
 | Migrations | Aplicadas automaticamente no startup (hand-written com atributos `[Migration]`/`[DbContext]`) |
-| Documentação | README + 17 docs em `docs/` + CHANGELOG completo 0.1 → 1.6 |
-| Dívida documentada | EPEC/NFC-e offline, OTel, Redis, PITR, contrato v2 F4–F6 |
+| Documentação | README + 18 docs em `docs/` + CHANGELOG completo 0.1 → 1.7 |
+| Dívida documentada | EPEC/NFC-e offline, PITR, contrato v2 F4–F6 |
