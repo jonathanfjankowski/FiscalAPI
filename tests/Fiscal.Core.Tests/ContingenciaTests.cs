@@ -18,8 +18,11 @@ public class ContingenciaTests
         CodigoMunicipioIbge = "4106902",
         RegimeTributario = 3,
         InscricaoEstadual = "12345678-01",
-        Logradouro = "Rua A", Numero = "100", Bairro = "Centro",
-        Cep = "80000000", NomeMunicipio = "Curitiba",
+        Logradouro = "Rua A",
+        Numero = "100",
+        Bairro = "Centro",
+        Cep = "80000000",
+        NomeMunicipio = "Curitiba",
     };
 
     private static DocumentoFiscal Documento(string? modoContingencia = null) => new()

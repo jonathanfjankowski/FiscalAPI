@@ -36,7 +36,56 @@ public record ItemDto(
     [Range(0.0001, double.MaxValue)] decimal Quantidade,
     [Range(0, double.MaxValue)] decimal ValorUnitario,
     [Range(0, double.MaxValue)] decimal ValorTotal,
-    List<ImpostoDto>? Impostos);
+    List<ImpostoDto>? Impostos,
+    ItemImpostosDtoV2? ImpostosV2 = null);
+
+// Contrato v2 dos grupos de imposto (evolução aditiva — ver docs/plano-evolucao-contrato-v2.md).
+// Um item usa 'impostos' (legado, ICMS 00/40/41/50) OU 'impostosV2' — nunca os dois.
+// A API não calcula tributos: valores chegam prontos; validamos a aritmética (tolerância R$ 0,01).
+
+public record ItemImpostosDtoV2(
+    IcmsDto? Icms);
+
+public record IcmsDto(
+    int? Origem = null,                // 0–8 (tabela A) — default 0 (nacional)
+    string? Cst = null,                // 00,10,20,40,41,51,60,70,90
+    string? Csosn = null,              // 101,102,103,201,202,203,300,400,500,900
+    string? ModBc = null,              // 0–3 — default 3 (valor da operação)
+    decimal? PercentualReducaoBc = null, // CST 20/51/70 e CSOSN 900
+    decimal? BaseCalculo = null,
+    decimal? Aliquota = null,
+    decimal? Valor = null,
+    decimal? PercentualCreditoSimples = null, // pCredSN — CSOSN 101/201/900
+    decimal? ValorCreditoSimples = null,      // vCredICMSSN — CSOSN 101/201/900
+    decimal? FcpPercentual = null,            // pFCP (base = baseCalculo)
+    decimal? ValorFcp = null,
+    decimal? ValorIcmsOperacao = null,        // vICMSOp — CST 51
+    decimal? PercentualDiferimento = null,    // pDif — CST 51
+    decimal? ValorIcmsDiferido = null,        // vICMSDif — CST 51
+    IcmsStDto? St = null,
+    DifalDto? Difal = null);                  // interestadual consumidor final (ICMSUFDest)
+
+public record IcmsStDto(
+    string? ModBcSt = null,            // 0–6 — obrigatório no ST próprio (10/70/90, CSOSN 201/202/203/900)
+    decimal? PercentualMva = null,     // pMVAST
+    decimal? PercentualReducaoBcSt = null, // pRedBCST
+    decimal? BaseCalculoSt = null, decimal? AliquotaSt = null, decimal? ValorSt = null, // ST própria
+    decimal? FcpPercentualSt = null, decimal? ValorFcpSt = null,        // FCP da ST própria
+    decimal? BaseCalculoStRetido = null,   // vBCSTRet — CST 60 / CSOSN 500
+    decimal? AliquotaStRetida = null,      // pST
+    decimal? ValorStRetido = null,         // vICMSSTRet
+    decimal? ValorIcmsSubstituto = null,   // vICMSSubstituto
+    decimal? FcpPercentualStRetido = null, // pFCPSTRet
+    decimal? ValorFcpStRetido = null);     // vFCPSTRet
+
+public record DifalDto(
+    int? AliquotaInterestadual = null, // pICMSInter: 4, 7 ou 12 — obrigatória quando DIFAL informado
+    decimal? BaseDestino = null,       // vBCUFDest
+    decimal? AliquotaDestino = null,   // pICMSUFDest
+    decimal? ValorIcmsDestino = null,  // vICMSUFDest
+    decimal? ValorIcmsOrigem = null,   // vICMSUFRemet (partilha 100% destino — Convênio 190/2017)
+    decimal? FcpPercentualDestino = null, // pFCPUFDest
+    decimal? ValorFcpDestino = null);  // vFCPUFDest
 
 public record TotaisDto(
     [Range(0, double.MaxValue)] decimal ValorProdutos,

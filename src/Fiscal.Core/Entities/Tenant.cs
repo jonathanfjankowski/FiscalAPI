@@ -27,7 +27,13 @@ public class Tenant
     public byte[]? CscCriptografado { get; set; }
 
     public string? WebhookUrl { get; set; }
+
+    /// <summary>Legado (texto plano). Novos segredos vão para WebhookSecretCriptografado;
+    /// o job de entrega migra em voo e limpa esta coluna.</summary>
     public string? WebhookSecret { get; set; }
+
+    /// <summary>Segredo HMAC dos webhooks, cifrado com a KEK (EnvelopeEncryptionService).</summary>
+    public byte[]? WebhookSecretCriptografado { get; set; }
     public bool Ativo { get; set; } = true;
     public DateTimeOffset CriadoEm { get; set; } = DateTimeOffset.UtcNow;
 

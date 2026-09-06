@@ -1,5 +1,42 @@
 # Changelog
 
+## [1.4.0-alpha] — 2026-09-06
+
+### Adicionado — contrato v2 F1: ICMS completo + CSOSN (Simples Nacional emite!)
+- **Grupo `impostosV2` por item** (evolução aditiva — sem rota `/v2`): CST
+  `00/10/20/40/41/51/60/70/90` e **CSOSN `101–900` do Simples Nacional**
+  (destrava a maior fatia do varejo, que não emitia), com origem 0–8,
+  `modBc`, redução de base, **ICMS-ST própria e retida**, **FCP**
+  (próprio/ST/retido), **DIFAL** (`ICMSUFDest`, partilha 100% destino —
+  Convênio 190/2017) e crédito do Simples (`pCredSN`/`vCredICMSSN`).
+- `ValidadorImpostosV2`: obrigatoriedade por CST/CSOSN, isento × valor e
+  aritmética por grupo (tolerância R$ 0,01) → `422` com `campo` exato.
+  Item com `impostos` **e** `impostosV2` → `400` (ambíguo).
+- `ICMSTot` completo para os novos grupos (`vBCST`, `vST`, `vFCP*`,
+  `vICMSUFDest`, `vICMSUFRemet`, `vFCPUFDest`).
+- Payload legado (`impostos[]`) continua emitindo igual (ICMS 00/40/41/50).
+- **Corrigido (bug legado)**: `ValidadorConsistenciaFiscal` tratava CST
+  `00/20/90` (tributados) como isentos — rejeitava emissões com destaque
+  válido; a lista de isentos agora é 40/41/50/60.
+
+### Infra — self-service de webhook (G10)
+- **`GET/PUT /v1/tenants/webhooks`** — o integrador configura
+  `webhookUrl`/`webhookSecret` sem depender do painel admin (URL http(s)
+  validada; segredo de 16–200 caracteres).
+
+### Segurança
+- **`webhook_secret` cifrado em repouso** (pendência 2 de
+  docs/revisao-seguranca.md): mesmo envelope AES-GCM (DEK/KEK) do CSC e dos
+  certificados — migration `WebhookSecretCriptografado`; segredos legados em
+  texto plano são migrados em voo pelo `ProcessarWebhookJob` e a coluna
+  antiga é esvaziada. Painel admin também grava cifrado.
+
+### Testes
+- **122/122** (81 + 41). Novos: 22 unitários de ICMS/CSOSN (grupos, ST, FCP,
+  DIFAL, validação declarativa) + 7 de integração (emissão com CSOSN 102/DIFAL,
+  ambiguidade → 400, isento → 422, self-service de webhook com segredo cifrado,
+  migração em voo do segredo legado).
+
 ## [1.3.0-alpha] — 2026-09-04
 
 ### Segurança (revisão completa em docs/revisao-seguranca.md)

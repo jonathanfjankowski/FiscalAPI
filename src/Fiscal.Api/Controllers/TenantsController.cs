@@ -19,6 +19,10 @@ public record PerfilTenantRequest(
     string? CscId,
     string? Csc);
 
+public record WebhooksTenantRequest(
+    string? WebhookUrl,
+    string? WebhookSecret);
+
 [ApiController]
 [Route("v1/tenants")]
 [Authorize(AuthenticationSchemes = ApiKeyAuthenticationOptions.SchemeName)]
@@ -106,5 +110,84 @@ public class TenantsController : ControllerBase
         await _db.SaveChangesAsync(ct);
 
         return Ok(new { atualizado = true });
+    }
+
+    /// <summary>
+    /// Configuração de webhook do tenant (self-service — dispensa o painel admin).
+    /// O segredo nunca é devolvido; só um booleano indica que existe.
+    /// </summary>
+    [HttpGet("webhooks")]
+    public async Task<IActionResult> ObterWebhooks(CancellationToken ct)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, ct);
+        if (tenant is null) return NotFound();
+
+        return Ok(new
+        {
+            tenant.WebhookUrl,
+            webhookSecretCadastrado =
+                tenant.WebhookSecretCriptografado is not null || tenant.WebhookSecret is not null,
+        });
+    }
+
+    /// <summary>
+    /// Define webhookUrl e webhookSecret (HMAC-SHA256 das entregas, janela
+    /// anti-replay de 5 min). Campos nulos não são alterados. O segredo é
+    /// armazenado cifrado com a KEK (mesmo envelope do CSC e dos certificados).
+    /// </summary>
+    [HttpPut("webhooks")]
+    public async Task<IActionResult> AtualizarWebhooks([FromBody] WebhooksTenantRequest req, CancellationToken ct)
+    {
+        if (req.WebhookUrl is null && req.WebhookSecret is null)
+            return Problem(statusCode: 400, title: "Informe webhookUrl e/ou webhookSecret.");
+
+        var tenantId = HttpContext.GetTenantId();
+        var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Id == tenantId, ct);
+        if (tenant is null) return NotFound();
+
+        if (req.WebhookUrl is not null)
+        {
+            var url = req.WebhookUrl.Trim();
+            if (url.Length > 0 &&
+                (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
+                 (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)))
+            {
+                return Problem(statusCode: 422, title: "webhookUrl inválida",
+                    detail: "Use uma URL absoluta http(s) (ex.: https://integrador.example.com/webhooks).");
+            }
+            tenant.WebhookUrl = url.Length == 0 ? null : url;
+        }
+
+        if (req.WebhookSecret is not null)
+        {
+            var segredo = req.WebhookSecret.Trim();
+            if (segredo.Length > 200)
+                return Problem(statusCode: 422, title: "webhookSecret excede 200 caracteres.");
+            if (segredo.Length < 16)
+                return Problem(statusCode: 422, title: "webhookSecret muito curto",
+                    detail: "Use ao menos 16 caracteres — o segredo assina HMAC-SHA256 as entregas.");
+            tenant.WebhookSecretCriptografado = await _certStore.CifrarTextoAsync(segredo, ct);
+            tenant.WebhookSecret = null;
+        }
+
+        await _db.SaveChangesAsync(ct);
+        await _auditoria.RegistrarAsync(new Auditoria
+        {
+            TenantId = tenantId,
+            Acao = "WEBHOOK_TENANT_ATUALIZADO",
+            RecursoId = tenantId,
+            Detalhe = $"{{\"urlAtualizada\":{(req.WebhookUrl is not null ? "true" : "false").ToLowerInvariant()}," +
+                      $"\"segredoAtualizado\":{(req.WebhookSecret is not null ? "true" : "false").ToLowerInvariant()}}}"
+        }, ct);
+        await _db.SaveChangesAsync(ct);
+
+        return Ok(new
+        {
+            atualizado = true,
+            tenant.WebhookUrl,
+            webhookSecretCadastrado =
+                tenant.WebhookSecretCriptografado is not null || tenant.WebhookSecret is not null,
+        });
     }
 }

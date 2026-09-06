@@ -20,6 +20,7 @@ Tudo abaixo de "Feito" está implementado e coberto por testes automatizados;
 | F4 | **NFS-e Nacional**: envelope completo + sandbox (transmissão DPS real pendente) | 1.0 |
 | F5 | **Backup/DR + hardening ops** (scripts, RPO/RTO, checklist go-live) | 1.1 |
 | F6 | Comunidade (CONTRIBUTING, badges, roadmap público) | 1.2 |
+| v2-F1 + Infra | **ICMS completo + CSOSN** (`impostosV2`: CST 00–90, CSOSN 101–900, ST, FCP, DIFAL — Simples Nacional emite) + `PUT /v1/tenants/webhooks` self-service + secret cifrado em repouso | 1.4 |
 
 ## Próximo (antes do 1.0 público)
 

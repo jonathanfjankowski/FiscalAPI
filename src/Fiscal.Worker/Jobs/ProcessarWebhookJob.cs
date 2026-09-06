@@ -27,15 +27,18 @@ public class ProcessarWebhookJob
 
     private readonly FiscalDbContext _db;
     private readonly IDespachanteWebhook _despachante;
+    private readonly ICertificadoStore _certStore;
     private readonly ILogger<ProcessarWebhookJob> _logger;
 
     public ProcessarWebhookJob(
         FiscalDbContext db,
         IDespachanteWebhook despachante,
+        ICertificadoStore certStore,
         ILogger<ProcessarWebhookJob> logger)
     {
         _db = db;
         _despachante = despachante;
+        _certStore = certStore;
         _logger = logger;
     }
 
@@ -62,8 +65,9 @@ public class ProcessarWebhookJob
             return;
         }
 
+        var segredo = await ResolverSegredoAsync(tenant, ct);
         var resultado = await _despachante.EntregarAsync(
-            tenant.WebhookUrl, tenant.WebhookSecret ?? string.Empty, entrega.Payload, ct);
+            tenant.WebhookUrl, segredo, entrega.Payload, ct);
 
         entrega.Tentativas += 1;
         entrega.UltimoStatusCode = resultado.StatusCode;
@@ -95,4 +99,21 @@ public class ProcessarWebhookJob
 
     private static TimeSpan ProximoBackoff(int tentativa) =>
         tentativa <= 0 ? Backoff[0] : Backoff[Math.Min(tentativa - 1, Backoff.Length - 1)];
+
+    /// <summary>
+    /// Segredo do tenant para assinar a entrega: decifra o envelope da KEK ou
+    /// usa o legado em texto plano — e, neste caso, migra em voo para a coluna
+    /// cifrada limpando o texto plano.
+    /// </summary>
+    private async Task<string> ResolverSegredoAsync(Tenant tenant, CancellationToken ct)
+    {
+        if (tenant.WebhookSecretCriptografado is not null)
+            return await _certStore.DecifrarTextoAsync(tenant.WebhookSecretCriptografado, ct);
+
+        var legado = tenant.WebhookSecret ?? string.Empty;
+        tenant.WebhookSecretCriptografado = await _certStore.CifrarTextoAsync(legado, ct);
+        tenant.WebhookSecret = null;
+        await _db.SaveChangesAsync(ct);
+        return legado;
+    }
 }

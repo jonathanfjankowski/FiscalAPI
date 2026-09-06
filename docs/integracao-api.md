@@ -431,7 +431,7 @@ Exemplo de `202`:
 
 Idêntico ao anterior, para **NFC-e** (modelo 65). Mesmo corpo (`EmissaoRequest`), mesmas respostas.
 
-> NFC-e exige o CSC (código de segurança do consumidor) fornecido pela SEFAZ do estado — a configuração dele ainda não está exposta via API (ver [Limitações](#limitações-conhecidas)).
+> NFC-e exige o CSC (código de segurança do consumidor) fornecido pela SEFAZ do estado — configure-o junto com o perfil fiscal do emitente via `PUT /v1/tenants/perfil` (o CSC fica cifrado com a KEK).
 
 #### `GET /v1/documentos-fiscais/{id}`
 
@@ -460,6 +460,51 @@ Consulta o estado atual do documento. `id` é o GUID retornado no `202`.
 `404` se o documento não existir ou pertencer a outro tenant (sem corpo).
 
 O campo `xmlRetornoSefaz` traz a resposta literal da SEFAZ — em rejeições é ali que está o detalhe técnico completo; `motivoStatus` é o resumo legível.
+
+---
+
+### Tenants — perfil fiscal e webhooks
+
+#### `GET /v1/tenants/perfil` 🔒 / `PUT /v1/tenants/perfil` 🔒
+
+Perfil fiscal do emitente (exigido para emissão real). Campos nulos no PUT
+não são alterados. O `csc`/`cscId` (NFC-e) é opcional e o CSC é armazenado
+cifrado — a resposta só indica `cscCadastrado`.
+
+#### `GET /v1/tenants/webhooks` 🔒
+
+Configuração de webhook do tenant:
+
+```json
+{
+  "webhookUrl": "https://integrador.example.com/hook",
+  "webhookSecretCadastrado": true
+}
+```
+
+O segredo nunca é devolvido — só o booleano indica que existe.
+
+#### `PUT /v1/tenants/webhooks` 🔒
+
+Define a URL de entrega e o segredo HMAC (self-service — dispensa o painel
+admin). Campos nulos não são alterados:
+
+```json
+{
+  "webhookUrl": "https://integrador.example.com/hook",
+  "webhookSecret": "um-segredo-de-ao-menos-16-chars"
+}
+```
+
+| Código | Quando |
+|---|---|
+| `200 OK` | Configuração atualizada (`webhookUrl` + `webhookSecretCadastrado`). |
+| `400` | Corpo sem nenhum campo. |
+| `422` | `webhookUrl` não é URL absoluta http(s); `webhookSecret` < 16 ou > 200 caracteres. |
+
+O segredo é armazenado **cifrado em repouso** (mesmo envelope AES-GCM do CSC
+e dos certificados) e assina as entregas com HMAC-SHA256
+(`X-Fiscal-Signature`, janela anti-replay de 5 min).
 
 ---
 
@@ -653,18 +698,90 @@ Todos os campos são opcionais, mas um endereço consistente é necessário para
 | `quantidade` | número | sim | > 0 |
 | `valorUnitario` | número | sim | ≥ 0 |
 | `valorTotal` | número | sim | ≥ 0 — deve bater com `quantidade × valorUnitario` (tolerância 0,01) |
-| `impostos` | array | não | [`Imposto`](#imposto) |
+| `impostos` | array | não | [`Imposto`](#imposto) — **legado** |
+| `impostosV2` | objeto | não | [`ImpostosV2`](#impostosv2) — grupos tipados (v2) |
 
-### `Imposto`
+> **`impostos` OU `impostosV2`, nunca os dois no mesmo item** — enviar os dois → `400`.
+
+### `Imposto` (legado)
 
 | Campo | Tipo | Obrigatório | Regras |
 |---|---|---|---|
-| `cst` | string | sim | Até 3 dígitos (ex.: `"00"`, `"60"`, `"102"` p/ Simples) |
+| `cst` | string | sim | Até 3 dígitos — suporta `00`, `40`, `41`, `50` |
 | `baseCalculo` | número | não | |
 | `aliquota` | número | não | Em %, ex.: `18` para 18% |
 | `valor` | número | não | Deve bater com `baseCalculo × aliquota / 100` (tolerância 0,01) |
 
-Regra especial: CSTs de isenção (`00`, `06`, `20`, `40`, `41`, `50`, `60`, `90`) não podem ter `valor > 0`.
+Regra especial: CSTs de isenção (`40`, `41`, `50`, `60`) não podem ter `valor > 0`.
+
+### `impostosV2` — ICMS completo + CSOSN (contrato v2)
+
+Grupo tipado que cobre **todo o ICMS do layout 4.00**: CST `00/10/20/40/41/51/60/70/90`
+e CSOSN do **Simples Nacional** `101/102/103/201/202/203/300/400/500/900`, com ST,
+FCP e DIFAL. Referência: [docs/plano-evolucao-contrato-v2.md](plano-evolucao-contrato-v2.md).
+
+```json
+{
+  "impostosV2": {
+    "icms": {
+      "origem": 0,
+      "csosn": "102"
+    }
+  }
+}
+```
+
+**`impostosV2.icms`** — informe `cst` (regime normal) **ou** `csosn` (Simples Nacional), nunca os dois:
+
+| Campo | Tipo | Regras |
+|---|---|---|
+| `origem` | int | 0–8 (tabela A) — default `0` (nacional) |
+| `cst` | string | `00`, `10`, `20`, `40`, `41`, `51`, `60`, `70`, `90` |
+| `csosn` | string | `101`, `102`, `103`, `201`, `202`, `203`, `300`, `400`, `500`, `900` |
+| `modBc` | string | 0–3 — default `3` (valor da operação) |
+| `percentualReducaoBc` | número | CST 20/51/70 |
+| `baseCalculo` / `aliquota` / `valor` | número | Trio da tributação própria (obrigatório em 00/10/20/70) |
+| `percentualCreditoSimples` / `valorCreditoSimples` | número | pCredSN/vCredICMSSN — CSOSN 101/201/900 |
+| `fcpPercentual` / `valorFcp` | número | FCP próprio (base = `baseCalculo`) |
+| `valorIcmsOperacao` / `percentualDiferimento` / `valorIcmsDiferido` | número | CST 51 (diferimento) |
+| `st` | objeto | [`IcmsSt`](#icmsst) — ST própria (10/70/90, CSOSN 201/202/203/900) ou retida (60/500) |
+| `difal` | objeto | [`Difal`](#difal) — interestadual consumidor final |
+
+**`impostosV2.icms.st`** (`IcmsSt`):
+
+| Campo | Tipo | Regras |
+|---|---|---|
+| `modBcSt` | string | 0–6 — obrigatório na ST própria |
+| `percentualMva` / `percentualReducaoBcSt` | número | Opcionais da ST própria |
+| `baseCalculoSt` / `aliquotaSt` / `valorSt` | número | Trio da ST própria (obrigatório em 10/70, CSOSN 201/202/203) |
+| `fcpPercentualSt` / `valorFcpSt` | número | FCP da ST própria |
+| `baseCalculoStRetido` / `aliquotaStRetida` / `valorStRetido` | número | vBCSTRet/pST/vICMSSTRet — CST 60, CSOSN 500 |
+| `valorIcmsSubstituto` | número | vICMSSubstituto |
+| `fcpPercentualStRetido` / `valorFcpStRetido` | número | FCP-ST retido |
+
+**`impostosV2.icms.difal`** (`Difal`) — CST interestadual + consumidor final
+(partilha 100% destino, Convênio 190/2017):
+
+| Campo | Tipo | Regras |
+|---|---|---|
+| `aliquotaInterestadual` | int | 4, 7 ou 12 (pICMSInter) — obrigatória |
+| `baseDestino` / `aliquotaDestino` / `valorIcmsDestino` / `valorIcmsOrigem` | número | vBCUFDest/pICMSUFDest/vICMSUFDest/vICMSUFRemet |
+| `fcpPercentualDestino` / `valorFcpDestino` | número | pFCPUFDest/vFCPUFDest |
+
+Exemplo completo — CST 10 (tributada + ST):
+
+```json
+{
+  "impostosV2": {
+    "icms": {
+      "origem": 0,
+      "cst": "10",
+      "baseCalculo": 100, "aliquota": 18, "valor": 18,
+      "st": { "modBcSt": "4", "baseCalculoSt": 130, "aliquotaSt": 18, "valorSt": 23.4 }
+    }
+  }
+}
+```
 
 ### `Totais`
 
@@ -713,6 +830,7 @@ Aplicada antes de qualquer efeito, em forma de `ValidationProblemDetails` (ver [
 - Campos obrigatórios ausentes (`ambiente`, `itens`, `totais`, `cnpjCpf`/`nome` do destinatário quando enviado, `codigo`/`descricao` do item, `cst`, `forma`…).
 - Limites de tamanho excedidos (ex.: `descricao` > 200, `ncm` > 8).
 - Ranges violados (`serie` fora de 1–999, `quantidade` ≤ 0, valores negativos).
+- Item com `impostos` **e** `impostosV2` simultâneos (ambíguo).
 - `justificativa`/`correcao` de eventos fora de 15–1000 caracteres.
 - `Idempotency-Key` ausente nos POSTs que a exigem.
 
@@ -722,8 +840,13 @@ Aplicada antes de qualquer efeito, em forma de `ValidationProblemDetails` (ver [
 - **Inconsistência aritmética** (tolerância de R$ 0,01):
   1. Soma dos `valorTotal` dos itens ≠ `totais.valorNota` → `campo: "valorTotal"`.
   2. `quantidade × valorUnitario` ≠ `valorTotal` do item → `campo: "itens[i].valorTotal"`.
-  3. `baseCalculo × aliquota / 100` ≠ `valor` do imposto → `campo: "impostos[i].valor"` (só quando os três campos são informados).
-  4. CST de isenção com `valor > 0` → `campo: "impostos[i].valor"`.
+  3. `baseCalculo × aliquota / 100` ≠ `valor` do imposto → `campo: "impostos[i].valor"` (só quando os três campos são informados). No `impostosV2` a aritmética se estende a ST, FCP, FCP-ST e DIFAL.
+  4. CST/CSOSN de isenção (`40`, `41`, `50`, `60`; CSOSN `300`, `400`) com `valor > 0` → `campo: "impostos[i].valor"`.
+- **Regras declarativas do `impostosV2`** (título `"Inconsistência nos grupos de imposto v2"`):
+  1. `cst` e `csosn` no mesmo grupo (ou nenhum dos dois).
+  2. `cst`/`csosn` fora das listas suportadas (ex.: CST `30`, `ICMSPart` — fail-loud).
+  3. Campos obrigatórios por código: CST 00 sem trio, CST 10/70 sem `st` completa, CST 20/70 sem `percentualReducaoBc`, CST 51 sem `valorIcmsOperacao`, CSOSN 201/202/203 sem `st`…
+  4. `difal.aliquotaInterestadual` fora de 4/7/12 ou partilha incompleta.
 - `numeroFinal < numeroInicial` na inutilização.
 - `.pfx` que não abre com a senha informada (upload de certificado).
 
@@ -844,13 +967,20 @@ Problemas que acontecem **depois** do `202` não viram erro HTTP — aparecem co
 
 ## Limitações conhecidas
 
-Versão atual (`0.3.0-alpha`) — considere no desenho da sua integração:
+Versão atual (`1.4.0-alpha`) — considere no desenho da sua integração:
 
-- **Webhooks ainda não implementados.** O acompanhamento de resultado é exclusivamente por polling do `GET /v1/documentos-fiscais/{id}`.
-- **Eventos fiscais não são transmitidos à SEFAZ ainda.** Cancelamento, CC-e e inutilização são persistidos e refletem estado (`CANCELAMENTO_PENDENTE` etc.), mas o envio real do evento e a confirmação da SEFAZ serão entregues em fase posterior — um cancelamento não passa de `CANCELAMENTO_PENDENTE` por enquanto.
-- **NFS-e** (modelo de serviço) não tem endpoint de emissão.
-- **CSC da NFC-e** não tem endpoint de configuração ainda — em produção a NFC-e precisa dele.
-- **Emissão real à SEFAZ** depende do adapter em desenvolvimento; em sandbox (`ModoSandbox=true`) um emissor mock autoriza os documentos localmente.
+- **Projeto em alpha** — sem homologação real contra SEFAZ ainda; a emissão
+  real de NF-e/NFC-e está implementada, a bateria de homologação exige
+  certificado A1 (checklist no README).
+- **NFS-e** (modelo de serviço, padrão Nacional/DPS): envelope completo com
+  sandbox (mock); a transmissão DPS real é a próxima sprint.
+- **Mapper NF-e cobre ICMS completo** (CST 00–90, CSOSN 101–900, ST, FCP,
+  DIFAL via `impostosV2`); **IPI/PIS/COFINS, desconto/frete/seguro, GTIN/
+  unidade configuráveis, NF-ref e transporte** entram nas fases seguintes do
+  contrato v2 (docs/plano-evolucao-contrato-v2.md). Unidade fixa `UN` e
+  GTIN `SEM GTIN` por enquanto.
+- **DANFE simplificado** (sem código de barras/QR do leiaute oficial).
+- **EPEC e NFC-e offline (tpEmis 9)** ficam para sprint futura.
 - **Certificado**: apenas A1 (`.pfx`). A3/HSM não são suportados.
 
 Dúvidas sobre o roadmap: consulte o `CHANGELOG.md` e o `README.md` na raiz do repositório.

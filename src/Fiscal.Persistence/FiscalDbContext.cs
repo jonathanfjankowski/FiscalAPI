@@ -44,6 +44,7 @@ public class FiscalDbContext : DbContext
             b.Property(x => x.CscCriptografado).HasColumnName("csc_criptografado");
             b.Property(x => x.WebhookUrl).HasColumnName("webhook_url");
             b.Property(x => x.WebhookSecret).HasColumnName("webhook_secret");
+            b.Property(x => x.WebhookSecretCriptografado).HasColumnName("webhook_secret_criptografado");
             b.Property(x => x.Ativo).HasColumnName("ativo");
             b.Property(x => x.CriadoEm).HasColumnName("criado_em");
             b.HasIndex(x => x.Cnpj).IsUnique();

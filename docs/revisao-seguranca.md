@@ -57,7 +57,9 @@ análise de dependências em runtime.** Repetir a revisão antes do 1.0 público
 
 1. Pentest dinâmico básico (OWASP ASVS nível 1–2) contra ambiente de
    homologação, incluindo abuso do rate limit e brute-force de API key.
-2. Cifrar `webhook_secret` em repouso (reusar o envelope da KEK).
+2. ~~Cifrar `webhook_secret` em repouso (reusar o envelope da KEK).~~
+   **Feito (1.4.0-alpha)** — envelope AES-GCM + migração em voo dos
+   segredos legados.
 3. Rate limit por API key (além do IP) com Redis para múltiplas instâncias.
 4. `dotnet format` + oxlint no CI (hoje só build/test).
 5. Revisar logs: XMLs completos nunca devem ser logados em nível Info.

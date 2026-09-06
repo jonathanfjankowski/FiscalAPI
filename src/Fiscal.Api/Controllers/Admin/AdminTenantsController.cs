@@ -55,11 +55,13 @@ public class AdminTenantsController : ControllerBase
 {
     private readonly FiscalDbContext _db;
     private readonly IRepositorioAuditoria _auditoria;
+    private readonly ICertificadoStore _certStore;
 
-    public AdminTenantsController(FiscalDbContext db, IRepositorioAuditoria auditoria)
+    public AdminTenantsController(FiscalDbContext db, IRepositorioAuditoria auditoria, ICertificadoStore certStore)
     {
         _db = db;
         _auditoria = auditoria;
+        _certStore = certStore;
     }
 
     [HttpGet]
@@ -133,7 +135,9 @@ public class AdminTenantsController : ControllerBase
             Cep = SomenteDigitos(req.Cep) is { Length: 8 } cep ? cep : req.Cep,
             NomeMunicipio = req.NomeMunicipio,
             WebhookUrl = req.WebhookUrl,
-            WebhookSecret = req.WebhookSecret,
+            WebhookSecretCriptografado = req.WebhookSecret is null
+                ? null
+                : await _certStore.CifrarTextoAsync(req.WebhookSecret, ct),
             Ativo = req.Ativo ?? true,
             CriadoEm = DateTimeOffset.UtcNow
         };
@@ -200,7 +204,12 @@ public class AdminTenantsController : ControllerBase
         if (req.Cep is not null) tenant.Cep = SomenteDigitos(req.Cep) is { Length: 8 } cep ? cep : req.Cep;
         if (req.NomeMunicipio is not null) tenant.NomeMunicipio = req.NomeMunicipio;
         if (req.WebhookUrl is not null) tenant.WebhookUrl = req.WebhookUrl;
-        if (req.WebhookSecret is not null) tenant.WebhookSecret = req.WebhookSecret;
+        if (req.WebhookSecret is not null)
+        {
+            // Sempre cifrado em repouso (envelope KEK); texto plano legado é limpo.
+            tenant.WebhookSecretCriptografado = await _certStore.CifrarTextoAsync(req.WebhookSecret, ct);
+            tenant.WebhookSecret = null;
+        }
         if (req.Ativo is not null) tenant.Ativo = req.Ativo.Value;
 
         await _db.SaveChangesAsync(ct);

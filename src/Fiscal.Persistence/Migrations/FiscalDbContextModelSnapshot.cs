@@ -653,6 +653,10 @@ namespace Fiscal.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("webhook_secret");
 
+                    b.Property<byte[]>("WebhookSecretCriptografado")
+                        .HasColumnType("bytea")
+                        .HasColumnName("webhook_secret_criptografado");
+
                     b.Property<string>("WebhookUrl")
                         .HasColumnType("text")
                         .HasColumnName("webhook_url");

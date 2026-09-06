@@ -23,6 +23,7 @@ public class DocumentosFiscaisController : ControllerBase
     private readonly IRepositorioAuditoria _auditoria;
     private readonly IFilaEmissao _fila;
     private readonly ValidadorConsistenciaFiscal _validador;
+    private readonly ValidadorImpostosV2 _validadorImpostosV2;
     private readonly FiscalDbContext _db;
     private readonly IGeradorPdf _geradorPdf;
     private readonly ILogger<DocumentosFiscaisController> _logger;
@@ -34,6 +35,7 @@ public class DocumentosFiscaisController : ControllerBase
         IRepositorioAuditoria auditoria,
         IFilaEmissao fila,
         ValidadorConsistenciaFiscal validador,
+        ValidadorImpostosV2 validadorImpostosV2,
         FiscalDbContext db,
         IGeradorPdf geradorPdf,
         ILogger<DocumentosFiscaisController> logger)
@@ -44,6 +46,7 @@ public class DocumentosFiscaisController : ControllerBase
         _auditoria = auditoria;
         _fila = fila;
         _validador = validador;
+        _validadorImpostosV2 = validadorImpostosV2;
         _db = db;
         _geradorPdf = geradorPdf;
         _logger = logger;
@@ -121,6 +124,15 @@ public class DocumentosFiscaisController : ControllerBase
         if (ambienteKey != ambienteReq)
             return Problem(statusCode: 403, title: "API Key não autorizada para o ambiente solicitado.");
 
+        // Grupos de imposto ambíguos: item declara a lista plana legada OU o
+        // grupo tipado v2 — nunca os dois (docs/plano-evolucao-contrato-v2.md §8).
+        for (var i = 0; i < req.Itens.Count; i++)
+        {
+            if (req.Itens[i].Impostos is not null && req.Itens[i].ImpostosV2 is not null)
+                return Problem(statusCode: 400,
+                    title: $"Item {i + 1}: informe apenas 'impostos' (legado) OU 'impostosV2' — nunca os dois.");
+        }
+
         // 1) Idempotência — 2ª chamada com mesma key devolve estado atual.
         var existente = await _docRepo.ObterPorIdempotencyKeyAsync(tenantId, tipo, idemKey!, ct);
         if (existente is not null)
@@ -144,6 +156,18 @@ public class DocumentosFiscaisController : ControllerBase
                 title: "Inconsistência nos valores do documento",
                 detail: primeira.Mensagem,
                 extensions: new Dictionary<string, object?> { ["campo"] = primeira.Campo });
+        }
+
+        // 2b) Validação declarativa dos grupos v2 (CST/CSOSN, ST, FCP, DIFAL).
+        var inconsistenciasV2 = _validadorImpostosV2.Validar(req.Itens);
+        if (inconsistenciasV2.Count > 0)
+        {
+            var primeiraV2 = inconsistenciasV2[0];
+            return Problem(
+                statusCode: 422,
+                title: "Inconsistência nos grupos de imposto v2",
+                detail: primeiraV2.Mensagem,
+                extensions: new Dictionary<string, object?> { ["campo"] = primeiraV2.Campo });
         }
 
         // 3) Reserva número + cria documento PENDENTE.

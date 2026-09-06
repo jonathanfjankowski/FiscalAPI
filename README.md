@@ -315,17 +315,20 @@ para `FALHA` (terminal, visível na tabela `outbox_webhooks`).
 - 🚧 **Projeto em alpha** — sem homologação real contra SEFAZ ainda; o
   contrato pode mudar até o 1.0.
 - **Certificado A1 apenas** — A3/HSM fora de escopo.
-- **Mapper da NF-e cobre um subconjunto do layout 4.00** (emissão real, não
-  sandbox): ICMS com CST 00/40/41/50, um grupo de imposto por item,
-  unidade fixa `UN`, sem IPI/PIS/COFINS/CSOSN, sem transporte/volumes e sem
-  desconto/frete/seguro. Defaults adotados quando o payload não traz:
-  `natOp` (`naturezaOperacao` opcional no payload, default `"VENDA"`),
-  `tpNF` saída, `finNFe` normal, `indFinal` consumidor final, `indPres`
-  presencial (internet quando a UF do destinatário difere), `modBC` 3,
-  `transp` sem ocorrência. CST 60, CSOSN e os demais grupos entram em
-  sprint futura — hoje falham alto (`ERRO_INTERNO` com mensagem explícita)
-  em vez de transmitir errado. A evolução disso está planejada em
-  [docs/plano-evolucao-contrato-v2.md](docs/plano-evolucao-contrato-v2.md).
+- **Mapper da NF-e cobre o ICMS completo do layout 4.00** (emissão real, não
+  sandbox): CST `00–90` e **CSOSN do Simples Nacional `101–900`** (ST, FCP e
+  DIFAL incluídos) via grupo `impostosV2`; a lista plana legada `impostos[]`
+  segue suportada (CST 00/40/41/50). Ainda ficam fora: IPI/PIS/COFINS (F3),
+  desconto/frete/seguro e GTIN/unidade configuráveis (F2), NF-ref (F4) e
+  transporte/volumes — unidade fixa `UN` e GTIN `SEM GTIN` por enquanto.
+  Defaults adotados quando o payload não traz: `natOp` (`naturezaOperacao`
+  opcional no payload, default `"VENDA"`), `tpNF` saída, `finNFe` normal,
+  `indFinal` consumidor final, `indPres` presencial (internet quando a UF do
+  destinatário difere), `modBC` 3, `transp` sem ocorrência. Combinações fora
+  do contrato falham alto (`ERRO_INTERNO` com mensagem explícita) em vez de
+  transmitir errado. A evolução está planejada em
+  [docs/plano-evolucao-contrato-v2.md](docs/plano-evolucao-contrato-v2.md)
+  (F1 concluída na 1.4.0-alpha).
 - **NF-e (modelo 55) é assíncrona em duas fases**: lote via `NFeAutorizacao`
   → recibo persistido (`recibo_lote`) → consulta via `NFeRetAutorizacao`;
   "lote em processamento" (cStat 105) reconsulta dentro do fluxo de

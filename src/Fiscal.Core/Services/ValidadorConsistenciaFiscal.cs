@@ -70,8 +70,9 @@ public class ValidadorConsistenciaFiscal
                 }
             }
 
-            // CST isento (00, 06, 20, 40, 41, 50, 60, 90 etc. — sem valor esperado).
-            // Se CST indica isento e veio valor > 0, é inconsistência.
+            // CST isento/não tributado (40 isenta, 41 não tributada, 50 suspensão,
+            // 60 já cobrada por ST) — sem valor próprio esperado.
+            // Se CST indica isenção e veio valor > 0, é inconsistência.
             if (EhCstIsento(imp.Cst) && imp.Valor is { } valor && valor > 0)
             {
                 erros.Add(new InconsistenciaFiscal(
@@ -83,6 +84,5 @@ public class ValidadorConsistenciaFiscal
         return erros;
     }
 
-    private static bool EhCstIsento(string cst) =>
-        cst is "00" or "06" or "20" or "40" or "41" or "50" or "60" or "90";
+    private static bool EhCstIsento(string cst) => cst is "40" or "41" or "50" or "60";
 }
