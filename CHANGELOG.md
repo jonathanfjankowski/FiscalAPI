@@ -1,5 +1,22 @@
 # Changelog
 
+## [1.10.0-alpha] — 2026-09-06
+
+### Adicionado — contrato v2 F5 (reforma IBS/CBS + IS) e F6 (barcode/QR no DANFE)
+- **F5 (G8)**: `impostosV2.ibsCbs` (CST/cClassTrib SEPEC, base, alíquotas e
+  valores IBS estadual/municipal e CBS → grupos `IBSCBS`/`gIBSCBS`) e
+  `impostosV2.is` (Imposto Seletivo, por valor ou quantidade → grupo `IS`).
+  Totais em `IBSCBSTot` (vBC, vIBS = UF+municipal, vCBS) e `ISTot`.
+  Validação: cClassTrib obrigatório, CSTs por tamanho de tabela SEPEC,
+  aritmética por componente (422), IS por quantidade com unidade+quantidade.
+- **F6 (G9, parcial)**: DANFE com **código de barras CODE-128 da chave de
+  acesso** (ZXing.Net/SkiaSharp) e **QR Code do DANFCe** extraído do
+  `infNFeSupl/qrCode` do XML autorizado (QRCoder) — o PDF passa a servir à
+  circulação em NFC-e com CSC. O leiaute visual completo de 20 campos segue
+  como evolução.
+- **173/173 testes** (116 + 57): +5 (IBSCBS/IS no XML e totais, validação
+  SEPEC, DANFCe com barcode/QR).
+
 ## [1.9.0-alpha] — 2026-09-06
 
 ### Adicionado — PITR + secret manager plugável + hardening de go-live (roadmap item 6)

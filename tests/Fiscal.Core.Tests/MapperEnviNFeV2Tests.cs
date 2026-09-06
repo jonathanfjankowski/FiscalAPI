@@ -432,4 +432,54 @@ public class MapperEnviNFeV2Tests
 
         act.Should().Throw<ErroNaoRecuperavelException>().WithMessage("*44 dígitos*");
     }
+    [Fact]
+    public void Reforma_mapeia_ibscbs_e_is_com_totais()
+    {
+        var item = ItemV2(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 18, Valor: 18)) with
+        {
+            ImpostosV2 = new ItemImpostosDtoV2(
+                Icms: new IcmsDto(Origem: 0, Cst: "00", BaseCalculo: 100, Aliquota: 18, Valor: 18),
+                IbsCbs: new IbsCbsDto(
+                    CstIbsCbs: "101", CClassTrib: "000001", BaseCalculo: 100,
+                    AliquotaIbsEstadual: 0.9m, ValorIbsEstadual: 0.9m,
+                    AliquotaIbsMunicipal: 0.1m, ValorIbsMunicipal: 0.1m,
+                    AliquotaCbs: 1, ValorCbs: 1),
+                Is: new IsDto(CstIs: "01", CClassTribIs: "000005",
+                    BaseCalculo: 100, Aliquota: 10, Valor: 10)),
+        };
+        var nfe = Mapear(item);
+
+        var ibscbs = nfe.Det.Single().Imposto.IBSCBS!;
+        ibscbs.CST.Should().Be("101");
+        ibscbs.CClassTrib.Should().Be("000001");
+        ibscbs.GIBSCBS!.GIBSUF!.VIBSUF.Should().Be(0.9);
+        ibscbs.GIBSCBS.GIBSMun!.VIBSMun.Should().Be(0.1);
+        ibscbs.GIBSCBS.GCBS!.VCBS.Should().Be(1);
+
+        var impostoIs = nfe.Det.Single().Imposto.IS!;
+        impostoIs.CSTIS.Should().Be("01");
+        impostoIs.VIS.Should().Be(10);
+
+        var ibscbsTot = nfe.Total.IBSCBSTot!;
+        ibscbsTot.VBCIBSCBS.Should().Be(100);
+        ibscbsTot.GIBS!.VIBS.Should().Be(1);
+        ibscbsTot.GCBS!.VCBS.Should().Be(1);
+        nfe.Total.ISTot!.VIS.Should().Be(10);
+    }
+
+    [Fact]
+    public void Reforma_sem_cclasstrib_falha_alto()
+    {
+        var item = ItemV2(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 18, Valor: 18)) with
+        {
+            ImpostosV2 = new ItemImpostosDtoV2(
+                Icms: new IcmsDto(Origem: 0, Cst: "00", BaseCalculo: 100, Aliquota: 18, Valor: 18),
+                IbsCbs: new IbsCbsDto(CstIbsCbs: "101", CClassTrib: "", BaseCalculo: 100)),
+        };
+
+        var act = () => Mapear(item);
+        act.Should().Throw<ErroNaoRecuperavelException>().WithMessage("*cClassTrib*");
+    }
 }

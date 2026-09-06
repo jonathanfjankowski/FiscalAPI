@@ -854,6 +854,26 @@ FCP e DIFAL. Referência: [docs/plano-evolucao-contrato-v2.md](plano-evolucao-co
 | `cst` | string | `01/02` tributado (exige trio); `04–09` isento (sem valor); `99` outras. `03` (por quantidade) não suportado |
 | `baseCalculo` / `aliquota` / `valor` | número | trio |
 
+**`impostosV2.ibsCbs`** (v2 F5 — reforma, LC 214/2025 / NT 2025.x):
+
+| Campo | Tipo | Regras |
+|---|---|---|
+| `cstIbsCbs` | string | 3 dígitos (tabela SEPEC) |
+| `cClassTrib` | string | 6 dígitos (tabela SEPEC) — obrigatório |
+| `baseCalculo` | número | vBC do bloco |
+| `aliquotaIbsEstadual` / `valorIbsEstadual` | número | gIBSUF |
+| `aliquotaIbsMunicipal` / `valorIbsMunicipal` | número | gIBSMun |
+| `aliquotaCbs` / `valorCbs` | número | gCBS |
+
+**`impostosV2.is`** (v2 F5 — Imposto Seletivo):
+
+| Campo | Tipo | Regras |
+|---|---|---|
+| `cstIs` | string | 2 dígitos (SEPEC) |
+| `cClassTribIs` | string | 6 dígitos — obrigatório |
+| `baseCalculo` / `aliquota` / `valor` | número | trio do IS |
+| `unidadeTributavel` / `quantidadeTributavel` | string/número | IS por quantidade — sempre juntos |
+
 Exemplo completo — CST 10 (tributada + ST):
 
 ```json

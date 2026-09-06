@@ -307,4 +307,34 @@ public class ValidadorImpostosV2Tests
         var erros = new ValidadorImpostosV2().ValidarTotais(totais, itens);
         erros.Should().BeEmpty();
     }
+    [Fact]
+    public void Reforma_com_sepec_incompleto_falha()
+    {
+        var item = new ItemDto(
+            Codigo: "SKU1", Descricao: "Produto", Ncm: "12345678", Cfop: "5102",
+            Quantidade: 1, ValorUnitario: 100, ValorTotal: 100, Impostos: null,
+            ImpostosV2: new ItemImpostosDtoV2(
+                Icms: new IcmsDto(Origem: 0, Cst: "00", BaseCalculo: 100, Aliquota: 18, Valor: 18),
+                IbsCbs: new IbsCbsDto(
+                    CstIbsCbs: "1", CClassTrib: "000001", BaseCalculo: 100,
+                    AliquotaCbs: 1, ValorCbs: 2)));
+
+        Validar(item).Should().Contain(e => e.Contains("CST do IBS/CBS deve ter 3 dígitos"))
+                             .And.Contain(e => e.Contains("valorCbs"));
+    }
+
+    [Fact]
+    public void Is_por_quantidade_incompleto_falha()
+    {
+        var item = new ItemDto(
+            Codigo: "SKU1", Descricao: "Produto", Ncm: "12345678", Cfop: "5102",
+            Quantidade: 1, ValorUnitario: 100, ValorTotal: 100, Impostos: null,
+            ImpostosV2: new ItemImpostosDtoV2(
+                Icms: new IcmsDto(Origem: 0, Cst: "00", BaseCalculo: 100, Aliquota: 18, Valor: 18),
+                Is: new IsDto(CstIs: "01", CClassTribIs: "000005",
+                    BaseCalculo: 100, Aliquota: 10, Valor: 10,
+                    UnidadeTributavel: "KG")));
+
+        Validar(item).Should().Contain(e => e.Contains("unidadeTributavel e quantidadeTributavel juntos"));
+    }
 }

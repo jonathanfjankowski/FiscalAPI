@@ -28,7 +28,7 @@ namespace Fiscal.Adapters.Unimake;
 /// </summary>
 public static class MapperEnviNFe
 {
-    private const string VerProc = "FiscalAPI 1.6.0";
+    private const string VerProc = "FiscalAPI 1.10.0";
 
     public static EnviNFe Criar(DocumentoFiscal doc, Tenant tenant, EmissaoRequest req, Ambiente ambiente)
     {
@@ -290,6 +290,8 @@ public static class MapperEnviNFe
             if (v2?.Ipi is not null) imposto.IPI = MapearIpi(v2.Ipi, i + 1, item.Codigo);
             if (v2?.Pis is not null) imposto.PIS = MapearPis(v2.Pis, i + 1, item.Codigo);
             if (v2?.Cofins is not null) imposto.COFINS = MapearCofins(v2.Cofins, i + 1, item.Codigo);
+            if (v2?.IbsCbs is not null) imposto.IBSCBS = MapearIbsCbs(v2.IbsCbs, i + 1, item.Codigo);
+            if (v2?.Is is not null) imposto.IS = MapearIs(v2.Is, i + 1, item.Codigo);
 
             var unidade = string.IsNullOrWhiteSpace(item.Unidade) ? "UN" : item.Unidade;
 
@@ -451,6 +453,60 @@ public static class MapperEnviNFe
 
         throw new ErroNaoRecuperavelException(
             $"Item {numeroItem} ('{codigoItem}'): COFINS CST '{cst}' fora do contrato (01, 02, 04–09, 99).");
+    }
+
+    private static IBSCBS MapearIbsCbs(IbsCbsDto dto, int numeroItem, string codigoItem)
+    {
+        Exigir(!string.IsNullOrWhiteSpace(dto.CClassTrib),
+            "IBS/CBS exige cClassTrib (6 dígitos, tabela SEPEC).", numeroItem, codigoItem);
+
+        var ibsUf = new GIBSUF();
+        if (dto.AliquotaIbsEstadual is { } pUf) ibsUf.PIBSUF = (double)pUf;
+        if (dto.ValorIbsEstadual is { } vUf) ibsUf.VIBSUF = (double)vUf;
+
+        var ibsMun = new GIBSMun();
+        if (dto.AliquotaIbsMunicipal is { } pMun) ibsMun.PIBSMun = (double)pMun;
+        if (dto.ValorIbsMunicipal is { } vMun) ibsMun.VIBSMun = (double)vMun;
+
+        var gcbs = new GCBS();
+        if (dto.AliquotaCbs is { } pCbs) gcbs.PCBS = (double)pCbs;
+        if (dto.ValorCbs is { } vCbs) gcbs.VCBS = (double)vCbs;
+
+        var grupo = new GIBSCBS
+        {
+            GIBSUF = ibsUf,
+            GIBSMun = ibsMun,
+            GCBS = gcbs,
+        };
+        if (dto.BaseCalculo is { } bc) grupo.VBC = (double)bc;
+
+        return new IBSCBS
+        {
+            CST = dto.CstIbsCbs,
+            CClassTrib = dto.CClassTrib,
+            GIBSCBS = grupo,
+        };
+    }
+
+    private static IS MapearIs(IsDto dto, int numeroItem, string codigoItem)
+    {
+        Exigir(!string.IsNullOrWhiteSpace(dto.CClassTribIs),
+            "IS exige cClassTribIs (6 dígitos, tabela SEPEC).", numeroItem, codigoItem);
+
+        var is_ = new IS
+        {
+            CSTIS = dto.CstIs,
+            CClassTribIS = dto.CClassTribIs,
+        };
+        if (dto.BaseCalculo is { } bc)
+        {
+            is_.VBCIS = (double)bc;
+            is_.UTrib = dto.UnidadeTributavel ?? "UN";
+            is_.QTrib = dto.QuantidadeTributavel is { } q ? (double)q : 1;
+        }
+        if (dto.Aliquota is { } p) is_.PIS = (double)p;
+        if (dto.Valor is { } v) is_.VIS = (double)v;
+        return is_;
     }
 
     private static ICMS MapearICMS(ImpostoDto? imposto, int numeroItem, string codigoItem)
@@ -900,6 +956,7 @@ public static class MapperEnviNFe
         var vSeg = req.Totais.ValorSeguro ?? 0;
         var vOutro = req.Totais.OutrasDespesas ?? 0;
         decimal vIpi = 0, vPis = 0, vCofins = 0;
+        decimal vBcIbsCbs = 0, vIbsUf = 0, vIbsMun = 0, vCbsTotal = 0, vIsTotal = 0;
 
         foreach (var item in req.Itens)
         {
@@ -911,6 +968,15 @@ public static class MapperEnviNFe
                 vPis += pis.Valor ?? 0;
             if (item.ImpostosV2?.Cofins is { } cofins)
                 vCofins += cofins.Valor ?? 0;
+            if (item.ImpostosV2?.IbsCbs is { } ibsCbs)
+            {
+                vBcIbsCbs += ibsCbs.BaseCalculo ?? 0;
+                vIbsUf += ibsCbs.ValorIbsEstadual ?? 0;
+                vIbsMun += ibsCbs.ValorIbsMunicipal ?? 0;
+                vCbsTotal += ibsCbs.ValorCbs ?? 0;
+            }
+            if (item.ImpostosV2?.Is is { } isItem)
+                vIsTotal += isItem.Valor ?? 0;
 
             if (item.ImpostosV2?.Icms is { } icms)
             {
@@ -964,7 +1030,24 @@ public static class MapperEnviNFe
         if (vPis != 0) tot.VPIS = (double)vPis;
         if (vCofins != 0) tot.VCOFINS = (double)vCofins;
 
-        return new Total { ICMSTot = tot };
+        var total = new Total { ICMSTot = tot };
+        if (vBcIbsCbs != 0 || vIbsUf + vIbsMun != 0 || vCbsTotal != 0)
+        {
+            total.IBSCBSTot = new IBSCBSTot
+            {
+                VBCIBSCBS = (double)vBcIbsCbs,
+                GIBS = new GIBSTot
+                {
+                    GIBSUF = new GIBSUFTot { VIBSUF = (double)vIbsUf },
+                    GIBSMun = new GIBSMunTot { VIBSMun = (double)vIbsMun },
+                    VIBS = (double)(vIbsUf + vIbsMun),
+                },
+                GCBS = new GCBSTot { VCBS = (double)vCbsTotal },
+            };
+        }
+        if (vIsTotal != 0) total.ISTot = new ISTot { VIS = (double)vIsTotal };
+
+        return total;
     }
 
     private static Pag MapearPag(EmissaoRequest req, bool nfce)

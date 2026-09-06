@@ -447,4 +447,48 @@ public class ImpostosV2WebhooksIntegracaoTests(EmissaoIntegracaoTests.Factory fa
         var conteudo = await resp.Content.ReadAsStringAsync();
         conteudo.Should().Contain("44 dígitos");
     }
+    [Fact]
+    public async Task Emissao_com_reforma_ibs_cbs_aceita_202()
+    {
+        var client = Client();
+        var req = new HttpRequestMessage(HttpMethod.Post, "/v1/documentos-fiscais/nfe")
+        {
+            Content = JsonContent.Create(new
+            {
+                ambiente = "homologacao",
+                serie = 1,
+                destinatario = new { cnpjCpf = "11122233000144", nome = "Cliente Teste Ltda" },
+                itens = new[]
+                {
+                    new
+                    {
+                        codigo = "SKU1", descricao = "x", ncm = "12345678", cfop = "5102",
+                        quantidade = 1, valorUnitario = 100, valorTotal = 100,
+                        impostosV2 = new
+                        {
+                            icms = new { origem = 0, cst = "00", baseCalculo = 100, aliquota = 18, valor = 18 },
+                            ibsCbs = new
+                            {
+                                cstIbsCbs = "101",
+                                cClassTrib = "000001",
+                                baseCalculo = 100,
+                                aliquotaIbsEstadual = 0.9,
+                                valorIbsEstadual = 0.9,
+                                aliquotaIbsMunicipal = 0.1,
+                                valorIbsMunicipal = 0.1,
+                                aliquotaCbs = 1,
+                                valorCbs = 1,
+                            },
+                        },
+                    },
+                },
+                totais = new { valorProdutos = 100, valorNota = 100 },
+            }),
+        };
+        req.Headers.Add("Idempotency-Key", $"f5-{Guid.NewGuid()}");
+
+        var resp = await client.SendAsync(req);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.Accepted);
+    }
 }

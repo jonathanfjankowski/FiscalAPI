@@ -26,6 +26,7 @@ public class ValidadorImpostosV2
             if (v2.Icms is { } icms)
                 ValidarIcms(icms, i, itens[i].Codigo, erros);
             ValidarFederais(v2, i, nfce, erros);
+            ValidarReforma(v2, i, erros);
         }
         return erros;
     }
@@ -341,4 +342,35 @@ public class ValidadorImpostosV2
             erros.Add(new(campo, $"Base {b:N2} × alíquota {a:N4}% = {b * a / 100m:N2}, recebido {v:N2}."));
         }
     }
+    private static void ValidarReforma(ItemImpostosDtoV2 v2, int indice, List<InconsistenciaFiscal> erros)
+    {
+        if (v2.IbsCbs is { } ibs)
+        {
+            var campo = $"itens[{indice}].impostosV2.ibsCbs";
+            if (string.IsNullOrWhiteSpace(ibs.CstIbsCbs) || ibs.CstIbsCbs.Length != 3)
+                erros.Add(new InconsistenciaFiscal($"{campo}.cstIbsCbs", "CST do IBS/CBS deve ter 3 dígitos (tabela SEPEC)."));
+            if (string.IsNullOrWhiteSpace(ibs.CClassTrib) || ibs.CClassTrib.Length != 6)
+                erros.Add(new InconsistenciaFiscal($"{campo}.cClassTrib", "cClassTrib é obrigatório e deve ter 6 dígitos (tabela SEPEC)."));
+
+            Conferir($"{campo}.valorIbsEstadual", ibs.BaseCalculo, ibs.AliquotaIbsEstadual, ibs.ValorIbsEstadual, erros);
+            Conferir($"{campo}.valorIbsMunicipal", ibs.BaseCalculo, ibs.AliquotaIbsMunicipal, ibs.ValorIbsMunicipal, erros);
+            Conferir($"{campo}.valorCbs", ibs.BaseCalculo, ibs.AliquotaCbs, ibs.ValorCbs, erros);
+        }
+
+        if (v2.Is is { } isDto)
+        {
+            var campo = $"itens[{indice}].impostosV2.is";
+            if (string.IsNullOrWhiteSpace(isDto.CstIs) || isDto.CstIs.Length != 2)
+                erros.Add(new InconsistenciaFiscal($"{campo}.cstIs", "CST do IS deve ter 2 dígitos (tabela SEPEC)."));
+            if (string.IsNullOrWhiteSpace(isDto.CClassTribIs) || isDto.CClassTribIs.Length != 6)
+                erros.Add(new InconsistenciaFiscal($"{campo}.cClassTribIs", "cClassTribIs é obrigatório e deve ter 6 dígitos."));
+
+            if ((isDto.UnidadeTributavel is not null) != (isDto.QuantidadeTributavel is not null))
+                erros.Add(new InconsistenciaFiscal($"{campo}.quantidadeTributavel",
+                    "IS por quantidade: informe unidadeTributavel e quantidadeTributavel juntos."));
+
+            Conferir($"{campo}.valor", isDto.BaseCalculo, isDto.Aliquota, isDto.Valor, erros);
+        }
+    }
+
 }

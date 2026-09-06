@@ -51,7 +51,27 @@ public record ItemImpostosDtoV2(
     IcmsDto? Icms = null,
     IpiDto? Ipi = null,        // v2 F3 — regime normal
     PisDto? Pis = null,        // v2 F3
-    CofinsDto? Cofins = null); // v2 F3
+    CofinsDto? Cofins = null,  // v2 F3
+    IbsCbsDto? IbsCbs = null,  // v2 F5 — reforma (LC 214/2025, NT 2025.x)
+    IsDto? Is = null);         // v2 F5 — Imposto Seletivo
+
+/// <summary>Reforma tributária (IBS/CBS). vIBS informado = UF + municipal.</summary>
+public record IbsCbsDto(
+    [Required, MaxLength(3)] string CstIbsCbs,       // 3 dígitos (tabela SEPEC)
+    [Required, MaxLength(6)] string CClassTrib,      // 6 dígitos (tabela SEPEC) — obrigatório
+    decimal? BaseCalculo = null,
+    decimal? AliquotaIbsEstadual = null, decimal? ValorIbsEstadual = null,
+    decimal? AliquotaIbsMunicipal = null, decimal? ValorIbsMunicipal = null,
+    decimal? AliquotaCbs = null, decimal? ValorCbs = null);
+
+public record IsDto(
+    [Required, MaxLength(2)] string CstIs,           // 2 dígitos (SEPEC)
+    [Required, MaxLength(6)] string CClassTribIs,
+    decimal? BaseCalculo = null,
+    decimal? Aliquota = null,                        // pIS
+    decimal? Valor = null,                           // vIS
+    [MaxLength(6)] string? UnidadeTributavel = null, // UTrib (tipo de base "quantidade")
+    decimal? QuantidadeTributavel = null);           // QTrib
 
 public record IpiDto(
     [Required, MaxLength(2)] string Cst,   // 00/49/50/99 tributado; 01–05/51 não tributado
@@ -119,7 +139,10 @@ public record TotaisDto(
     [Range(0, double.MaxValue)] decimal? ValorDesconto = null,   // v2 F2 — desconto no total
     [Range(0, double.MaxValue)] decimal? ValorFrete = null,      // v2 F2 — compõe o total da nota
     [Range(0, double.MaxValue)] decimal? ValorSeguro = null,     // v2 F2
-    [Range(0, double.MaxValue)] decimal? OutrasDespesas = null); // v2 F2
+    [Range(0, double.MaxValue)] decimal? OutrasDespesas = null,  // v2 F2
+    [Range(0, double.MaxValue)] decimal? ValorIbs = null,        // v2 F5 — conferência
+    [Range(0, double.MaxValue)] decimal? ValorCbs = null,        // v2 F5 — conferência
+    [Range(0, double.MaxValue)] decimal? ValorIs = null);        // v2 F5 — conferência
 
 public record PagamentoDto(
     [Required, MaxLength(2)] string Forma,

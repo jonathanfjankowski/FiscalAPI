@@ -4,7 +4,9 @@
 > (self-service de webhook, G10) — implementadas** na `1.4.0-alpha`.
 > **F2 (item rico + totais) e F3 (IPI/PIS/COFINS) — implementadas** na
 > `1.6.0-alpha`. **F4 (NF-ref/devolução) — implementada** na `1.8.0-alpha`.
-> F5–F6 permanecem planejadas, na ordem recomendada abaixo.
+> **F5 (reforma IBS/CBS + IS) — implementada** e **F6 (DANFE) parcial**
+> (barcode da chave + QR do DANFCe; leiaute visual completo segue aberto)
+> na `1.10.0-alpha`. Backlog do §7 permanece.
 >
 > **Escopo**: emissão de **NF-e (modelo 55) e NFC-e (modelo 65)**. A NFS-e
 > Nacional segue plano próprio (ver `docs/roadmap.md`).

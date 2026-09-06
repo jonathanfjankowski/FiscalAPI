@@ -319,9 +319,9 @@ para `FALHA` (terminal, visível na tabela `outbox_webhooks`).
   (emissão real, não sandbox): CST `00–90` e **CSOSN do Simples Nacional
   `101–900`** (ST, FCP e DIFAL), **IPI/PIS/COFINS**, GTIN, CEST, unidade,
   desconto por item e frete/seguro/outras — via grupo `impostosV2`; a lista
-  plana legada `impostos[]` segue suportada (CST 00/40/41/50). Ficam para as
-  próximas fases: NF-ref/devolução (F4), reforma IBS/CBS/IS (F5) e
-  transporte/volumes.
+  plana legada `impostos[]` segue suportada (CST 00/40/41/50), além de
+  NF-ref/devolução (F4) e reforma IBS/CBS/IS (F5, NT 2025.x). Fica para
+  depois: transporte/volumes (backlog v2).
   Defaults adotados quando o payload não traz: `natOp` (`naturezaOperacao`
   opcional no payload, default `"VENDA"`), `tpNF` saída, `finNFe` normal,
   `indFinal` consumidor final, `indPres` presencial (internet quando a UF do
@@ -350,8 +350,9 @@ para `FALHA` (terminal, visível na tabela `outbox_webhooks`).
   do prestador** na SEFAZ Nacional.
 - **Distribuição DFe sincroniza por NSU** a cada 60 s no Worker; em produção
   exige certificado A1; em sandbox a consulta responde "sem documentos" (mock).
-- **PDF (DANFE/DANFCe/DANFSe)** em layout **simplificado** — sem código de
-  barras/QR do leiaute oficial de 20 campos (evolução no plano v2).
+- **PDF (DANFE/DANFCe/DANFSe)** em leiaute **simplificado** (com barcode
+  CODE-128 da chave e QR do DANFCe extraído do XML) — o quadro visual
+  oficial de 20 campos segue como evolução no plano v2.
 - **Webhooks** sem página de reenvio manual na outbox (consultável via
   banco: tabela `outbox_webhooks`).
 - **Em homologação real** você precisa de um certificado A1 válido (a SEFAZ

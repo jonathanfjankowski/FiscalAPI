@@ -80,4 +80,21 @@ public class GeradorPdfQuestPdfTests
         bytes.Should().NotBeEmpty();
         Encoding.ASCII.GetString(bytes, 0, 4).Should().Be("%PDF");
     }
+    [Fact]
+    public async Task Danfce_com_chave_e_qrcode_no_xml_gera_pdf_valido()
+    {
+        var doc = Documento(65, "AUTORIZADA");
+        doc.XmlAssinado = """
+            <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">
+              <NFe><infNFe Id="NFe123"><infNFeSupl>
+                <qrCode><![CDATA[https://www.sefaz.pr.gov.br/NFCeConsulta?p=4126]]></qrCode>
+              </infNFeSupl></infNFe></NFe>
+            </nfeProc>
+            """;
+
+        var bytes = await new GeradorPdfQuestPdf().GerarDanfceAsync(doc, Tenant(), CancellationToken.None);
+
+        bytes.Should().NotBeEmpty();
+        Encoding.ASCII.GetString(bytes, 0, 5).Should().StartWith("%PDF-");
+    }
 }

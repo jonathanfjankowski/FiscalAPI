@@ -26,6 +26,7 @@ Tudo abaixo de "Feito" está implementado e coberto por testes automatizados;
 | 1.0-4/5 | **OTel/Prometheus** (`/metrics`, métricas de negócio, alertas em `docs/observabilidade.md`) + **Redis** (rate limit distribuído por API key + cache compartilhado) | 1.7 |
 | v2-F4 | **NF-ref / devolução** (`finalidade`, `tipoOperacao`, `indPres`, `indFinal`, `nfesReferenciadas` → grupo NFref) + lint do painel no CI | 1.8 |
 | 1.0-6 | **PITR/WAL** (RPO ≤ 5 min + `restore-pitr.sh`) + **secret manager plugável** (`CHAVE_FILE`) + pgcrypto no compose | 1.9 |
+| v2-F5 + F6 | **Reforma IBS/CBS + IS** (NT 2025.x: grupos IBSCBS/IS, totais IBSCBSTot/ISTot) + **barcode/QR no DANFE** (CODE-128 + QR DANFCe do XML) | 1.10 |
 
 ## Próximo (antes do 1.0 público)
 

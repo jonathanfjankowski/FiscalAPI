@@ -12,7 +12,7 @@ namespace Fiscal.Core.Services;
 public class MetricasFiscais
 {
     public const string NomeMedidor = "FiscalAPI";
-    public const string VersaoServico = "1.6.0";
+    public const string VersaoServico = "1.10.0";
 
     private readonly Counter<long> _documentos;
     private readonly Histogram<double> _latenciaAutorizacao;

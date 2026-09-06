@@ -9,10 +9,10 @@
 
 | | |
 |---|---|
-| **Versão atual** | `1.9.0-alpha` (2026-09-06) |
+| **Versão atual** | `1.10.0-alpha` (2026-09-06) |
 | **Estágio** | Alpha — funcional ponta a ponta em sandbox; emissão real NF-e/NFC-e/NFS-e(DPS) implementada, homologação contra SEFAZ pendente de certificado A1 |
 | **Stack** | .NET 10 (API + Worker Hangfire), PostgreSQL/EF Core, React 19 + Vite + Tailwind v4 (painel admin), Unimake.DFe (adapters SEFAZ), QuestPDF (DANFE/DANFCe) |
-| **Testes** | 168/168 (113 unitários em `Fiscal.Core.Tests`, 55 de integração em `Fiscal.Api.Tests`) |
+| **Testes** | 173/173 (116 unitários em `Fiscal.Core.Tests`, 57 de integração em `Fiscal.Api.Tests`) |
 | **Licença** | MIT — **sujeito à confirmação da licença da `Unimake.DFe`** (bloqueio do release público) |
 | **Repositório** | https://github.com/jonathanfjankowski/FiscalAPI |
 
@@ -46,9 +46,9 @@
   (`PUT /v1/tenants/webhooks`). Eventos: `documento.autorizado/rejeitado/
   denegado/cancelado/carta_correcao`, `nota.recebida`, `manifestacao.processada`,
   `certificado.vencendo`.
-- **DANFE/DANFCe/DANFSe** — PDF via QuestPDF em layout **simplificado**
-  (sem código de barras/QR do leiaute oficial de 20 campos — limitação
-  documentada).
+- **DANFE/DANFCe/DANFSe** — PDF via QuestPDF com **barcode CODE-128 da
+  chave** e **QR Code do DANFCe** (extraído do XML autorizado), em leiaute
+  simplificado (o quadro oficial de 20 campos segue como evolução).
 - **Distribuição DFe + Manifestação do Destinatário** — sincronização por
   NSU a cada 60 s no Worker (`notas_recebidas`/`ultimo_nsu`), manifestação
   (210200/210210/210220/210240) com idempotência e webhook.
@@ -102,10 +102,10 @@ A lista completa e justificada está no README (`Limitações conhecidas`).
 As principais:
 
 - Mapper NF-e cobre ICMS completo + IPI/PIS/COFINS + item rico (GTIN,
-  CEST, unidade, desconto, frete/seguro/outras) via `impostosV2`. Ficam
-  para as próximas fases do contrato v2: NF-ref/devolução (F4), reforma
-  IBS/CBS/IS (F5), DANFE oficial (F6) e transporte/volumes (backlog).
-  Combinações não suportadas **falham alto** em vez de transmitir errado.
+  CEST, unidade, desconto, frete/seguro/outras) + NF-ref/devolução +
+  reforma IBS/CBS/IS (NT 2025.x) via `impostosV2`. Fica para depois:
+  transporte/volumes (backlog v2). Combinações não suportadas **falham
+  alto** em vez de transmitir errado.
 - PDF **simplificado** (sem código de barras/QR do leiaute oficial) — F6.
 - Certificado **A1 apenas** (A3/HSM fora de escopo).
 - NFS-e real exige credenciamento do prestador na SEFAZ Nacional +
@@ -120,8 +120,8 @@ As principais:
 | Indicador | Estado |
 |---|---|
 | Build + testes no CI | ✅ verde (`build-and-test.yml`) |
-| Cobertura de testes automatizados | 168 testes — segurança, ICMS/CSOSN, IPI/PIS/COFINS, NF-ref/devolução, DPS/substituição, contingência, DFe, webhooks, painel, métricas, secrets |
+| Cobertura de testes automatizados | 173 testes — segurança, ICMS/CSOSN, IPI/PIS/COFINS, NF-ref/devolução, reforma IBS/CBS/IS, DPS/substituição, contingência, DFe, webhooks, painel, métricas, secrets |
 | `dotnet format --verify-no-changes` | ✅ exigido no CI |
 | Migrations | Aplicadas automaticamente no startup (hand-written com atributos `[Migration]`/`[DbContext]`) |
 | Documentação | README + 18 docs em `docs/` + CHANGELOG completo 0.1 → 1.8 |
-| Dívida documentada | EPEC/NFC-e offline, contrato v2 F5–F6 |
+| Dívida documentada | EPEC/NFC-e offline, leiaute visual completo do DANFE, backlog v2 (transporte, batch, ICMSPart) |
