@@ -49,12 +49,24 @@ services:
 
   postgres:
     image: postgres:16-alpine
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=test ! -f /wal_archive/%f && cp %p /wal_archive/%f
+      - -c
+      - archive_timeout=300
     environment:
       - POSTGRES_DB=fiscal
       - POSTGRES_USER=fiscal
       - POSTGRES_PASSWORD=${DB_PASSWORD:-fiscal}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - wal_archive:/wal_archive
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U fiscal -d fiscal"]
       interval: 5s
@@ -66,3 +78,4 @@ services:
 volumes:
   pgdata:
   redisdata:
+  wal_archive:

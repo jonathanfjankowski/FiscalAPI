@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.9.0-alpha] — 2026-09-06
+
+### Adicionado — PITR + secret manager plugável + hardening de go-live (roadmap item 6)
+- **PITR/WAL archiving (RPO ≤ 5 min)**: compose do Postgres sobe com
+  `wal_level=replica`, `archive_mode=on`, `archive_timeout=300` e volume
+  `wal_archive` (journals a cada 5 min, `.partial` inclusos);
+  **`docker/restore-pitr.sh`** restaura base backup + journals até
+  `recovery_target_time`.
+- **Secret manager plugável**: convenção `CHAVE_FILE=/caminho` (Docker
+  secrets / K8s mounted files) — `AddFileSecrets()` mapeia
+  `ADMIN_JWT_SECRET_FILE` e `CERTIFICADOS__CHAVEMESTRAKEK_FILE` para as
+  chaves de config; valor direto da env segue vencendo o arquivo.
+- **pgcrypto**: `docker/postgres-init/01-extensions.sql` cria a extensão no
+  primeiro boot (checklist de criptografia em repouso do backup-dr.md).
+- **backup-dr.md**: checklist de go-live anotado com o que virou código e
+  seção de restore pontual.
+- **168/168 testes** (113 + 55): +2 do provider de segredos.
+
 ## [1.8.0-alpha] — 2026-09-06
 
 ### Adicionado — contrato v2 F4: NF-ref / devolução

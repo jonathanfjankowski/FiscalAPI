@@ -25,14 +25,14 @@ Tudo abaixo de "Feito" está implementado e coberto por testes automatizados;
 | v2-F2 + F3 | **Item rico + totais** (GTIN, CEST, unidade, desconto, frete/seguro/outras, fórmula v2 do `valorNota`) + **IPI/PIS/COFINS** por item com totais | 1.6 |
 | 1.0-4/5 | **OTel/Prometheus** (`/metrics`, métricas de negócio, alertas em `docs/observabilidade.md`) + **Redis** (rate limit distribuído por API key + cache compartilhado) | 1.7 |
 | v2-F4 | **NF-ref / devolução** (`finalidade`, `tipoOperacao`, `indPres`, `indFinal`, `nfesReferenciadas` → grupo NFref) + lint do painel no CI | 1.8 |
+| 1.0-6 | **PITR/WAL** (RPO ≤ 5 min + `restore-pitr.sh`) + **secret manager plugável** (`CHAVE_FILE`) + pgcrypto no compose | 1.9 |
 
 ## Próximo (antes do 1.0 público)
 
 1. **Homologação real NFe/NFC-e/eventos/NFS-e** contra SEFAZ (exige
    certificado A1 — checklist no README) + ajustes de default por UF que
    ela revelar. A NFS-e Nacional exige ainda credenciamento do prestador.
-2. **PITR (WAL archiving)** para RPO ≤ 5 min + secret manager plugável.
-3. **Confirmação da licença da `Unimake.DFe`** (o MIT do projeto depende
+2. **Confirmação da licença da `Unimake.DFe`** (o MIT do projeto depende
    dessa checagem).
 
 ## Como votar/propor
