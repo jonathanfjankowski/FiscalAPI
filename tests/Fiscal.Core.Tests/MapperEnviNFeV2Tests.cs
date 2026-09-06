@@ -385,4 +385,51 @@ public class MapperEnviNFeV2Tests
 
         Mapear(item).Det.Single().Imposto.PIS!.PISNT!.CST.Should().Be("04");
     }
+    [Fact]
+    public void Ide_configuravel_finalidade_tpoperacao_indpres_indfinal()
+    {
+        var req = Request(ItemV2(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 18, Valor: 18))) with
+        {
+            Finalidade = "devolucao",
+            TipoOperacao = "entrada",
+            IndicadorPresenca = "internet",
+            IndicadorConsumidorFinal = "nao",
+            NfesReferenciadas = [new NfRefDto("41260912345678000199550010000001001000123456")],
+        };
+        var nfe = MapperEnviNFe.Criar(Documento(), TenantCompleto(), req, Ambiente.Homologacao)
+            .NFe[0].InfNFeField;
+
+        nfe.Ide.FinNFe.Should().Be(FinalidadeNFe.Devolucao);
+        nfe.Ide.TpNF.Should().Be(TipoOperacao.Entrada);
+        nfe.Ide.IndPres.Should().Be(IndicadorPresenca.OperacaoInternet);
+        nfe.Ide.IndFinal.Should().Be(SimNao.Nao);
+        nfe.Ide.NFref!.Single().RefNFe.Should().Be("41260912345678000199550010000001001000123456");
+    }
+
+    [Fact]
+    public void Ide_defaults_mantidos_sem_campos_novos()
+    {
+        var nfe = Mapear(ItemV2(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 18, Valor: 18)));
+
+        nfe.Ide.FinNFe.Should().Be(FinalidadeNFe.Normal);
+        nfe.Ide.TpNF.Should().Be(TipoOperacao.Saida);
+        nfe.Ide.IndFinal.Should().Be(SimNao.Sim);
+        nfe.Ide.NFref.Should().BeNullOrEmpty();
+    }
+
+    [Fact]
+    public void Chave_referenciada_invalida_falha_alto()
+    {
+        var req = Request(ItemV2(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 18, Valor: 18))) with
+        {
+            NfesReferenciadas = [new NfRefDto("123")],
+        };
+
+        var act = () => MapperEnviNFe.Criar(Documento(), TenantCompleto(), req, Ambiente.Homologacao);
+
+        act.Should().Throw<ErroNaoRecuperavelException>().WithMessage("*44 dígitos*");
+    }
 }

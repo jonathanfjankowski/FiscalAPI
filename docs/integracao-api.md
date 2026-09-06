@@ -712,6 +712,11 @@ Corpo do POST de emissão (`/nfe` e `/nfce`):
 | `totais` | objeto | sim | [`Totais`](#totais) |
 | `pagamento` | array | não | [`Pagamento`](#pagamento) |
 | `naturezaOperacao` | string | não | Ex.: `"Venda de mercadoria"` |
+| `finalidade` | string | não | `normal` (default) \| `complementar` \| `ajuste` \| `devolucao` (finNFe) |
+| `tipoOperacao` | string | não | `saida` (default) \| `entrada` (tpNF) |
+| `indicadorPresenca` | string | não | `presencial` \| `internet` \| `teleatendimento` \| `entrega_domicilio` \| `fora_estabelecimento` \| `outros` (indPres) |
+| `indicadorConsumidorFinal` | string | não | `sim` (default) \| `nao` (indFinal) |
+| `nfesReferenciadas` | array | devolução | Chaves de 44 dígitos (`[{ "chaveAcesso": "..." }]`) → grupo `NFref`. **Obrigatória quando `finalidade = "devolucao"`** |
 
 ```json
 {

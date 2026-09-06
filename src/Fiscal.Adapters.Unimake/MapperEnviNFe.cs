@@ -22,7 +22,9 @@ namespace Fiscal.Adapters.Unimake;
 /// ICMS: lista plana legada ('impostos', CST 00/40/41/50) ou grupo tipado v2
 /// ('impostosV2' — CST 00–90, CSOSN 101–900, ST, FCP e DIFAL; ver
 /// docs/plano-evolucao-contrato-v2.md). Item rico (GTIN/CEST/unidade/
-/// desconto), frete/seguro/outras e IPI/PIS/COFINS desde a F2/F3.
+/// desconto), frete/seguro/outras e IPI/PIS/COFINS desde a F2/F3; Ide
+/// configurável (finalidade, tipoOperacao, indPres, indFinal) e NF-ref
+/// (devolução) desde a F4.
 /// </summary>
 public static class MapperEnviNFe
 {
@@ -88,10 +90,19 @@ public static class MapperEnviNFe
 
     private static Ide MapearIde(DocumentoFiscal doc, Tenant tenant, EmissaoRequest req, Ambiente ambiente, bool nfce, UFBrasil ufEmit)
     {
-        var indPres = IndicadorPresenca.OperacaoPresencial;
-        if (!nfce && req.Destinatario?.Endereco?.Uf is { Length: 2 } ufDest
-            && !string.Equals(ufDest, tenant.Uf, StringComparison.OrdinalIgnoreCase))
-            indPres = IndicadorPresenca.OperacaoInternet;
+        var indPres = req.IndicadorPresenca?.Trim().ToLowerInvariant() switch
+        {
+            "presencial" => IndicadorPresenca.OperacaoPresencial,
+            "internet" => IndicadorPresenca.OperacaoInternet,
+            "teleatendimento" => IndicadorPresenca.OperacaoTeleAtendimento,
+            "entrega_domicilio" => IndicadorPresenca.NFCeEntregaDomicilio,
+            "fora_estabelecimento" => IndicadorPresenca.PresencialForaEstabelecimento,
+            "outros" => IndicadorPresenca.OperacaoOutros,
+            null or "" => IndicadorPresencaPadrao(req, nfce, tenant),
+            _ => throw new ErroNaoRecuperavelException(
+                $"indicadorPresenca '{req.IndicadorPresenca}' inválido — use presencial, internet, teleatendimento, " +
+                "entrega_domicilio, fora_estabelecimento ou outros."),
+        };
 
         return new Ide
         {
@@ -105,7 +116,14 @@ public static class MapperEnviNFe
             // tentativas (SVC retransmite com a MESMA chave; agora no fluxo
             // normal também — a chave não muda se o job tentar de novo em outro mês).
             DhEmi = doc.CriadoEm,
-            TpNF = TipoOperacao.Saida,
+            TpNF = req.TipoOperacao?.Trim().ToLowerInvariant() switch
+            {
+                "entrada" => TipoOperacao.Entrada,
+                "saida" => TipoOperacao.Saida,
+                null or "" => TipoOperacao.Saida,
+                _ => throw new ErroNaoRecuperavelException(
+                    $"tipoOperacao '{req.TipoOperacao}' inválido — use saida ou entrada."),
+            },
             IdDest = DestinoOperacao.OperacaoInterna,
             CMunFG = int.Parse(tenant.CodigoMunicipioIbge!),
             TpImp = nfce ? FormatoImpressaoDANFE.NFCe : FormatoImpressaoDANFE.NormalRetrato,
@@ -116,12 +134,53 @@ public static class MapperEnviNFe
                 _ => TipoEmissao.Normal,
             },
             TpAmb = ambiente == Ambiente.Producao ? TipoAmbiente.Producao : TipoAmbiente.Homologacao,
-            FinNFe = FinalidadeNFe.Normal,
-            IndFinal = SimNao.Sim,
+            FinNFe = req.Finalidade?.Trim().ToLowerInvariant() switch
+            {
+                "normal" => FinalidadeNFe.Normal,
+                "complementar" => FinalidadeNFe.Complementar,
+                "ajuste" => FinalidadeNFe.Ajuste,
+                "devolucao" => FinalidadeNFe.Devolucao,
+                null or "" => FinalidadeNFe.Normal,
+                _ => throw new ErroNaoRecuperavelException(
+                    $"finalidade '{req.Finalidade}' inválida — use normal, complementar, ajuste ou devolucao."),
+            },
+            IndFinal = req.IndicadorConsumidorFinal?.Trim().ToLowerInvariant() switch
+            {
+                "nao" => SimNao.Nao,
+                "sim" => SimNao.Sim,
+                null or "" => SimNao.Sim,
+                _ => throw new ErroNaoRecuperavelException(
+                    $"indicadorConsumidorFinal '{req.IndicadorConsumidorFinal}' inválido — use sim ou nao."),
+            },
             IndPres = indPres,
             ProcEmi = ProcessoEmissao.AplicativoContribuinte,
             VerProc = VerProc,
+            NFref = MapearNfref(req, numeroItem: 0),
         };
+    }
+
+    private static IndicadorPresenca IndicadorPresencaPadrao(EmissaoRequest req, bool nfce, Tenant tenant)
+    {
+        // Default histórico: presencial; internet quando a UF do destinatário difere (NF-e).
+        if (!nfce && req.Destinatario?.Endereco?.Uf is { Length: 2 } ufDest
+            && !string.Equals(ufDest, tenant.Uf, StringComparison.OrdinalIgnoreCase))
+            return IndicadorPresenca.OperacaoInternet;
+        return IndicadorPresenca.OperacaoPresencial;
+    }
+
+    private static List<NFref> MapearNfref(EmissaoRequest req, int numeroItem)
+    {
+        if (req.NfesReferenciadas is not { Count: > 0 })
+            return [];
+
+        return req.NfesReferenciadas.Select(refDto =>
+        {
+            var chave = new string((refDto.ChaveAcesso ?? "").Where(char.IsDigit).ToArray());
+            if (chave.Length != 44)
+                throw new ErroNaoRecuperavelException(
+                    $"Chave de NF-e referenciada inválida (esperado 44 dígitos): '{refDto.ChaveAcesso}'.");
+            return new NFref { RefNFe = chave };
+        }).ToList();
     }
 
     private static Emit MapearEmit(Tenant tenant, UFBrasil ufEmit) => new()

@@ -251,6 +251,21 @@ public class DocumentosFiscaisController : ControllerBase
         if (ambienteKey != ambienteReq)
             return Problem(statusCode: 403, title: "API Key não autorizada para o ambiente solicitado.");
 
+        // v2 F4: devolução exige NF-e referenciada; chaves com 44 dígitos.
+        if (req.Finalidade?.Trim().ToLowerInvariant() == "devolucao" &&
+            req.NfesReferenciadas is not { Count: > 0 })
+        {
+            return Problem(statusCode: 422, title: "Devolução exige NF-e referenciada",
+                detail: "Informe 'nfesReferenciadas' com a(s) chave(s) de 44 dígitos da(s) NF-e devolvida(s).");
+        }
+        for (var i = 0; i < (req.NfesReferenciadas?.Count ?? 0); i++)
+        {
+            var chave = new string((req.NfesReferenciadas![i].ChaveAcesso ?? "").Where(char.IsDigit).ToArray());
+            if (chave.Length != 44)
+                return Problem(statusCode: 422, title: "Chave de NF-e referenciada inválida",
+                    detail: $"nfesReferenciadas[{i}]: esperado 44 dígitos, recebido {chave.Length}.");
+        }
+
         // Grupos de imposto ambíguos: item declara a lista plana legada OU o
         // grupo tipado v2 — nunca os dois (docs/plano-evolucao-contrato-v2.md §8).
         for (var i = 0; i < req.Itens.Count; i++)

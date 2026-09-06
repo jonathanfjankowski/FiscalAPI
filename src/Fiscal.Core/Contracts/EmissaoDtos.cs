@@ -132,7 +132,15 @@ public record EmissaoRequest(
     [Required, MinLength(1)] List<ItemDto> Itens,
     [Required] TotaisDto Totais,
     List<PagamentoDto>? Pagamento,
-    string? NaturezaOperacao = null);
+    string? NaturezaOperacao = null,
+    string? Finalidade = null,               // v2 F4: normal|complementar|ajuste|devolucao (finNFe)
+    string? TipoOperacao = null,             // v2 F4: saida|entrada (tpNF)
+    string? IndicadorPresenca = null,        // v2 F4: presencial|internet|teleatendimento|entrega_domicilio|fora_estabelecimento|outros (indPres)
+    string? IndicadorConsumidorFinal = null, // v2 F4: sim|nao (indFinal)
+    List<NfRefDto>? NfesReferenciadas = null); // v2 F4 — grupo NFref; devolucao exige
+
+public record NfRefDto(
+    [Required, MaxLength(44)] string ChaveAcesso);
 
 public record EmissaoResponse(
     Guid Id,

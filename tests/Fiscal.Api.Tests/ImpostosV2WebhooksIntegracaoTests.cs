@@ -370,4 +370,81 @@ public class ImpostosV2WebhooksIntegracaoTests(EmissaoIntegracaoTests.Factory fa
         var conteudo = await resp.Content.ReadAsStringAsync();
         conteudo.Should().NotBeEmpty();
     }
+    // ---------- v2 F4: NF-ref / devolução ----------
+
+    [Fact]
+    public async Task Devolucao_sem_nfes_referenciadas_retorna_422()
+    {
+        var client = Client();
+        var req = new HttpRequestMessage(HttpMethod.Post, "/v1/documentos-fiscais/nfe")
+        {
+            Content = JsonContent.Create(new
+            {
+                ambiente = "homologacao",
+                serie = 1,
+                destinatario = new { cnpjCpf = "11122233000144", nome = "Cliente Teste Ltda" },
+                finalidade = "devolucao",
+                tipoOperacao = "entrada",
+                itens = new[] { new { codigo = "X", descricao = "x", ncm = "12345678", cfop = "5102", quantidade = 1, valorUnitario = 10, valorTotal = 10 } },
+                totais = new { valorProdutos = 10, valorNota = 10 },
+            }),
+        };
+        req.Headers.Add("Idempotency-Key", $"dev-{Guid.NewGuid()}");
+
+        var resp = await client.SendAsync(req);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        var conteudo = await resp.Content.ReadAsStringAsync();
+        conteudo.Should().Contain("nfesReferenciadas");
+    }
+
+    [Fact]
+    public async Task Devolucao_com_nf_ref_aceita_202()
+    {
+        var client = Client();
+        var req = new HttpRequestMessage(HttpMethod.Post, "/v1/documentos-fiscais/nfe")
+        {
+            Content = JsonContent.Create(new
+            {
+                ambiente = "homologacao",
+                serie = 1,
+                destinatario = new { cnpjCpf = "11122233000144", nome = "Cliente Teste Ltda" },
+                finalidade = "devolucao",
+                tipoOperacao = "entrada",
+                nfesReferenciadas = new[] { new { chaveAcesso = "41260912345678000199550010000001001000123456" } },
+                itens = new[] { new { codigo = "X", descricao = "x", ncm = "12345678", cfop = "5102", quantidade = 1, valorUnitario = 10, valorTotal = 10 } },
+                totais = new { valorProdutos = 10, valorNota = 10 },
+            }),
+        };
+        req.Headers.Add("Idempotency-Key", $"dev-ok-{Guid.NewGuid()}");
+
+        var resp = await client.SendAsync(req);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.Accepted);
+    }
+
+    [Fact]
+    public async Task Chave_referenciada_com_tamanho_errado_retorna_422()
+    {
+        var client = Client();
+        var req = new HttpRequestMessage(HttpMethod.Post, "/v1/documentos-fiscais/nfe")
+        {
+            Content = JsonContent.Create(new
+            {
+                ambiente = "homologacao",
+                serie = 1,
+                destinatario = new { cnpjCpf = "11122233000144", nome = "Cliente Teste Ltda" },
+                nfesReferenciadas = new[] { new { chaveAcesso = "123" } },
+                itens = new[] { new { codigo = "X", descricao = "x", ncm = "12345678", cfop = "5102", quantidade = 1, valorUnitario = 10, valorTotal = 10 } },
+                totais = new { valorProdutos = 10, valorNota = 10 },
+            }),
+        };
+        req.Headers.Add("Idempotency-Key", $"dev-chave-{Guid.NewGuid()}");
+
+        var resp = await client.SendAsync(req);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        var conteudo = await resp.Content.ReadAsStringAsync();
+        conteudo.Should().Contain("44 dígitos");
+    }
 }

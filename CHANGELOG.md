@@ -1,5 +1,26 @@
 # Changelog
 
+## [1.8.0-alpha] — 2026-09-06
+
+### Adicionado — contrato v2 F4: NF-ref / devolução
+- `finalidade` (normal|complementar|ajuste|devolucao → finNFe),
+  `tipoOperacao` (saida|entrada → tpNF), `indicadorPresenca`
+  (presencial/internet/teleatendimento/entrega_domicilio/fora_estabelecimento/
+  outros → indPres) e `indicadorConsumidorFinal` (sim|nao → indFinal) —
+  deixam de ser fixos/derivados; defaults preservados.
+- `nfesReferenciadas` (grupo `NFref`, chaves de 44 dígitos) — **devolução
+  exige NF-e referenciada** (422 sem ela; chave com tamanho errado → 422;
+  fail-loud no mapper).
+- **166/166 testes** (111 + 55): +7 (Ide configurável, defaults mantidos,
+  NF-ref no XML, guardas 422 de devolução/chave).
+
+### Segurança/CI (pendências da revisão)
+- **CI**: lint do painel admin (oxlint) no `build-and-test.yml` — pendência 4.
+- **Logs**: confirmado que nenhum XML completo é logado em nível Info
+  (apenas ids/status — pendência 5; sem mudança de código necessária).
+- **SECURITY.md**: e-mail real já configurado — pendência 6 (e-mail) fechada;
+  a confirmação da licença da Unimake.DFe segue como bloqueio do release.
+
 ## [1.7.0-alpha] — 2026-09-06
 
 ### Adicionado — OpenTelemetry/Prometheus + Redis (roadmap itens 4 e 5)

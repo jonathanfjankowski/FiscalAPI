@@ -55,3 +55,9 @@ jobs:
 
       - name: Format check
         run: dotnet format --verify-no-changes --no-restore
+
+      - name: Frontend lint (oxlint)
+        run: |
+          cd frontend
+          npm ci
+          npm run lint

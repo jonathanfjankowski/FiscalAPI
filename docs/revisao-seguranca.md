@@ -63,7 +63,11 @@ análise de dependências em runtime.** Repetir a revisão antes do 1.0 público
 3. ~~Rate limit por API key (além do IP) com Redis para múltiplas
    instâncias.~~ **Feito (1.7.0-alpha)** — janela fixa em Redis
    (`LimitadorRedis`), partição por API key caindo para IP, fail-open.
-4. `dotnet format` + oxlint no CI (hoje só build/test).
-5. Revisar logs: XMLs completos nunca devem ser logados em nível Info.
-6. Substituir o e-mail placeholder do SECURITY.md e confirmar a licença da
-   Unimake.DFe (bloqueadores do release público).
+4. ~~`dotnet format` + oxlint no CI (hoje só build/test).~~ **Feito
+   (1.8.0-alpha)** — oxlint do painel entrou no `build-and-test.yml`.
+5. ~~Revisar logs: XMLs completos nunca devem ser logados em nível Info.~~
+   **Verificado (1.8.0-alpha)** — nenhum XML completo em log; apenas
+   ids/status/motivos.
+6. ~~Substituir o e-mail placeholder do SECURITY.md~~ **Feito** (e-mail real
+   configurado). Confirmação da licença da Unimake.DFe segue como bloqueio
+   do release público.

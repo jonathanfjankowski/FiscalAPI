@@ -24,6 +24,7 @@ Tudo abaixo de "Feito" está implementado e coberto por testes automatizados;
 | 1.0-1.3 | **NFS-e Nacional DPS real** (`POST /nfse/dps`, layout 1.01 síncrono) + **substituição de NFS-e** (`POST {id}/substituicao`) | 1.5 |
 | v2-F2 + F3 | **Item rico + totais** (GTIN, CEST, unidade, desconto, frete/seguro/outras, fórmula v2 do `valorNota`) + **IPI/PIS/COFINS** por item com totais | 1.6 |
 | 1.0-4/5 | **OTel/Prometheus** (`/metrics`, métricas de negócio, alertas em `docs/observabilidade.md`) + **Redis** (rate limit distribuído por API key + cache compartilhado) | 1.7 |
+| v2-F4 | **NF-ref / devolução** (`finalidade`, `tipoOperacao`, `indPres`, `indFinal`, `nfesReferenciadas` → grupo NFref) + lint do painel no CI | 1.8 |
 
 ## Próximo (antes do 1.0 público)
 
