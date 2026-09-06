@@ -290,4 +290,99 @@ public class MapperEnviNFeV2Tests
 
         envi.GerarXML().OuterXml.Should().Contain("<ICMSUFDest>");
     }
+    [Fact]
+    public void Item_rico_mapeia_gtin_cest_unidade_e_desconto()
+    {
+        var item = ItemV2(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 18, Valor: 18)) with
+        {
+            Gtin = "7891234567890",
+            Cest = "0100400",
+            Unidade = "KG",
+            ValorDesconto = 10,
+        };
+        var nfe = Mapear(item);
+
+        var prod = nfe.Det.Single().Prod;
+        prod.CEAN.Should().Be("7891234567890");
+        prod.CEST.Should().Be("0100400");
+        prod.UCom.Should().Be("KG");
+        prod.UTrib.Should().Be("KG");
+        prod.VDesc.Should().Be(10);
+        nfe.Total.ICMSTot.VDesc.Should().Be(10);
+    }
+
+    [Fact]
+    public void Frete_seguro_e_outras_vao_para_icmstot_e_modfrete()
+    {
+        var req = Request(ItemV2(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 18, Valor: 18))) with
+        {
+            Totais = new TotaisDto(ValorProdutos: 100, ValorNota: 165,
+                ValorFrete: 50, ValorSeguro: 10, OutrasDespesas: 5),
+        };
+        var nfe = MapperEnviNFe.Criar(Documento(), TenantCompleto(), req, Ambiente.Homologacao)
+            .NFe[0].InfNFeField;
+
+        var tot = nfe.Total.ICMSTot;
+        tot.VFrete.Should().Be(50);
+        tot.VSeg.Should().Be(10);
+        tot.VOutro.Should().Be(5);
+    }
+
+    [Fact]
+    public void Ipi_tributado_mapeia_ipitrib_e_soma_no_total()
+    {
+        var item = ItemV2(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 18, Valor: 18)) with
+        {
+            ImpostosV2 = new ItemImpostosDtoV2(
+                Icms: new IcmsDto(Origem: 0, Cst: "00", BaseCalculo: 100, Aliquota: 18, Valor: 18),
+                Ipi: new IpiDto(Cst: "00", BaseCalculo: 100, Aliquota: 10, Valor: 10)),
+        };
+        var nfe = Mapear(item);
+
+        var ipiTrib = nfe.Det.Single().Imposto.IPI!.IPITrib!;
+        ipiTrib.CST.Should().Be("00");
+        ipiTrib.VBC.Should().Be(100);
+        ipiTrib.PIPI.Should().Be(10);
+        ipiTrib.VIPI.Should().Be(10);
+        nfe.Total.ICMSTot.VIPI.Should().Be(10);
+    }
+
+    [Fact]
+    public void Pis_e_cofins_tributados_mapeiam_e_somam_no_total()
+    {
+        var item = ItemV2(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 18, Valor: 18)) with
+        {
+            ImpostosV2 = new ItemImpostosDtoV2(
+                Icms: new IcmsDto(Origem: 0, Cst: "00", BaseCalculo: 100, Aliquota: 18, Valor: 18),
+                Pis: new PisDto(Cst: "01", BaseCalculo: 100, Aliquota: 1.65m, Valor: 1.65m),
+                Cofins: new CofinsDto(Cst: "01", BaseCalculo: 100, Aliquota: 7.6m, Valor: 7.6m)),
+        };
+        var nfe = Mapear(item);
+
+        var imposto = nfe.Det.Single().Imposto;
+        imposto.PIS!.PISAliq!.CST.Should().Be("01");
+        imposto.PIS.PISAliq.VPIS.Should().Be(1.65);
+        imposto.COFINS!.COFINSAliq!.CST.Should().Be("01");
+        imposto.COFINS.COFINSAliq.VCOFINS.Should().Be(7.6);
+        nfe.Total.ICMSTot.VPIS.Should().Be(1.65);
+        nfe.Total.ICMSTot.VCOFINS.Should().Be(7.6);
+    }
+
+    [Fact]
+    public void Pis_isento_mapeia_pisnt()
+    {
+        var item = ItemV2(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 18, Valor: 18)) with
+        {
+            ImpostosV2 = new ItemImpostosDtoV2(
+                Icms: new IcmsDto(Origem: 0, Cst: "00", BaseCalculo: 100, Aliquota: 18, Valor: 18),
+                Pis: new PisDto(Cst: "04")),
+        };
+
+        Mapear(item).Det.Single().Imposto.PIS!.PISNT!.CST.Should().Be("04");
+    }
 }

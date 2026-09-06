@@ -246,4 +246,115 @@ public class ImpostosV2WebhooksIntegracaoTests(EmissaoIntegracaoTests.Factory fa
             string url, string secret, string payload, CancellationToken cancellationToken) =>
             Task.FromResult(new ResultadoEntrega(true, 200, null));
     }
+    // ---------- v2 F2/F3: item rico, totais, IPI/PIS/COFINS ----------
+
+    [Fact]
+    public async Task Emissao_com_item_rico_e_totais_v2_aceita_202()
+    {
+        var client = Client();
+        var req = new HttpRequestMessage(HttpMethod.Post, "/v1/documentos-fiscais/nfe")
+        {
+            Content = JsonContent.Create(new
+            {
+                ambiente = "homologacao",
+                serie = 1,
+                destinatario = new { cnpjCpf = "11122233000144", nome = "Cliente Teste Ltda" },
+                itens = new[]
+                {
+                    new
+                    {
+                        codigo = "SKU1",
+                        descricao = "Produto a granel",
+                        ncm = "12345678",
+                        cfop = "5102",
+                        gtin = "7891234567890",
+                        cest = "0100400",
+                        unidade = "KG",
+                        quantidade = 2,
+                        valorUnitario = 50,
+                        valorTotal = 100,
+                        valorDesconto = 10,
+                        impostosV2 = new
+                        {
+                            icms = new { origem = 0, cst = "00", baseCalculo = 90, aliquota = 18, valor = 16.2 },
+                        },
+                    },
+                },
+                totais = new { valorProdutos = 100, valorNota = 110, valorFrete = 20 },
+            }),
+        };
+        req.Headers.Add("Idempotency-Key", $"rico-{Guid.NewGuid()}");
+
+        var resp = await client.SendAsync(req);
+        var rawRico = await resp.Content.ReadAsStringAsync();
+        resp.StatusCode.Should().Be(HttpStatusCode.Accepted, "body: {0}", rawRico);
+    }
+
+    [Fact]
+    public async Task Emissao_com_formula_v2_errada_retorna_422()
+    {
+        var client = Client();
+        var req = new HttpRequestMessage(HttpMethod.Post, "/v1/documentos-fiscais/nfe")
+        {
+            Content = JsonContent.Create(new
+            {
+                ambiente = "homologacao",
+                serie = 1,
+                destinatario = new { cnpjCpf = "11122233000144", nome = "Cliente Teste Ltda" },
+                itens = new[]
+                {
+                    new
+                    {
+                        codigo = "SKU1", descricao = "x", ncm = "12345678", cfop = "5102",
+                        quantidade = 1, valorUnitario = 100, valorTotal = 100, valorDesconto = 10,
+                        impostosV2 = new { icms = new { origem = 0, cst = "00", baseCalculo = 90, aliquota = 18, valor = 16.2 } },
+                    },
+                },
+                totais = new { valorProdutos = 100, valorNota = 100 }, // fórmula v2: 100 − 10 = 90
+            }),
+        };
+        req.Headers.Add("Idempotency-Key", $"f2-bad-{Guid.NewGuid()}");
+
+        var resp = await client.SendAsync(req);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        var conteudo = await resp.Content.ReadAsStringAsync();
+        conteudo.Should().Contain("Fórmula v2");
+    }
+
+    [Fact]
+    public async Task Emissao_nfe_com_ipi_pis_cofins_aceita_202()
+    {
+        var client = Client();
+        var req = new HttpRequestMessage(HttpMethod.Post, "/v1/documentos-fiscais/nfe")
+        {
+            Content = JsonContent.Create(new
+            {
+                ambiente = "homologacao",
+                serie = 1,
+                destinatario = new { cnpjCpf = "11122233000144", nome = "Cliente Teste Ltda" },
+                itens = new[]
+                {
+                    new
+                    {
+                        codigo = "SKU1", descricao = "x", ncm = "12345678", cfop = "5102",
+                        quantidade = 1, valorUnitario = 100, valorTotal = 100,
+                        impostosV2 = new
+                        {
+                            icms = new { origem = 0, cst = "00", baseCalculo = 100, aliquota = 18, valor = 18 },
+                            ipi = new { cst = "00", baseCalculo = 100, aliquota = 10, valor = 10 },
+                            pis = new { cst = "01", baseCalculo = 100, aliquota = 1.65, valor = 1.65 },
+                            cofins = new { cst = "01", baseCalculo = 100, aliquota = 7.6, valor = 7.6 },
+                        },
+                    },
+                },
+                totais = new { valorProdutos = 100, valorNota = 110 }, // vNF inclui IPI 10
+            }),
+        };
+        req.Headers.Add("Idempotency-Key", $"f3-{Guid.NewGuid()}");
+
+        var resp = await client.SendAsync(req);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.Accepted);
+    }
 }

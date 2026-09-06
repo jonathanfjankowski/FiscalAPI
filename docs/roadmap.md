@@ -22,6 +22,7 @@ Tudo abaixo de "Feito" está implementado e coberto por testes automatizados;
 | F6 | Comunidade (CONTRIBUTING, badges, roadmap público) | 1.2 |
 | v2-F1 + Infra | **ICMS completo + CSOSN** (`impostosV2`: CST 00–90, CSOSN 101–900, ST, FCP, DIFAL — Simples Nacional emite) + `PUT /v1/tenants/webhooks` self-service + secret cifrado em repouso | 1.4 |
 | 1.0-1.3 | **NFS-e Nacional DPS real** (`POST /nfse/dps`, layout 1.01 síncrono) + **substituição de NFS-e** (`POST {id}/substituicao`) | 1.5 |
+| v2-F2 + F3 | **Item rico + totais** (GTIN, CEST, unidade, desconto, frete/seguro/outras, fórmula v2 do `valorNota`) + **IPI/PIS/COFINS** por item com totais | 1.6 |
 
 ## Próximo (antes do 1.0 público)
 

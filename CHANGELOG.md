@@ -1,5 +1,27 @@
 # Changelog
 
+## [1.6.0-alpha] — 2026-09-06
+
+### Adicionado — contrato v2 F2 (item rico + totais) e F3 (IPI/PIS/COFINS)
+- **Item rico (F2)**: `cest` (7), `gtin` (EAN 8/12/13/14), `unidade`
+  (uCom/uTrib, default `UN`) e `valorDesconto` por item; `totais` ganha
+  `valorDesconto`, `valorFrete`, `valorSeguro` e `outrasDespesas`.
+  Frete > 0 muda `modFrete` para CIF (0).
+- **Grupos federais (F3)**: `impostosV2.ipi` (IPITrib/IPINT, cEnq default
+  999), `.pis` e `.cofins` (PISAliq/PISNT/PISOutr — CST 03 por quantidade
+  fora do contrato). NFC-e rejeita os grupos (422/fail-loud).
+- **Fórmula v2 do `valorNota`** (§5.2, determinística): com qualquer campo
+  novo presente, `valorNota = Σ brutos − descontos + frete + seguro +
+  outras + ST + FCP-ST + IPI` (conferida com tolerância de R$ 0,01 → 422
+  `"Fórmula v2"`; payload legado segue com a soma simples). Nota: FCP
+  próprio e DIFAL não compõem o vNF (fórmula oficial da SEFAZ).
+- `ICMSTot` completo: `vDesc`, `vFrete`, `vSeg`, `vOutro`, `vIPI`, `vPIS`,
+  `vCOFINS` somados dos itens.
+- Validação: aritmética por grupo federal; CST isento (IPI 01–05/51,
+  PIS/COFINS 04–09) com valor > 0 → 422.
+- **158/158 testes** (107 + 51): +14 novos (GTIN/CEST/unidade/desconto,
+  modFrete, IPI/PIS/COFINS no XML e nos totais, fórmula v2, guardas NFC-e).
+
 ## [1.5.0-alpha] — 2026-09-06
 
 ### Adicionado — NFS-e Nacional com transmissão DPS real

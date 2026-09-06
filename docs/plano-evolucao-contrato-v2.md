@@ -2,7 +2,8 @@
 
 > **Status (2026-09-06)**: **F1 (ICMS completo + CSOSN) e Infra
 > (self-service de webhook, G10) — implementadas** na `1.4.0-alpha`.
-> F2–F6 permanecem planejadas, na ordem recomendada abaixo.
+> **F2 (item rico + totais) e F3 (IPI/PIS/COFINS) — implementadas** na
+> `1.6.0-alpha`. F4–F6 permanecem planejadas, na ordem recomendada abaixo.
 >
 > **Escopo**: emissão de **NF-e (modelo 55) e NFC-e (modelo 65)**. A NFS-e
 > Nacional segue plano próprio (ver `docs/roadmap.md`).

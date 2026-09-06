@@ -216,4 +216,95 @@ public class ValidadorImpostosV2Tests
 
         erros.Should().BeEmpty();
     }
+    [Fact]
+    public void Pis_isento_com_valor_falha()
+    {
+        var item = new ItemDto(
+            Codigo: "SKU1", Descricao: "Produto", Ncm: "12345678", Cfop: "5102",
+            Quantidade: 1, ValorUnitario: 100, ValorTotal: 100, Impostos: null,
+            ImpostosV2: new ItemImpostosDtoV2(
+                Icms: new IcmsDto(Origem: 0, Cst: "00", BaseCalculo: 100, Aliquota: 18, Valor: 18),
+                Pis: new PisDto(Cst: "04", Valor: 1.65m)));
+
+        Validar(item).Should().Contain(e => e.Contains("isento — valor não é permitido"));
+    }
+
+    [Fact]
+    public void Pis_tributado_sem_trio_falha()
+    {
+        var item = new ItemDto(
+            Codigo: "SKU1", Descricao: "Produto", Ncm: "12345678", Cfop: "5102",
+            Quantidade: 1, ValorUnitario: 100, ValorTotal: 100, Impostos: null,
+            ImpostosV2: new ItemImpostosDtoV2(
+                Icms: new IcmsDto(Origem: 0, Cst: "00", BaseCalculo: 100, Aliquota: 18, Valor: 18),
+                Pis: new PisDto(Cst: "01", BaseCalculo: 100)));
+
+        Validar(item).Should().Contain(e => e.Contains("PIS CST 01 exige baseCalculo, aliquota e valor"));
+    }
+
+    [Fact]
+    public void Aritmetica_do_pis_errada_falha()
+    {
+        var item = new ItemDto(
+            Codigo: "SKU1", Descricao: "Produto", Ncm: "12345678", Cfop: "5102",
+            Quantidade: 1, ValorUnitario: 100, ValorTotal: 100, Impostos: null,
+            ImpostosV2: new ItemImpostosDtoV2(
+                Icms: new IcmsDto(Origem: 0, Cst: "00", BaseCalculo: 100, Aliquota: 18, Valor: 18),
+                Pis: new PisDto(Cst: "01", BaseCalculo: 100, Aliquota: 1.65m, Valor: 5)));
+
+        Validar(item).Should().Contain(e => e.Contains("impostosV2.pis.valor"));
+    }
+
+    [Fact]
+    public void Nfce_com_grupo_federal_falha()
+    {
+        var item = new ItemDto(
+            Codigo: "SKU1", Descricao: "Produto", Ncm: "12345678", Cfop: "5102",
+            Quantidade: 1, ValorUnitario: 100, ValorTotal: 100, Impostos: null,
+            ImpostosV2: new ItemImpostosDtoV2(
+                Icms: new IcmsDto(Origem: 0, Cst: "00", BaseCalculo: 100, Aliquota: 18, Valor: 18),
+                Cofins: new CofinsDto(Cst: "01", BaseCalculo: 100, Aliquota: 7.6m, Valor: 7.6m)));
+
+        var erros = new ValidadorImpostosV2().Validar([item], nfce: true);
+        erros.Should().Contain(e => e.Mensagem.Contains("NFC-e não admite"));
+    }
+
+    [Fact]
+    public void Formula_v2_do_total_conferida_campo_a_campo()
+    {
+        var itens = new List<ItemDto>
+        {
+            new("SKU1", "Produto", "12345678", "5102", 1, 100, 100, Impostos: null,
+                ImpostosV2: new ItemImpostosDtoV2(
+                    Icms: new IcmsDto(Origem: 0, Cst: "00", BaseCalculo: 100, Aliquota: 18, Valor: 18),
+                    Ipi: new IpiDto(Cst: "00", BaseCalculo: 100, Aliquota: 10, Valor: 10),
+                    Pis: new PisDto(Cst: "01", BaseCalculo: 100, Aliquota: 1.65m, Valor: 1.65m),
+                    Cofins: new CofinsDto(Cst: "01", BaseCalculo: 100, Aliquota: 7.6m, Valor: 7.6m)),
+                ValorDesconto: 10),
+        };
+        var totais = new TotaisDto(ValorProdutos: 100, ValorNota: 210.65m,
+            ValorFrete: 100, ValorSeguro: 10, OutrasDespesas: 5);
+
+        // 100 − 10 + 100 + 10 + 5 + IPI 10 = 215? Não: ST/FCP-ST 0, IPI 10 → 215. ValorNota errado de propósito abaixo.
+        var errosErrado = new ValidadorImpostosV2().ValidarTotais(totais, itens);
+        errosErrado.Should().NotBeEmpty();
+
+        var totaisOk = totais with { ValorNota = 215 };
+        var errosOk = new ValidadorImpostosV2().ValidarTotais(totaisOk, itens);
+        errosOk.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Formula_v2_somente_ativa_com_campo_novo()
+    {
+        // Payload legado: soma simples dos itens, sem campos novos.
+        var itens = new List<ItemDto>
+        {
+            new("SKU1", "Produto", "12345678", "5102", 2, 50, 100, Impostos: null),
+        };
+        var totais = new TotaisDto(ValorProdutos: 100, ValorNota: 100);
+
+        var erros = new ValidadorImpostosV2().ValidarTotais(totais, itens);
+        erros.Should().BeEmpty();
+    }
 }

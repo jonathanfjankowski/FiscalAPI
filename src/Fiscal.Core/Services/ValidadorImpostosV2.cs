@@ -14,17 +14,142 @@ public class ValidadorImpostosV2
     private static readonly string[] CstsSuportados = ["00", "10", "20", "40", "41", "51", "60", "70", "90"];
     private static readonly string[] CsosnsSuportados = ["101", "102", "103", "201", "202", "203", "300", "400", "500", "900"];
 
-    public IReadOnlyList<InconsistenciaFiscal> Validar(IReadOnlyList<ItemDto> itens)
+    public IReadOnlyList<InconsistenciaFiscal> Validar(IReadOnlyList<ItemDto> itens, bool nfce = false)
     {
         var erros = new List<InconsistenciaFiscal>();
         for (var i = 0; i < itens.Count; i++)
         {
-            var icms = itens[i].ImpostosV2?.Icms;
-            if (icms is null)
+            var v2 = itens[i].ImpostosV2;
+            if (v2 is null)
                 continue;
-            ValidarIcms(icms, i, itens[i].Codigo, erros);
+
+            if (v2.Icms is { } icms)
+                ValidarIcms(icms, i, itens[i].Codigo, erros);
+            ValidarFederais(v2, i, nfce, erros);
         }
         return erros;
+    }
+
+    /// <summary>
+    /// Fórmula do total da nota (v2 §5.2): qualquer campo novo de total
+    /// presente troca a regra — valorNota = Σ brutos − descontos + frete +
+    /// seguro + outras + ST + FCP-ST + IPI (tolerância R$ 0,01).
+    /// </summary>
+    /// <summary>Indica se o payload usa a fórmula v2 do total (algum campo novo presente).</summary>
+    public static bool FormulaV2Ativa(TotaisDto totais, IReadOnlyList<ItemDto> itens) =>
+        totais.ValorDesconto is not null || totais.ValorFrete is not null ||
+        totais.ValorSeguro is not null || totais.OutrasDespesas is not null ||
+        itens.Any(i => i.ValorDesconto is not null || i.ImpostosV2?.Ipi is not null);
+
+    public IReadOnlyList<InconsistenciaFiscal> ValidarTotais(TotaisDto totais, IReadOnlyList<ItemDto> itens)
+    {
+        var erros = new List<InconsistenciaFiscal>();
+
+        if (!FormulaV2Ativa(totais, itens))
+            return erros;
+
+        var brutos = itens.Sum(i => i.ValorTotal);
+        var descontos = itens.Sum(i => i.ValorDesconto ?? 0) + (totais.ValorDesconto ?? 0);
+        var st = itens.Sum(i => i.ImpostosV2?.Icms?.St?.ValorSt ?? 0);
+        var fcpSt = itens.Sum(i => i.ImpostosV2?.Icms?.St?.ValorFcpSt ?? 0);
+        var ipi = itens.Sum(i => i.ImpostosV2?.Ipi?.Valor ?? 0);
+
+        var esperado = brutos - descontos + (totais.ValorFrete ?? 0) + (totais.ValorSeguro ?? 0) +
+                       (totais.OutrasDespesas ?? 0) + st + fcpSt + ipi;
+
+        if (Math.Abs(esperado - totais.ValorNota) > Tolerancia)
+        {
+            erros.Add(new InconsistenciaFiscal("valorNota",
+                $"Fórmula v2: {brutos:N2} − {descontos:N2} (descontos) + frete/seguro/outras + ST {st:N2} + FCP-ST {fcpSt:N2} + IPI {ipi:N2} = {esperado:N2}, recebido {totais.ValorNota:N2}."));
+        }
+
+        return erros;
+    }
+
+    private static void ValidarFederais(ItemImpostosDtoV2 v2, int indice, bool nfce, List<InconsistenciaFiscal> erros)
+    {
+        if (nfce && (v2.Ipi is not null || v2.Pis is not null || v2.Cofins is not null))
+        {
+            erros.Add(new InconsistenciaFiscal($"itens[{indice}].impostosV2",
+                "NFC-e não admite os grupos IPI/PIS/COFINS."));
+            return;
+        }
+
+        if (v2.Ipi is { } ipi)
+        {
+            var cst = ipi.Cst?.Trim();
+            if (cst is null)
+                erros.Add(new InconsistenciaFiscal($"itens[{indice}].impostosV2.ipi.cst", "CST do IPI é obrigatório."));
+            else if (cst is "00" or "49" or "50" or "99")
+            {
+                if (ipi.BaseCalculo is null || ipi.Aliquota is null || ipi.Valor is null)
+                    erros.Add(new InconsistenciaFiscal($"itens[{indice}].impostosV2.ipi.valor",
+                        $"IPI CST {cst} exige baseCalculo, aliquota e valor."));
+                else
+                    Conferir($"itens[{indice}].impostosV2.ipi.valor", ipi.BaseCalculo, ipi.Aliquota, ipi.Valor, erros);
+            }
+            else if (cst is "01" or "02" or "03" or "04" or "05" or "51")
+            {
+                if (ipi.Valor is > 0)
+                    erros.Add(new InconsistenciaFiscal($"itens[{indice}].impostosV2.ipi.valor",
+                        $"IPI CST {cst} não tributado — valor não é permitido."));
+            }
+            else
+            {
+                erros.Add(new InconsistenciaFiscal($"itens[{indice}].impostosV2.ipi.cst",
+                    $"IPI CST '{cst}' fora do contrato (00, 01–05, 49, 50, 51, 99)."));
+            }
+        }
+
+        if (v2.Pis is { } pis)
+            ValidarPisCofins(pis.Cst, "pis", indice, pis.BaseCalculo, pis.Aliquota, pis.Valor, erros);
+        if (v2.Cofins is { } cofins)
+            ValidarPisCofins(cofins.Cst, "cofins", indice, cofins.BaseCalculo, cofins.Aliquota, cofins.Valor, erros);
+    }
+
+    private static void ValidarPisCofins(
+        string? cst, string grupo, int indice,
+        decimal? baseCalculo, decimal? aliquota, decimal? valor,
+        List<InconsistenciaFiscal> erros)
+    {
+        var campo = $"itens[{indice}].impostosV2.{grupo}";
+        cst = cst?.Trim();
+        if (cst is null)
+        {
+            erros.Add(new InconsistenciaFiscal($"{campo}.cst", $"CST do {grupo.ToUpperInvariant()} é obrigatório."));
+            return;
+        }
+
+        if (cst is "03")
+        {
+            erros.Add(new InconsistenciaFiscal($"{campo}.cst",
+                $"{grupo.ToUpperInvariant()} CST 03 (por quantidade) não suportado no contrato atual."));
+            return;
+        }
+
+        if (cst is "01" or "02")
+        {
+            if (baseCalculo is null || aliquota is null || valor is null)
+                erros.Add(new InconsistenciaFiscal($"{campo}.valor",
+                    $"{grupo.ToUpperInvariant()} CST {cst} exige baseCalculo, aliquota e valor."));
+            else
+                Conferir($"{campo}.valor", baseCalculo, aliquota, valor, erros);
+            return;
+        }
+
+        if (cst is "04" or "05" or "06" or "07" or "08" or "09")
+        {
+            if (valor is > 0)
+                erros.Add(new InconsistenciaFiscal($"{campo}.valor",
+                    $"{grupo.ToUpperInvariant()} CST {cst} isento — valor não é permitido."));
+            return;
+        }
+
+        if (cst is "99")
+            Conferir($"{campo}.valor", baseCalculo, aliquota, valor, erros);
+        else
+            erros.Add(new InconsistenciaFiscal($"{campo}.cst",
+                $"{grupo.ToUpperInvariant()} CST '{cst}' fora do contrato (01, 02, 04–09, 99)."));
     }
 
     private static void ValidarIcms(IcmsDto icms, int indice, string codigo, List<InconsistenciaFiscal> erros)

@@ -9,10 +9,10 @@
 
 | | |
 |---|---|
-| **Versão atual** | `1.5.0-alpha` (2026-09-06) |
+| **Versão atual** | `1.6.0-alpha` (2026-09-06) |
 | **Estágio** | Alpha — funcional ponta a ponta em sandbox; emissão real NF-e/NFC-e/NFS-e(DPS) implementada, homologação contra SEFAZ pendente de certificado A1 |
 | **Stack** | .NET 10 (API + Worker Hangfire), PostgreSQL/EF Core, React 19 + Vite + Tailwind v4 (painel admin), Unimake.DFe (adapters SEFAZ), QuestPDF (DANFE/DANFCe) |
-| **Testes** | 144/144 (96 unitários em `Fiscal.Core.Tests`, 48 de integração em `Fiscal.Api.Tests`) |
+| **Testes** | 158/158 (107 unitários em `Fiscal.Core.Tests`, 51 de integração em `Fiscal.Api.Tests`) |
 | **Licença** | MIT — **sujeito à confirmação da licença da `Unimake.DFe`** (bloqueio do release público) |
 | **Repositório** | https://github.com/jonathanfjankowski/FiscalAPI |
 
@@ -99,11 +99,11 @@ F3 (IPI/PIS/COFINS), F4 (NF-ref/devolução), F5 (reforma IBS/CBS/IS) e F6
 A lista completa e justificada está no README (`Limitações conhecidas`).
 As principais:
 
-- Mapper NF-e cobre ICMS completo via `impostosV2`, mas ainda **um grupo
-  de PIS/COFINS/IPI por item não existe** (F3), unidade fixa `UN`, GTIN
-  fixo `SEM GTIN` (F2), sem desconto/frete/seguro (F2), sem NF-ref (F4) e
-  sem transporte/volumes (backlog). Combinações não suportadas **falham
-  alto** em vez de transmitir errado.
+- Mapper NF-e cobre ICMS completo + IPI/PIS/COFINS + item rico (GTIN,
+  CEST, unidade, desconto, frete/seguro/outras) via `impostosV2`. Ficam
+  para as próximas fases do contrato v2: NF-ref/devolução (F4), reforma
+  IBS/CBS/IS (F5), DANFE oficial (F6) e transporte/volumes (backlog).
+  Combinações não suportadas **falham alto** em vez de transmitir errado.
 - PDF **simplificado** (sem código de barras/QR do leiaute oficial) — F6.
 - Certificado **A1 apenas** (A3/HSM fora de escopo).
 - NFS-e real exige credenciamento do prestador na SEFAZ Nacional +
@@ -118,8 +118,8 @@ As principais:
 | Indicador | Estado |
 |---|---|
 | Build + testes no CI | ✅ verde (`build-and-test.yml`) |
-| Cobertura de testes automatizados | 144 testes — segurança, ICMS/CSOSN, DPS/substituição, contingência, DFe, webhooks, painel |
+| Cobertura de testes automatizados | 158 testes — segurança, ICMS/CSOSN, IPI/PIS/COFINS, DPS/substituição, contingência, DFe, webhooks, painel |
 | `dotnet format --verify-no-changes` | ✅ exigido no CI |
 | Migrations | Aplicadas automaticamente no startup (hand-written com atributos `[Migration]`/`[DbContext]`) |
-| Documentação | README + 17 docs em `docs/` + CHANGELOG completo 0.1 → 1.5 |
-| Dívida documentada | EPEC/NFC-e offline, OTel, Redis, PITR, contrato v2 F2–F6 |
+| Documentação | README + 17 docs em `docs/` + CHANGELOG completo 0.1 → 1.6 |
+| Dívida documentada | EPEC/NFC-e offline, OTel, Redis, PITR, contrato v2 F4–F6 |

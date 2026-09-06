@@ -762,6 +762,10 @@ Todos os campos são opcionais, mas um endereço consistente é necessário para
 | `valorTotal` | número | sim | ≥ 0 — deve bater com `quantidade × valorUnitario` (tolerância 0,01) |
 | `impostos` | array | não | [`Imposto`](#imposto) — **legado** |
 | `impostosV2` | objeto | não | [`ImpostosV2`](#impostosv2) — grupos tipados (v2) |
+| `cest` | string | não | 7 dígitos (v2 F2) |
+| `gtin` | string | não | EAN 8/12/13/14 (v2 F2) — default `"SEM GTIN"` |
+| `unidade` | string | não | Até 6 (uCom/uTrib) — default `"UN"` (v2 F2) |
+| `valorDesconto` | número | não | ≥ 0 — vDesc do item (v2 F2) |
 
 > **`impostos` OU `impostosV2`, nunca os dois no mesmo item** — enviar os dois → `400`.
 
@@ -830,6 +834,21 @@ FCP e DIFAL. Referência: [docs/plano-evolucao-contrato-v2.md](plano-evolucao-co
 | `baseDestino` / `aliquotaDestino` / `valorIcmsDestino` / `valorIcmsOrigem` | número | vBCUFDest/pICMSUFDest/vICMSUFDest/vICMSUFRemet |
 | `fcpPercentualDestino` / `valorFcpDestino` | número | pFCPUFDest/vFCPUFDest |
 
+**`impostosV2.ipi`** (`Ipi`) — só NF-e (NFC-e rejeita):
+
+| Campo | Tipo | Regras |
+|---|---|---|
+| `cst` | string | `00/49/50/99` tributado (exige trio); `01–05/51` não tributado |
+| `cEnq` | string | 3 dígitos — default `999` |
+| `baseCalculo` / `aliquota` / `valor` | número | trio do IPI |
+
+**`impostosV2.pis`** e **`impostosV2.cofins`** — só NF-e:
+
+| Campo | Tipo | Regras |
+|---|---|---|
+| `cst` | string | `01/02` tributado (exige trio); `04–09` isento (sem valor); `99` outras. `03` (por quantidade) não suportado |
+| `baseCalculo` / `aliquota` / `valor` | número | trio |
+
 Exemplo completo — CST 10 (tributada + ST):
 
 ```json
@@ -850,7 +869,18 @@ Exemplo completo — CST 10 (tributada + ST):
 | Campo | Tipo | Obrigatório | Regras |
 |---|---|---|---|
 | `valorProdutos` | número | sim | ≥ 0 |
-| `valorNota` | número | sim | ≥ 0 — deve bater com a soma dos `valorTotal` dos itens (tolerância 0,01) |
+| `valorNota` | número | sim | ≥ 0 — regra abaixo (tolerância 0,01) |
+| `valorDesconto` | número | não | ≥ 0 (v2 F2) |
+| `valorFrete` | número | não | ≥ 0 — compõe o total da nota; `modFrete` vira CIF (v2 F2) |
+| `valorSeguro` | número | não | ≥ 0 (v2 F2) |
+| `outrasDespesas` | número | não | ≥ 0 (v2 F2) |
+
+**Fórmula do `valorNota`** (determinística):
+
+- Payload atual (sem campos novos): `valorNota = Σ valorTotal` dos itens.
+- **Fórmula v2** (qualquer campo novo preenchido, incluindo desconto por
+  item): `valorNota = Σ brutos − descontos + frete + seguro + outras + ST +
+  FCP-ST + IPI` (FCP próprio e DIFAL não compõem o total, como na SEFAZ).
 
 ### `Pagamento`
 
@@ -904,6 +934,7 @@ Aplicada antes de qualquer efeito, em forma de `ValidationProblemDetails` (ver [
   2. `quantidade × valorUnitario` ≠ `valorTotal` do item → `campo: "itens[i].valorTotal"`.
   3. `baseCalculo × aliquota / 100` ≠ `valor` do imposto → `campo: "impostos[i].valor"` (só quando os três campos são informados). No `impostosV2` a aritmética se estende a ST, FCP, FCP-ST e DIFAL.
   4. CST/CSOSN de isenção (`40`, `41`, `50`, `60`; CSOSN `300`, `400`) com `valor > 0` → `campo: "impostos[i].valor"`.
+- **Fórmula v2 do `valorNota`** com campo novo presente e total incoerente (título `"Inconsistência no total da nota"`).
 - **Regras declarativas do `impostosV2`** (título `"Inconsistência nos grupos de imposto v2"`):
   1. `cst` e `csosn` no mesmo grupo (ou nenhum dos dois).
   2. `cst`/`csosn` fora das listas suportadas (ex.: CST `30`, `ICMSPart` — fail-loud).

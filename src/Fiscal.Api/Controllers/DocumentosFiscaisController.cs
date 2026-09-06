@@ -265,9 +265,13 @@ public class DocumentosFiscaisController : ControllerBase
         if (existente is not null)
             return Ok(ParaResponse(existente));
 
-        // 2) Validação aritmética.
+        // 2) Validação aritmética. Com a fórmula v2 do total (docs/plano-
+        // evolucao-contrato-v2.md §5.2), a soma legada (itens = valorNota)
+        // não se aplica — confere-se contra os brutos para validar o resto.
         var docValidar = new DocumentoParaValidar(
-            ValorTotal: req.Totais.ValorNota,
+            ValorTotal: ValidadorImpostosV2.FormulaV2Ativa(req.Totais, req.Itens)
+                ? req.Itens.Sum(i => i.ValorTotal)
+                : req.Totais.ValorNota,
             Itens: req.Itens.Select(i => new ItemFiscal(
                 i.Codigo, i.Quantidade, i.ValorUnitario, i.ValorTotal)).ToList(),
             Impostos: req.Itens
@@ -285,8 +289,8 @@ public class DocumentosFiscaisController : ControllerBase
                 extensions: new Dictionary<string, object?> { ["campo"] = primeira.Campo });
         }
 
-        // 2b) Validação declarativa dos grupos v2 (CST/CSOSN, ST, FCP, DIFAL).
-        var inconsistenciasV2 = _validadorImpostosV2.Validar(req.Itens);
+        // 2b) Validação declarativa dos grupos v2 (CST/CSOSN, ST, FCP, DIFAL, IPI/PIS/COFINS).
+        var inconsistenciasV2 = _validadorImpostosV2.Validar(req.Itens, nfce: modelo == 65);
         if (inconsistenciasV2.Count > 0)
         {
             var primeiraV2 = inconsistenciasV2[0];
@@ -295,6 +299,17 @@ public class DocumentosFiscaisController : ControllerBase
                 title: "Inconsistência nos grupos de imposto v2",
                 detail: primeiraV2.Mensagem,
                 extensions: new Dictionary<string, object?> { ["campo"] = primeiraV2.Campo });
+        }
+
+        // 2c) Fórmula do total da nota — v2 quando qualquer campo novo está presente.
+        var inconsistenciasTotais = _validadorImpostosV2.ValidarTotais(req.Totais, req.Itens);
+        if (inconsistenciasTotais.Count > 0)
+        {
+            return Problem(
+                statusCode: 422,
+                title: "Inconsistência no total da nota",
+                detail: inconsistenciasTotais[0].Mensagem,
+                extensions: new Dictionary<string, object?> { ["campo"] = "valorNota" });
         }
 
         return await AceitarAsync(

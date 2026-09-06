@@ -21,11 +21,12 @@ namespace Fiscal.Adapters.Unimake;
 /// operação), unidade = "UN", transp sem ocorrência de transporte.
 /// ICMS: lista plana legada ('impostos', CST 00/40/41/50) ou grupo tipado v2
 /// ('impostosV2' — CST 00–90, CSOSN 101–900, ST, FCP e DIFAL; ver
-/// docs/plano-evolucao-contrato-v2.md). IPI/PIS/COFINS entram na fase F3.
+/// docs/plano-evolucao-contrato-v2.md). Item rico (GTIN/CEST/unidade/
+/// desconto), frete/seguro/outras e IPI/PIS/COFINS desde a F2/F3.
 /// </summary>
 public static class MapperEnviNFe
 {
-    private const string VerProc = "FiscalAPI 1.5.0";
+    private const string VerProc = "FiscalAPI 1.6.0";
 
     public static EnviNFe Criar(DocumentoFiscal doc, Tenant tenant, EmissaoRequest req, Ambiente ambiente)
     {
@@ -62,9 +63,14 @@ public static class MapperEnviNFe
                 Versao = "4.00",
                 Ide = MapearIde(doc, tenant, req, ambiente, nfce, ufEmit),
                 Emit = MapearEmit(tenant, ufEmit),
-                Det = MapearDets(req),
+                Det = MapearDets(req, nfce),
                 Total = MapearTotal(req),
-                Transp = new Transp { ModFrete = ModalidadeFrete.SemOcorrenciaTransporte },
+                Transp = new Transp
+                {
+                    ModFrete = req.Totais.ValorFrete is > 0
+                        ? ModalidadeFrete.ContratacaoFretePorContaRemetente_CIF
+                        : ModalidadeFrete.SemOcorrenciaTransporte,
+                },
                 Pag = MapearPag(req, nfce),
             }
         };
@@ -198,7 +204,7 @@ public static class MapperEnviNFe
         return result;
     }
 
-    private static List<Det> MapearDets(EmissaoRequest req)
+    private static List<Det> MapearDets(EmissaoRequest req, bool nfce)
     {
         var dets = new List<Det>(req.Itens.Count);
         for (var i = 0; i < req.Itens.Count; i++)
@@ -217,13 +223,25 @@ public static class MapperEnviNFe
             if (icmsUfDest is not null)
                 imposto.ICMSUFDest = icmsUfDest;
 
+            // Grupos federais (v2 F3) — só NF-e; NFC-e não os admite.
+            var v2 = item.ImpostosV2;
+            if (v2 is not null && nfce && (v2.Ipi is not null || v2.Pis is not null || v2.Cofins is not null))
+                throw new ErroNaoRecuperavelException(
+                    $"Item {i + 1} ('{item.Codigo}'): NFC-e não admite os grupos IPI/PIS/COFINS.");
+            if (v2?.Ipi is not null) imposto.IPI = MapearIpi(v2.Ipi, i + 1, item.Codigo);
+            if (v2?.Pis is not null) imposto.PIS = MapearPis(v2.Pis, i + 1, item.Codigo);
+            if (v2?.Cofins is not null) imposto.COFINS = MapearCofins(v2.Cofins, i + 1, item.Codigo);
+
+            var unidade = string.IsNullOrWhiteSpace(item.Unidade) ? "UN" : item.Unidade;
+
             dets.Add(new Det
             {
                 NItem = i + 1,
                 Prod = new Prod
                 {
                     CProd = item.Codigo,
-                    CEAN = "SEM GTIN",
+                    CEAN = string.IsNullOrWhiteSpace(item.Gtin) ? "SEM GTIN" : item.Gtin,
+                    CEST = string.IsNullOrWhiteSpace(item.Cest) ? null : item.Cest,
                     XProd = item.Descricao,
                     NCM = string.IsNullOrWhiteSpace(item.Ncm)
                         ? throw new ErroNaoRecuperavelException($"Item {i + 1} ('{item.Codigo}') sem NCM — obrigatório na NF-e.")
@@ -231,19 +249,149 @@ public static class MapperEnviNFe
                     CFOP = string.IsNullOrWhiteSpace(item.Cfop)
                         ? throw new ErroNaoRecuperavelException($"Item {i + 1} ('{item.Codigo}') sem CFOP — obrigatório na NF-e.")
                         : item.Cfop,
-                    UCom = "UN",
+                    UCom = unidade,
                     QCom = item.Quantidade,
                     VUnCom = item.ValorUnitario,
                     VProd = (double)item.ValorTotal,
-                    UTrib = "UN",
+                    UTrib = unidade,
                     QTrib = item.Quantidade,
                     VUnTrib = item.ValorUnitario,
                     IndTot = SimNao.Sim,
                 },
                 Imposto = imposto,
             });
+            if (item.ValorDesconto is { } desconto)
+                dets[^1].Prod.VDesc = (double)desconto;
         }
         return dets;
+    }
+
+    private static IPI MapearIpi(IpiDto ipi, int numeroItem, string codigoItem)
+    {
+        var cst = ipi.Cst.Trim();
+        var grupo = new IPI
+        {
+            CEnq = string.IsNullOrWhiteSpace(ipi.CEnq) ? "999" : ipi.CEnq,
+        };
+
+        if (cst is "00" or "49" or "50" or "99")
+        {
+            if (ipi.BaseCalculo is null || ipi.Aliquota is null || ipi.Valor is null)
+                throw new ErroNaoRecuperavelException(
+                    $"Item {numeroItem} ('{codigoItem}'): IPI CST {cst} exige baseCalculo, aliquota e valor.");
+            grupo.IPITrib = new IPITrib
+            {
+                CST = cst,
+                VBC = (double)ipi.BaseCalculo.Value,
+                PIPI = (double)ipi.Aliquota.Value,
+                VIPI = (double)ipi.Valor.Value,
+            };
+            return grupo;
+        }
+
+        if (cst is "01" or "02" or "03" or "04" or "05" or "51")
+        {
+            if (ipi.Valor is > 0)
+                throw new ErroNaoRecuperavelException(
+                    $"Item {numeroItem} ('{codigoItem}'): IPI CST {cst} não tributado — valor não é permitido.");
+            grupo.IPINT = new IPINT { CST = cst };
+            return grupo;
+        }
+
+        throw new ErroNaoRecuperavelException(
+            $"Item {numeroItem} ('{codigoItem}'): IPI CST '{cst}' fora do contrato (00, 01–05, 49, 50, 51, 99).");
+    }
+
+    private static PIS MapearPis(PisDto pis, int numeroItem, string codigoItem)
+    {
+        var cst = pis.Cst.Trim();
+
+        if (cst is "01" or "02")
+        {
+            if (pis.BaseCalculo is null || pis.Aliquota is null || pis.Valor is null)
+                throw new ErroNaoRecuperavelException(
+                    $"Item {numeroItem} ('{codigoItem}'): PIS CST {cst} exige baseCalculo, aliquota e valor.");
+            return new PIS
+            {
+                PISAliq = new PISAliq
+                {
+                    CST = cst,
+                    VBC = (double)pis.BaseCalculo.Value,
+                    PPIS = (double)pis.Aliquota.Value,
+                    VPIS = (double)pis.Valor.Value,
+                },
+            };
+        }
+
+        if (cst is "03")
+            throw new ErroNaoRecuperavelException(
+                $"Item {numeroItem} ('{codigoItem}'): PIS CST 03 (por quantidade) não suportado no contrato atual.");
+
+        if (cst is "04" or "05" or "06" or "07" or "08" or "09")
+        {
+            if (pis.Valor is > 0)
+                throw new ErroNaoRecuperavelException(
+                    $"Item {numeroItem} ('{codigoItem}'): PIS CST {cst} isento — valor não é permitido.");
+            return new PIS { PISNT = new PISNT { CST = cst } };
+        }
+
+        if (cst is "99")
+        {
+            var outr = new PISOutr { CST = cst };
+            if (pis.BaseCalculo is { } bc) outr.VBC = (double)bc;
+            if (pis.Aliquota is { } p) outr.PPIS = (double)p;
+            if (pis.Valor is { } v) outr.VPIS = (double)v;
+            return new PIS { PISOutr = outr };
+        }
+
+        throw new ErroNaoRecuperavelException(
+            $"Item {numeroItem} ('{codigoItem}'): PIS CST '{cst}' fora do contrato (01, 02, 04–09, 99).");
+    }
+
+    private static COFINS MapearCofins(CofinsDto cofins, int numeroItem, string codigoItem)
+    {
+        var cst = cofins.Cst.Trim();
+
+        if (cst is "01" or "02")
+        {
+            if (cofins.BaseCalculo is null || cofins.Aliquota is null || cofins.Valor is null)
+                throw new ErroNaoRecuperavelException(
+                    $"Item {numeroItem} ('{codigoItem}'): COFINS CST {cst} exige baseCalculo, aliquota e valor.");
+            return new COFINS
+            {
+                COFINSAliq = new COFINSAliq
+                {
+                    CST = cst,
+                    VBC = (double)cofins.BaseCalculo.Value,
+                    PCOFINS = (double)cofins.Aliquota.Value,
+                    VCOFINS = (double)cofins.Valor.Value,
+                },
+            };
+        }
+
+        if (cst is "03")
+            throw new ErroNaoRecuperavelException(
+                $"Item {numeroItem} ('{codigoItem}'): COFINS CST 03 (por quantidade) não suportado no contrato atual.");
+
+        if (cst is "04" or "05" or "06" or "07" or "08" or "09")
+        {
+            if (cofins.Valor is > 0)
+                throw new ErroNaoRecuperavelException(
+                    $"Item {numeroItem} ('{codigoItem}'): COFINS CST {cst} isento — valor não é permitido.");
+            return new COFINS { COFINSNT = new COFINSNT { CST = cst } };
+        }
+
+        if (cst is "99")
+        {
+            var outr = new COFINSOutr { CST = cst };
+            if (cofins.BaseCalculo is { } bc) outr.VBC = (double)bc;
+            if (cofins.Aliquota is { } p) outr.PCOFINS = (double)p;
+            if (cofins.Valor is { } v) outr.VCOFINS = (double)v;
+            return new COFINS { COFINSOutr = outr };
+        }
+
+        throw new ErroNaoRecuperavelException(
+            $"Item {numeroItem} ('{codigoItem}'): COFINS CST '{cst}' fora do contrato (01, 02, 04–09, 99).");
     }
 
     private static ICMS MapearICMS(ImpostoDto? imposto, int numeroItem, string codigoItem)
@@ -688,9 +836,23 @@ public static class MapperEnviNFe
     {
         decimal vBc = 0, vIcms = 0, vBcSt = 0, vSt = 0, vFcp = 0, vFcpSt = 0, vFcpStRet = 0,
                 vFcpUfDest = 0, vIcmsUfDest = 0, vIcmsUfRemet = 0;
+        var vDesc = req.Totais.ValorDesconto ?? 0;
+        var vFrete = req.Totais.ValorFrete ?? 0;
+        var vSeg = req.Totais.ValorSeguro ?? 0;
+        var vOutro = req.Totais.OutrasDespesas ?? 0;
+        decimal vIpi = 0, vPis = 0, vCofins = 0;
 
         foreach (var item in req.Itens)
         {
+            if (item.ValorDesconto is { } descontoItem)
+                vDesc += descontoItem;
+            if (item.ImpostosV2?.Ipi is { } ipi)
+                vIpi += ipi.Valor ?? 0;
+            if (item.ImpostosV2?.Pis is { } pis)
+                vPis += pis.Valor ?? 0;
+            if (item.ImpostosV2?.Cofins is { } cofins)
+                vCofins += cofins.Valor ?? 0;
+
             if (item.ImpostosV2?.Icms is { } icms)
             {
                 vBc += icms.BaseCalculo ?? 0;
@@ -735,6 +897,13 @@ public static class MapperEnviNFe
         if (vFcpUfDest != 0) tot.VFCPUFDest = (double)vFcpUfDest;
         if (vIcmsUfDest != 0) tot.VICMSUFDest = (double)vIcmsUfDest;
         if (vIcmsUfRemet != 0) tot.VICMSUFRemet = (double)vIcmsUfRemet;
+        if (vDesc != 0) tot.VDesc = (double)vDesc;
+        if (vFrete != 0) tot.VFrete = (double)vFrete;
+        if (vSeg != 0) tot.VSeg = (double)vSeg;
+        if (vOutro != 0) tot.VOutro = (double)vOutro;
+        if (vIpi != 0) tot.VIPI = (double)vIpi;
+        if (vPis != 0) tot.VPIS = (double)vPis;
+        if (vCofins != 0) tot.VCOFINS = (double)vCofins;
 
         return new Total { ICMSTot = tot };
     }

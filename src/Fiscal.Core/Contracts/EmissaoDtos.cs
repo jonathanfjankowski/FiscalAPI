@@ -37,14 +37,40 @@ public record ItemDto(
     [Range(0, double.MaxValue)] decimal ValorUnitario,
     [Range(0, double.MaxValue)] decimal ValorTotal,
     List<ImpostoDto>? Impostos,
-    ItemImpostosDtoV2? ImpostosV2 = null);
+    ItemImpostosDtoV2? ImpostosV2 = null,
+    [MaxLength(7)] string? Cest = null,          // v2 F2 — 7 dígitos
+    [MaxLength(14)] string? Gtin = null,         // v2 F2 — EAN 8/12/13/14
+    [MaxLength(6)] string? Unidade = null,       // v2 F2 — uCom/uTrib, default "UN"
+    [Range(0, double.MaxValue)] decimal? ValorDesconto = null);  // v2 F2 — vDesc do item
 
 // Contrato v2 dos grupos de imposto (evolução aditiva — ver docs/plano-evolucao-contrato-v2.md).
 // Um item usa 'impostos' (legado, ICMS 00/40/41/50) OU 'impostosV2' — nunca os dois.
 // A API não calcula tributos: valores chegam prontos; validamos a aritmética (tolerância R$ 0,01).
 
 public record ItemImpostosDtoV2(
-    IcmsDto? Icms);
+    IcmsDto? Icms = null,
+    IpiDto? Ipi = null,        // v2 F3 — regime normal
+    PisDto? Pis = null,        // v2 F3
+    CofinsDto? Cofins = null); // v2 F3
+
+public record IpiDto(
+    [Required, MaxLength(2)] string Cst,   // 00/49/50/99 tributado; 01–05/51 não tributado
+    [MaxLength(3)] string? CEnq = null,    // cEnq — default 999
+    decimal? BaseCalculo = null,
+    decimal? Aliquota = null,
+    decimal? Valor = null);
+
+public record PisDto(
+    [Required, MaxLength(2)] string Cst,   // 01/02 tributado; 04–09 isento; 99 outras
+    decimal? BaseCalculo = null,
+    decimal? Aliquota = null,
+    decimal? Valor = null);
+
+public record CofinsDto(
+    [Required, MaxLength(2)] string Cst,
+    decimal? BaseCalculo = null,
+    decimal? Aliquota = null,
+    decimal? Valor = null);
 
 public record IcmsDto(
     int? Origem = null,                // 0–8 (tabela A) — default 0 (nacional)
@@ -89,7 +115,11 @@ public record DifalDto(
 
 public record TotaisDto(
     [Range(0, double.MaxValue)] decimal ValorProdutos,
-    [Range(0, double.MaxValue)] decimal ValorNota);
+    [Range(0, double.MaxValue)] decimal ValorNota,
+    [Range(0, double.MaxValue)] decimal? ValorDesconto = null,   // v2 F2 — desconto no total
+    [Range(0, double.MaxValue)] decimal? ValorFrete = null,      // v2 F2 — compõe o total da nota
+    [Range(0, double.MaxValue)] decimal? ValorSeguro = null,     // v2 F2
+    [Range(0, double.MaxValue)] decimal? OutrasDespesas = null); // v2 F2
 
 public record PagamentoDto(
     [Required, MaxLength(2)] string Forma,
