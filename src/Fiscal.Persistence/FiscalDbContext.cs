@@ -106,7 +106,7 @@ public class FiscalDbContext : DbContext
             b.Property(x => x.XmlRetornoSefaz).HasColumnName("xml_retorno_sefaz");
             b.Property(x => x.ProtocoloAutorizacao).HasColumnName("protocolo_autorizacao").HasMaxLength(20);
             b.Property(x => x.ReciboLote).HasColumnName("recibo_lote").HasMaxLength(20);
-            b.Property(x => x.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(20).IsRequired();
+            b.Property(x => x.Status).HasColumnName("status").HasConversion<string>().HasMaxLength(30).IsRequired();
             b.Property(x => x.MotivoStatus).HasColumnName("motivo_status");
             b.Property(x => x.Tentativas).HasColumnName("tentativas");
             b.Property(x => x.ModoContingencia).HasColumnName("modo_contingencia").HasMaxLength(20);
@@ -149,7 +149,7 @@ public class FiscalDbContext : DbContext
             b.Property(x => x.XmlRetorno).HasColumnName("xml_retorno");
             b.Property(x => x.Protocolo).HasColumnName("protocolo").HasMaxLength(20);
             b.Property(x => x.MotivoStatus).HasColumnName("motivo_status");
-            b.Property(x => x.Status).HasColumnName("status").HasMaxLength(20).IsRequired();
+            b.Property(x => x.Status).HasColumnName("status").HasMaxLength(30).IsRequired();
             b.Property(x => x.Tentativas).HasColumnName("tentativas");
             b.Property(x => x.ProximaTentativaEm).HasColumnName("proxima_tentativa_em");
             b.Property(x => x.CriadoEm).HasColumnName("criado_em");
@@ -202,7 +202,7 @@ public class FiscalDbContext : DbContext
             b.Property(x => x.DocumentoId).HasColumnName("documento_id");
             b.Property(x => x.TipoEvento).HasColumnName("tipo_evento").HasMaxLength(40).IsRequired();
             b.Property(x => x.Payload).HasColumnName("payload").HasColumnType("jsonb").IsRequired();
-            b.Property(x => x.Status).HasColumnName("status").HasMaxLength(20).IsRequired();
+            b.Property(x => x.Status).HasColumnName("status").HasMaxLength(30).IsRequired();
             b.Property(x => x.Tentativas).HasColumnName("tentativas");
             b.Property(x => x.ProximaTentativaEm).HasColumnName("proxima_tentativa_em");
             b.Property(x => x.UltimoStatusCode).HasColumnName("ultimo_status_code");
@@ -249,7 +249,7 @@ public class FiscalDbContext : DbContext
             b.Property(x => x.Tipo).HasColumnName("tipo").HasMaxLength(6).IsRequired();
             b.Property(x => x.Justificativa).HasColumnName("justificativa");
             b.Property(x => x.IdempotencyKey).HasColumnName("idempotency_key").HasMaxLength(100).IsRequired();
-            b.Property(x => x.Status).HasColumnName("status").HasMaxLength(20).IsRequired();
+            b.Property(x => x.Status).HasColumnName("status").HasMaxLength(30).IsRequired();
             b.Property(x => x.Protocolo).HasColumnName("protocolo").HasMaxLength(20);
             b.Property(x => x.MotivoStatus).HasColumnName("motivo_status");
             b.Property(x => x.Tentativas).HasColumnName("tentativas");
