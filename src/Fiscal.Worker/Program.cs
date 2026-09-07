@@ -9,6 +9,7 @@ using Fiscal.Worker.Jobs;
 using Fiscal.Worker.Delivery;
 using Hangfire;
 using Hangfire.PostgreSql;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
 using OpenTelemetry.Metrics;
 using OpenTelemetry.Resources;
@@ -119,42 +120,47 @@ builder.Services.AddHangfireServer();
 
 var host = builder.Build();
 
+// Jobs recorrentes via IRecurringJobManager (DI) — a API estática
+// (RecurringJob.AddOrUpdate) exige JobStorage.Current, que só é inicializado
+// quando o HangfireServer (hosted service) sobe; aqui o host ainda não rodou.
+var recorrentes = host.Services.GetRequiredService<IRecurringJobManager>();
+
 // Job recorrente: varre CONTINGENCIA e reenfileira (a cada 30s).
-RecurringJob.AddOrUpdate<VarrerContingenciaJob>(
+recorrentes.AddOrUpdate<VarrerContingenciaJob>(
     "varrer-contingencia",
     j => j.ExecutarAsync(CancellationToken.None),
-    "*/30 * * * * *");
+    "15,45 * * * * *");
 
 // Job recorrente: reenfileira eventos (cancelamento/CC-e/inutilização) cujo
 // retry de transmissão venceu (a cada 30s).
-RecurringJob.AddOrUpdate<VarrerEventosJob>(
+recorrentes.AddOrUpdate<VarrerEventosJob>(
     "varrer-eventos",
     j => j.ExecutarAsync(CancellationToken.None),
-    "*/30 * * * * *");
+    "15,45 * * * * *");
 
 // Job recorrente: entrega webhooks da outbox cujo retry venceu (a cada 60s).
-RecurringJob.AddOrUpdate<VarrerWebhooksJob>(
+recorrentes.AddOrUpdate<VarrerWebhooksJob>(
     "varrer-webhooks",
     j => j.ExecutarAsync(CancellationToken.None),
-    "*/60 * * * * *");
+    "* * * * *");
 
 // Job recorrente: distribuição DFe (NSU) por tenant/ambiente (a cada 60s).
-RecurringJob.AddOrUpdate<SincronizarDistribuicaoDFeJob>(
+recorrentes.AddOrUpdate<SincronizarDistribuicaoDFeJob>(
     "sincronizar-distribuicao-dfe",
     j => j.ExecutarAsync(CancellationToken.None),
-    "*/60 * * * * *");
+    "* * * * *");
 
 // Job recorrente: retry de manifestações pendentes (a cada 30s).
-RecurringJob.AddOrUpdate<VarrerManifestacoesJob>(
+recorrentes.AddOrUpdate<VarrerManifestacoesJob>(
     "varrer-manifestacoes",
     j => j.ExecutarAsync(CancellationToken.None),
-    "*/30 * * * * *");
+    "15,45 * * * * *");
 
 // Job recorrente: alerta de certificados vencendo (diário, 12:00).
-RecurringJob.AddOrUpdate<AlertarCertificadosVencendoJob>(
+recorrentes.AddOrUpdate<AlertarCertificadosVencendoJob>(
     "alertar-certificados-vencendo",
     j => j.ExecutarAsync(CancellationToken.None),
-    "0 0 12 * * *");
+    "1 0 12 * * *");
 
 host.Run();
 
