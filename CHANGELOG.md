@@ -2,6 +2,16 @@
 
 ## [Não lançada]
 
+### Corrigido
+- **DIFAL: `vICMSUFDest` com o valor errado (lib + API consistentemente
+  errados)** — o validador exigia `valorIcmsDestino = baseDestino × interna
+  cheia`, mas o MOC (rejeições SEFAZ **815/816**) define
+  `vICMSUFDest = vBCUFDest × (pICMSUFDest − pICMSInter)`: o ICMS próprio já
+  remete `base × interestadual` à UF de origem. Em UFs com o validador ativo,
+  toda NF-e com DIFAL rejeitaria com 815; nas demais, o XML passaria e o
+  emissor remeteria o diferencial a mais ao estado de destino. Ex. (BC 1000,
+  inter 7%, interna 18%): antes 180,00 → agora 110,00.
+
 ### Adicionado
 - **`indicadorIntermediador` / `cnpjIntermediador` no `EmissaoRequest`**
   (NT 2020.006 — grupo `indIntermed`/`infIntermed`, só NF-e mod 55). Default

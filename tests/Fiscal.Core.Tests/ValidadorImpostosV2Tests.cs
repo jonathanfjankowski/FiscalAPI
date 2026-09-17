@@ -185,6 +185,32 @@ public class ValidadorImpostosV2Tests
     }
 
     [Fact]
+    public void Difal_valor_icms_destino_com_interna_cheia_falha()
+    {
+        // Fórmula do MOC (rejeições SEFAZ 815/816): vICMSUFDest =
+        // BC × (interna − interestadual). Informar BC × interna cheia rejeita.
+        var erros = Validar(Item(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 12, Valor: 12,
+            Difal: new DifalDto(AliquotaInterestadual: 12,
+                BaseDestino: 100, AliquotaDestino: 18,
+                ValorIcmsDestino: 18, ValorIcmsOrigem: 0))));
+
+        erros.Should().Contain(e => e.Contains("vICMSUFDest = BC × (interna − interestadual)"));
+    }
+
+    [Fact]
+    public void Difal_com_diferencial_correto_passa()
+    {
+        var erros = Validar(Item(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 12, Valor: 12,
+            Difal: new DifalDto(AliquotaInterestadual: 12,
+                BaseDestino: 100, AliquotaDestino: 18,
+                ValorIcmsDestino: 6, ValorIcmsOrigem: 0))));
+
+        erros.Should().BeEmpty();
+    }
+
+    [Fact]
     public void Csosn_102_simples_passa_sem_erros()
     {
         var erros = Validar(Item(new IcmsDto(Origem: 0, Csosn: "102")));

@@ -218,16 +218,16 @@ public class MapperEnviNFeV2Tests
             BaseCalculo: 100, Aliquota: 12, Valor: 12,
             Difal: new DifalDto(AliquotaInterestadual: 12,
                 BaseDestino: 100, AliquotaDestino: 18,
-                ValorIcmsDestino: 18, ValorIcmsOrigem: 0))));
+                ValorIcmsDestino: 6, ValorIcmsOrigem: 0))));
 
         var ufDest = nfe.Det.Single().Imposto.ICMSUFDest!;
         ufDest.VBCUFDest.Should().Be(100);
         ufDest.PICMSInter.Should().Be(12);
         ufDest.PICMSInterPart.Should().Be(100); // partilha 100% destino (Convênio 190/2017)
-        ufDest.VICMSUFDest.Should().Be(18);
+        ufDest.VICMSUFDest.Should().Be(6); // MOC 815/816: 100 × (18% − 12%)
         ufDest.VICMSUFRemet.Should().Be(0);
 
-        nfe.Total.ICMSTot.VICMSUFDest.Should().Be(18);
+        nfe.Total.ICMSTot.VICMSUFDest.Should().Be(6);
         nfe.Total.ICMSTot.VICMSUFRemet.Should().Be(0);
     }
 

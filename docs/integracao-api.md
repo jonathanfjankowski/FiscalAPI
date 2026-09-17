@@ -865,7 +865,7 @@ FCP e DIFAL. Referência: [docs/plano-evolucao-contrato-v2.md](plano-evolucao-co
 | Campo | Tipo | Regras |
 |---|---|---|
 | `aliquotaInterestadual` | int | 4, 7 ou 12 (pICMSInter) — obrigatória |
-| `baseDestino` / `aliquotaDestino` / `valorIcmsDestino` / `valorIcmsOrigem` | número | vBCUFDest/pICMSUFDest/vICMSUFDest/vICMSUFRemet |
+| `baseDestino` / `aliquotaDestino` / `valorIcmsDestino` / `valorIcmsOrigem` | número | vBCUFDest/pICMSUFDest/vICMSUFDest/vICMSUFRemet. Fórmula do MOC (rejeições SEFAZ **815/816**): `valorIcmsDestino = baseDestino × (aliquotaDestino − aliquotaInterestadual)`; `valorIcmsOrigem = 0` na partilha vigente |
 | `fcpPercentualDestino` / `valorFcpDestino` | número | pFCPUFDest/vFCPUFDest |
 
 **`impostosV2.ipi`** (`Ipi`) — só NF-e (NFC-e rejeita):
@@ -993,7 +993,7 @@ Aplicada antes de qualquer efeito, em forma de `ValidationProblemDetails` (ver [
   1. `cst` e `csosn` no mesmo grupo (ou nenhum dos dois).
   2. `cst`/`csosn` fora das listas suportadas (ex.: CST `30`, `ICMSPart` — fail-loud).
   3. Campos obrigatórios por código: CST 00 sem trio, CST 10/70 sem `st` completa, CST 20/70 sem `percentualReducaoBc`, CST 51 sem `valorIcmsOperacao`, CSOSN 201/202/203 sem `st`…
-  4. `difal.aliquotaInterestadual` fora de 4/7/12 ou partilha incompleta.
+  4. `difal.aliquotaInterestadual` fora de 4/7/12 ou partilha incompleta, ou `valorIcmsDestino` ≠ `baseDestino × (aliquotaDestino − aliquotaInterestadual)`.
 - `numeroFinal < numeroInicial` na inutilização.
 - `.pfx` que não abre com a senha informada (upload de certificado).
 

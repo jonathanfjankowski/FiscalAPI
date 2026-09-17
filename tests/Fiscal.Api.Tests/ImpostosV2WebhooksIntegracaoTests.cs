@@ -121,7 +121,7 @@ public class ImpostosV2WebhooksIntegracaoTests(EmissaoIntegracaoTests.Factory fa
                 aliquotaInterestadual = 12,
                 baseDestino = 100,
                 aliquotaDestino = 18,
-                valorIcmsDestino = 18,
+                valorIcmsDestino = 6, // MOC 815/816: 100 × (18% − 12%)
                 valorIcmsOrigem = 0,
             },
         });

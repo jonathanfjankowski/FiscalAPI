@@ -330,7 +330,18 @@ public class ValidadorImpostosV2
         if (difal.BaseDestino is null || difal.ValorIcmsDestino is null || difal.ValorIcmsOrigem is null)
             erros.Add(new(P("difal"), "DIFAL exige baseDestino, valorIcmsDestino e valorIcmsOrigem."));
 
-        Conferir(P("difal.valorIcmsDestino"), difal.BaseDestino, difal.AliquotaDestino, difal.ValorIcmsDestino, erros);
+        // Fórmula do MOC (rejeições SEFAZ 815/816): vICMSUFDest =
+        // vBCUFDest × (pICMSUFDest − pICMSInter) — o ICMS próprio já remete
+        // base × interestadual à UF de origem (partilha 100% destino, 2019+).
+        if (difal.BaseDestino is { } bc && difal.AliquotaDestino is { } pDest &&
+            difal.AliquotaInterestadual is { } pInter && difal.ValorIcmsDestino is { } vDest)
+        {
+            var esperado = bc * (pDest - pInter) / 100m;
+            if (Math.Abs(esperado - vDest) > Tolerancia)
+                erros.Add(new(P("difal.valorIcmsDestino"),
+                    $"vICMSUFDest = BC × (interna − interestadual): {bc:N2} × ({pDest:N4}% − {pInter:N2}%) = {esperado:N2}, recebido {vDest:N2}."));
+        }
+
         Conferir(P("difal.valorFcpDestino"), difal.BaseDestino, difal.FcpPercentualDestino, difal.ValorFcpDestino, erros);
     }
 
