@@ -6,5 +6,6 @@
     <TreatWarningsAsErrors>true</TreatWarningsAsErrors>
     <WarningsNotAsErrors>CS1591</WarningsNotAsErrors>
     <AnalysisLevel>latest</AnalysisLevel>
+    <VersionPrefix>1.12.2</VersionPrefix>
   </PropertyGroup>
 </Project>

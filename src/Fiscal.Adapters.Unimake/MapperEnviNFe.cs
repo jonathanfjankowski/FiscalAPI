@@ -28,7 +28,10 @@ namespace Fiscal.Adapters.Unimake;
 /// </summary>
 public static class MapperEnviNFe
 {
-    private const string VerProc = "FiscalAPI 1.10.0";
+    // verAplic no XML — da versão do assembly (VersionPrefix no Directory.Build.props),
+    // não hardcoded: campos "verAplic > 20 chars" rejeitam na SEFAZ.
+    private static readonly string VerProc =
+        "FiscalAPI " + (typeof(MapperEnviNFe).Assembly.GetName().Version?.ToString(3) ?? "1.12.2");
 
     /// <summary>
     /// Dados do responsável técnico (grupo infRespTec — obrigatório em algumas

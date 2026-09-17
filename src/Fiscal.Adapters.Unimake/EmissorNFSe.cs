@@ -100,14 +100,24 @@ public class EmissorNFSe : IEmissorFiscal
                 if (temp.Erros is not null) motivos.Add($"{temp.Erros.Codigo}: {temp.Erros.Descricao}".Trim(' ', ':'));
                 motivos.RemoveAll(string.IsNullOrWhiteSpace);
 
+                // Resposta genérica do ADN (código 0 / "sem detalhes"): anexa um
+                // trecho do corpo bruto — normalmente credenciamento/autenticação.
+                var motivo = motivos.Count > 0
+                    ? "Rejeição SEFAZ Nacional: " + string.Join(" | ", motivos)
+                    : "Rejeição SEFAZ Nacional sem detalhes.";
+                if (motivos.Any(m => m.StartsWith("0:") || m.Contains("sem detalhes", StringComparison.OrdinalIgnoreCase)))
+                {
+                    var bruto = xmlRetorno?.Trim() ?? "";
+                    if (bruto.Length > 300) bruto = bruto[..300] + "…";
+                    if (bruto.Length > 0) motivo += $" [corpo bruto: {bruto}]";
+                }
+
                 return Task.FromResult(new ResultadoEmissao(
                     ResultadoEmissaoStatus.Rejeitada,
                     ChaveAcesso: temp.ChaveAcesso,
                     ProtocoloAutorizacao: null,
                     XmlAssinado: xmlAssinado, XmlRetornoSefaz: xmlRetorno,
-                    Motivo: motivos.Count > 0
-                        ? "Rejeição SEFAZ Nacional: " + string.Join(" | ", motivos)
-                        : "Rejeição SEFAZ Nacional sem detalhes.",
+                    Motivo: motivo,
                     XmlGerado: xmlGerado));
             }
 

@@ -1,6 +1,6 @@
 # Changelog
 
-## [Não lançada]
+## [1.12.2-alpha] — 2026-09-17
 
 ### Corrigido
 - **DIFAL: `vICMSUFDest` com o valor errado (lib + API consistentemente
@@ -11,16 +11,8 @@
   toda NF-e com DIFAL rejeitaria com 815; nas demais, o XML passaria e o
   emissor remeteria o diferencial a mais ao estado de destino. Ex. (BC 1000,
   inter 7%, interna 18%): antes 180,00 → agora 110,00.
-
-### Adicionado
-- **`indicadorIntermediador` / `cnpjIntermediador` no `EmissaoRequest`**
-  (NT 2020.006 — grupo `indIntermed`/`infIntermed`, só NF-e mod 55). Default
-  `0` (sem intermediador) quando ausente — SEFAZ-PR rejeitava toda NF-e sem
-  o campo com **434**. Com `1`, `cnpjIntermediador` é obrigatório e vira o
-  grupo `infIntermed` no XML. Validado em homologação real (PR): a 434 sai,
-  a emissão avança para as validações de cadastro.
-
-### Corrigido
+- **`verAplic` do XML defasado** ("FiscalAPI 1.10.0" hardcoded) — agora vem
+  da versão do assembly (`VersionPrefix 1.12.2` no `Directory.Build.props`).
 - **`vIBS` do item zerado** (`gIBSCBS`): o mapper nunca somava
   `vIBSUF + vIBSMun` no total do item — SEFAZ-PR rejeitava com **1150**
   ("vIBS informado 0.00, calculado 0.10") em qualquer item com IBS. Agora
@@ -29,6 +21,20 @@
   ia como interna e a SEFAZ-PR rejeitava com **521**. Agora o mapper deriva
   interna × interestadual comparando a UF do destinatário com a UF do
   emitente (NFC-e segue sempre interna).
+
+### Adicionado
+- **`indicadorIntermediador` / `cnpjIntermediador` no `EmissaoRequest`**
+  (NT 2020.006 — grupo `indIntermed`/`infIntermed`, só NF-e mod 55). Default
+  `0` (sem intermediador) quando ausente — SEFAZ-PR rejeitava toda NF-e sem
+  o campo com **434**. Com `1`, `cnpjIntermediador` é obrigatório e vira o
+  grupo `infIntermed` no XML. Validado em homologação real (PR): a 434 sai,
+  a emissão avança para as validações de cadastro.
+- **NFS-e: motivo de rejeição genérica do ADN carrega o corpo bruto da
+  resposta** (trecho de até 300 chars) quando o retorno vem sem código nem
+  descrição útil (típico de pendência de credenciamento) — antes era só
+  "0: O retorno do servidor não contém o evento processado nem os detalhes
+  do erro", sem pista sobre a causa.
+
 
 ## [1.12.1-alpha] — 2026-09-17
 
