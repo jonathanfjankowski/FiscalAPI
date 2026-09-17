@@ -14,6 +14,10 @@
     <PackageReference Include="QRCoder" Version="1.8.0" />
     <PackageReference Include="QuestPDF" Version="2026.8.0" />
     <PackageReference Include="SkiaSharp" Version="4.151.2" />
+    <!-- O pacote base do SkiaSharp nao traz assets nativos Linux (so win/osx).
+         Sem este pacote o container Alpine nao encontra libSkiaSharp.so e a
+         geracao de DANFE falha com 500 (DllNotFoundException no barcode). -->
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.151.2" />
     <PackageReference Include="ZXing.Net" Version="0.16.11" />
     <PackageReference Include="ZXing.Net.Bindings.SkiaSharp" Version="0.16.24" />
   </ItemGroup>

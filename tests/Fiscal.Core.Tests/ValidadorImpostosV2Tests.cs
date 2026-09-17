@@ -1,3 +1,4 @@
+using System.Text.RegularExpressions;
 using Fiscal.Core.Contracts;
 using Fiscal.Core.Services;
 using FluentAssertions;
@@ -129,7 +130,8 @@ public class ValidadorImpostosV2Tests
         var erros = Validar(Item(new IcmsDto(Origem: 0, Cst: "00",
             BaseCalculo: 100, Aliquota: 18, Valor: 19)));
 
-        erros.Should().Contain(e => e.Contains("= 18,00, recebido 19,00"));
+        // Mensagem usa :N2 com a cultura corrente: pt-BR → "18,00"; invariante → "18.00".
+        erros.Should().Contain(e => Regex.IsMatch(e, @"= 18[.,]00, recebido 19[.,]00"));
     }
 
     [Fact]

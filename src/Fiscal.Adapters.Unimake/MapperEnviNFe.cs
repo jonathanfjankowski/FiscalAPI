@@ -30,7 +30,14 @@ public static class MapperEnviNFe
 {
     private const string VerProc = "FiscalAPI 1.10.0";
 
-    public static EnviNFe Criar(DocumentoFiscal doc, Tenant tenant, EmissaoRequest req, Ambiente ambiente)
+    /// <summary>
+    /// Dados do responsável técnico (grupo infRespTec — obrigatório em algumas
+    /// SEFAZ, ex.: PR rejeita com 972 quando ausente). Vem da configuração
+    /// (Fiscal:RespTec:*); quando ausente o grupo não é emitido.
+    /// </summary>
+    public sealed record RespTecDados(string Cnpj, string Contato, string Email, string Fone);
+
+    public static EnviNFe Criar(DocumentoFiscal doc, Tenant tenant, EmissaoRequest req, Ambiente ambiente, RespTecDados? respTec = null)
     {
         var nfce = doc.Tipo == TipoDocumento.NFCE;
         if (doc.Serie is null || doc.Numero is null)
@@ -79,11 +86,25 @@ public static class MapperEnviNFe
         if (req.Destinatario is not null)
             nfe.InfNFeField.Dest = MapearDest(req.Destinatario, ufEmit);
 
+        if (respTec is not null)
+            nfe.InfNFeField.InfRespTec = new InfRespTec
+            {
+                CNPJ = respTec.Cnpj,
+                XContato = respTec.Contato,
+                Email = respTec.Email,
+                Fone = respTec.Fone,
+            };
+
         return new EnviNFe
         {
             Versao = "4.00",
             IdLote = LoteDe(doc.Id),
-            IndSinc = nfce ? SimNao.Sim : SimNao.Nao,
+            // Lote sempre tem exatamente 1 NF-e → processamento síncrono é
+            // obrigatório (SEFAZ-PR rejeita com 452 lote unitário assíncrono;
+            // demais UFs aceitam sincronizado). EmissorNFe interpreta o
+            // protNFe vindo na própria resposta; o caminho assíncrono (103 +
+            // recibo) permanece como fallback.
+            IndSinc = SimNao.Sim,
             NFe = new List<NFe> { nfe },
         };
     }
@@ -302,6 +323,7 @@ public static class MapperEnviNFe
                 {
                     CProd = item.Codigo,
                     CEAN = string.IsNullOrWhiteSpace(item.Gtin) ? "SEM GTIN" : item.Gtin,
+                    CEANTrib = string.IsNullOrWhiteSpace(item.Gtin) ? "SEM GTIN" : item.Gtin,
                     CEST = string.IsNullOrWhiteSpace(item.Cest) ? null : item.Cest,
                     XProd = item.Descricao,
                     NCM = string.IsNullOrWhiteSpace(item.Ncm)

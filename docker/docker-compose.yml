@@ -19,6 +19,11 @@ services:
       - ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET:-}
       # Redis (opcional) — rate limit distribuído + cache compartilhado.
       - Fiscal__Redis__ConnectionString=${REDIS_CONNECTION_STRING:-}
+      # Responsável técnico (infRespTec) — SEFAZ-PR rejeita com 972 sem o grupo.
+      - Fiscal__RespTec__Cnpj=${RESPTEC_CNPJ:-}
+      - Fiscal__RespTec__Contato=${RESPTEC_CONTATO:-}
+      - Fiscal__RespTec__Email=${RESPTEC_EMAIL:-}
+      - Fiscal__RespTec__Fone=${RESPTEC_FONE:-}
     depends_on:
       postgres:
         condition: service_healthy
@@ -32,6 +37,14 @@ services:
       - DOTNET_ENVIRONMENT=Development
       - ConnectionStrings__Postgres=Host=postgres;Database=fiscal;Username=fiscal;Password=${DB_PASSWORD:-fiscal}
       - Certificados__ChaveMestraKEK=${KEK_MASTER_KEY}
+      # Mesma flag da API — sem isso o worker usaria os emissores reais
+      # (Unimake/SEFAZ) mesmo com MODO_SANDBOX=true.
+      - Fiscal__ModoSandbox=${MODO_SANDBOX:-true}
+      # Responsável técnico (infRespTec) — SEFAZ-PR rejeita com 972 sem o grupo.
+      - Fiscal__RespTec__Cnpj=${RESPTEC_CNPJ:-}
+      - Fiscal__RespTec__Contato=${RESPTEC_CONTATO:-}
+      - Fiscal__RespTec__Email=${RESPTEC_EMAIL:-}
+      - Fiscal__RespTec__Fone=${RESPTEC_FONE:-}
     depends_on:
       postgres:
         condition: service_healthy

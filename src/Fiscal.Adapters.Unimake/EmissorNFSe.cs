@@ -5,6 +5,7 @@ using Fiscal.Core.Entities;
 using Fiscal.Core.Enums;
 using Fiscal.Core.Exceptions;
 using Fiscal.Core.Interfaces;
+using Microsoft.Extensions.Logging;
 using Unimake.Business.DFe.Servicos;
 using NACIONAL = Unimake.Business.DFe.Xml.NFSe.NACIONAL;
 using GerarNfseNacional = Unimake.Business.DFe.Servicos.NFSe.GerarNfse;
@@ -23,6 +24,12 @@ namespace Fiscal.Adapters.Unimake;
 public class EmissorNFSe : IEmissorFiscal
 {
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
+    private readonly Microsoft.Extensions.Logging.ILogger<EmissorNFSe> _logger;
+
+    public EmissorNFSe(Microsoft.Extensions.Logging.ILogger<EmissorNFSe> logger)
+    {
+        _logger = logger;
+    }
 
     public Task<ResultadoEmissao> EmitirAsync(
         DocumentoFiscal documento,
@@ -58,6 +65,10 @@ public class EmissorNFSe : IEmissorFiscal
             TipoAmbiente = ambiente == Ambiente.Producao ? TipoAmbiente.Producao : TipoAmbiente.Homologacao,
             SchemaVersao = "1.01",
             CertificadoDigital = certificado,
+            // 1001058 = convenção da Unimake para o padrão Nacional (ADN) — sem
+            // este código o Configuracoes.Load() sai sem definir a RequestURI e
+            // o serviço estoura ArgumentNullException em Regex.Matches(null).
+            CodigoMunicipio = 1001058,
         };
 
         try
@@ -114,6 +125,7 @@ public class EmissorNFSe : IEmissorFiscal
         catch (Exception ex)
         {
             // Erro de transmissão (rede/SEFAZ fora): o retry reenvia o mesmo DPS.
+            _logger.LogError(ex, "Erro de transmissão na NFS-e {Id}.", documento.Id);
             return Task.FromResult(new ResultadoEmissao(
                 ResultadoEmissaoStatus.ErroTransmissao,
                 ChaveAcesso: null, ProtocoloAutorizacao: null,

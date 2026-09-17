@@ -1,5 +1,53 @@
 # Changelog
 
+## [1.12.0-alpha] — 2026-09-17
+
+### Adicionado — ciclo de vida de certificado + bateria de homologação real iniciada (SEFAZ-PR, A1 real)
+- **Ciclo de vida de certificado** (tenant e admin): upload agora **rotaciona**
+  — desativa o ativo anterior e audita `CERTIFICADO_SUBSTITUIDO` (restaura a
+  invariante de 1 ativo/tenant; `ObterAtivoPorTenantAsync` era não-determinístico
+  com 2+ ativos). Novos endpoints: `DELETE /v1/certificados/{id}` (soft-delete
+  idempotente, auditoria `CERTIFICADO_REVOGADO`) e
+  `POST /v1/certificados/{id}/ativar` (reativa desativando os demais);
+  espelhos em `/v1/admin/tenants/{tenantId}/certificados/…`.
+- **Bateria de homologação real contra a SEFAZ-PR** com certificado A1 real
+  (RFB e-CNPJ, AC SOLUTI): `MODO_SANDBOX=false` na stack, tenant/IE/upload,
+  **status-serviço `cStat 107`**, NF-e assinada (XML-DSig via Unimake) e
+  transmitida com sucesso — autorização ponta a ponta pendente de IE real do
+  emitente (rejeição `209 — IE do emitente invalida` com IE de teste; a PR
+  valida IE mesmo em homologação).
+- **Correção de rejeição `452`** (descoberta na bateria): a PR rejeita lote
+  unitário assíncrono — `MapperEnviNFe` passa a enviar **sempre síncrono**
+  (`indSinc=1`); o caminho assíncrono (103 + recibo → retAutorização)
+  permanece como fallback no `EmissorNFe`.
+- **Segurança**: `*.pfx`/`*.p12` no `.gitignore`.
+- **`infRespTec`** no XML de NF-e/NFC-e via config `Fiscal:RespTec:*`
+  (CNPJ/contato/e-mail) — resolve a rejeição `972` da SEFAZ-PR.
+- **Licença**: dependência `Unimake.DFe` confirmada como **MIT** — bloqueio
+  do release público (aberto em 1.8.0-alpha) removido.
+- **Docs**: guia-primeira-emissao ganhou a seção 9 (homologação real:
+  pré-requisitos, roteiro, diagnóstico de rejeições); README (aviso, tabela
+  de endpoints, checklist); integracao-api corrigida (transmissão de eventos
+  já real, webhook, limitações) e com os endpoints novos.
+- **180/180 testes** (116 + 64): +2 do ciclo de vida (rotação → desativação →
+  reativação, invariante 1 ativo/tenant, 404s, idempotência).
+
+## [1.11.0-alpha] — 2026-09-09
+
+### Adicionado — bootstrap em 1 request (tenant + primeira API key)
+- `POST /v1/admin/tenants` aceita `criarApiKey` opcional (`"producao"` |
+  `"homologacao"`): cria o tenant e a primeira API key **na mesma
+  transação** (mesmo `SaveChanges`), com geração/hash/auditoria idênticos ao
+  endpoint de keys (`GenerateKey`, prefixo 12 chars, hash PBKDF2,
+  `API_KEY_CRIADA`). Resposta vira `{tenant, apiKey}` com a chave em claro —
+  exibição única, mesma garantia de sempre.
+- Campo ausente/null preserva o contrato atual (corpo = GUID do tenant);
+  `criarApiKey` inválido → `422` sem persistir nada; `PUT /tenants/{id}`
+  rejeita o campo (só vale na criação).
+- **62/62 testes de API** (+4: `fk_test_` com hash persistido e chave
+  autenticando na API, `fk_live_` para produção, 422 não cria tenant,
+  comportamento legado intacto).
+
 ## [1.10.0-alpha] — 2026-09-06
 
 ### Adicionado — contrato v2 F5 (reforma IBS/CBS + IS) e F6 (barcode/QR no DANFE)

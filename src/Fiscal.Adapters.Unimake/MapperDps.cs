@@ -11,9 +11,9 @@ namespace Fiscal.Adapters.Unimake;
 /// <summary>
 /// Monta o DPS (padrão Nacional, layout 1.01) a partir do DocumentoFiscal +
 /// do NfseDpsRequest serializado em doc.PayloadEntrada + do perfil do tenant
-/// (prestador). Chave do DPS (Id): "DPS" + cLocEmi(7) + CNPJ(14) + série(5)
-/// + nDPS(15) = 44 caracteres — a NFS-e (chave de 50, prefixo "NFS") é
-/// devolvida pela SEFAZ na autorização síncrona.
+/// (prestador). Chave do DPS (Id): "DPS" + cLocEmi(7) + tpInsc(1) + CNPJ(14)
+/// + série(5) + nDPS(15) = 45 caracteres — a NFS-e (chave de 50, prefixo
+/// "NFS") é devolvida pela SEFAZ na autorização síncrona.
 ///
 /// Substituição: quando o payload vem de
 /// POST /v1/documentos-fiscais/{id}/substituicao, o grupo &lt;subst&gt; aponta
@@ -93,14 +93,17 @@ public static class MapperDps
 
         var infDps = new NACIONAL.InfDPS
         {
-            Id = $"DPS{cLocEmi:D7}{tenant.Cnpj}{doc.Serie!.Value:D5}{nDps:D15}",
+            // tpInsc "1" = CNPJ (layout 1.01: "DPS" + cLocEmi(7) + tpInsc(1) +
+            // inscricao(14) + serie(5) + nDPS(15) = 45 posições).
+            Id = $"DPS{cLocEmi:D7}1{tenant.Cnpj}{doc.Serie!.Value:D5}{nDps:D15}",
             TpAmb = ambiente == Ambiente.Producao ? TipoAmbiente.Producao : TipoAmbiente.Homologacao,
             // DhEmi = aceitação da request: mantém o Id determinístico entre
             // tentativas (retry reenvia o MESMO DPS).
             DhEmi = doc.CriadoEm,
             VerAplic = $"FiscalAPI {typeof(MapperDps).Assembly.GetName().Version?.ToString(3) ?? "1.4.0"}",
             Serie = doc.Serie.Value.ToString("D5"),
-            NDPS = nDps.ToString("D15"),
+            // TSNumDPS: padrão [1-9][0-9]{0,14} — sem zeros à esquerda.
+            NDPS = nDps.ToString(),
             DCompet = ParseDataCompetencia(req.DataCompetencia, doc),
             TpEmit = (TipoEmitenteNFSe)(req.TipoEmissor ?? 1),
             CLocEmi = cLocEmi,
@@ -263,6 +266,12 @@ public static class MapperDps
             Trib = new NACIONAL.Trib
             {
                 TribMun = tribMun,
+                // totTrib é obrigatório no layout 1.01; indTotTrib 0 = não
+                // totaliza (o contrato ainda não expõe totais de tributos).
+                TotTrib = new NACIONAL.TotTrib
+                {
+                    IndTotTrib = 0,
+                },
             },
         };
         if (v.ValorRecebido is { } recebido) valores.VServPrest.VReceb = (double)recebido;

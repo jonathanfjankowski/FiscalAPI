@@ -13,7 +13,7 @@
 | **Estágio** | Alpha — funcional ponta a ponta em sandbox; emissão real NF-e/NFC-e/NFS-e(DPS) implementada, homologação contra SEFAZ pendente de certificado A1 |
 | **Stack** | .NET 10 (API + Worker Hangfire), PostgreSQL/EF Core, React 19 + Vite + Tailwind v4 (painel admin), Unimake.DFe (adapters SEFAZ), QuestPDF (DANFE/DANFCe) |
 | **Testes** | 173/173 (116 unitários em `Fiscal.Core.Tests`, 57 de integração em `Fiscal.Api.Tests`) |
-| **Licença** | MIT — **sujeito à confirmação da licença da `Unimake.DFe`** (bloqueio do release público) |
+| **Licença** | MIT — licença da `Unimake.DFe` **confirmada (MIT)**, sem bloqueios de licença |
 | **Repositório** | https://github.com/jonathanfjankowski/FiscalAPI |
 
 ## O que está funcionando (resumo por capacidade)
@@ -81,8 +81,8 @@ Em ordem de prioridade (detalhes em `docs/roadmap.md`):
 1. **Homologação real NF-e/NFC-e/eventos/NFS-e contra SEFAZ** — exige
    certificado A1; checklist no README (`### Checklist de homologação real`).
    A NFS-e Nacional exige também credenciamento do prestador.
-2. **Confirmação da licença da `Unimake.DFe`** — bloqueio burocrático do
-   release público (o MIT do projeto depende dessa checagem).
+2. ~~Confirmação da licença da `Unimake.DFe`~~ — **feito: confirmada como
+   MIT**, bloqueio do release público removido.
 3. ~~PITR (WAL archiving) + secret manager plugável~~ — **feito (1.9.0-alpha)**.
 
 ## Evolução do contrato (v2) — F1 concluída, F2–F6 planejadas

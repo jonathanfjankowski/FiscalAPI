@@ -6,12 +6,15 @@
 
 > **API open source para emissão de NF-e, NFC-e e NFS-e (padrão Nacional) — multi-tenant, assíncrona, .NET 10.**
 
-> 🚧 **PROJETO EM DESENVOLVIMENTO — ALPHA (`1.3.0-alpha`).**
+> 🚧 **PROJETO EM DESENVOLVIMENTO — ALPHA (`1.12.0-alpha`).**
 > Está funcional ponta a ponta em **modo sandbox** e a emissão real de
-> NF-e/NFC-e está implementada, mas **ainda não passou por homologação
-> contra a SEFAZ** (exige certificado A1) e o contrato de API **pode mudar**
-> até o 1.0. **Não use em produção.** Acompanhe o estado em
-> [docs/status-atual.md](docs/status-atual.md).
+> NF-e/NFC-e está implementada. A **bateria de homologação contra a SEFAZ
+> começou** (SEFAZ-PR, A1 real): status-serviço OK (`cStat 107`), emissão
+> transmitindo e sendo assinada de verdade — ainda **sem autorização
+> ponta a ponta** (aguarda IE real do emitente) e o contrato de API **pode
+> mudar** até o 1.0. **Não use em produção.** Roteiro e rejeições vistas em
+> [docs/guia-primeira-emissao.md (seção 9)](docs/guia-primeira-emissao.md);
+> estado geral em [docs/status-atual.md](docs/status-atual.md).
 
 ## O que é
 
@@ -50,8 +53,9 @@ numeração isolados.
   [docs/revisao-seguranca.md](docs/revisao-seguranca.md).
 
 > 📘 **Integrando um ERP?** Comece pelo
-> [Guia de Integração](docs/integracao-api.md) — autenticação, fluxo de
-> emissão e referência completa de endpoints e DTOs.
+> [Guia da primeira emissão](docs/guia-primeira-emissao.md) — onboarding
+> passo a passo do zero à nota autorizada com PDF, em modo sandbox — e use a
+> [Referência da API](docs/integracao-api.md) para todos os endpoints e DTOs.
 
 ## Início rápido (Docker, modo sandbox — sem certificado)
 
@@ -197,7 +201,9 @@ startup via seed (`ADMIN_EMAIL`/`ADMIN_PASSWORD`, segredo em
 | `POST` | `/v1/admin/auth/login` | — | Login do operador do painel (`{email, senha}` → `{token, expiraEm}`) |
 | `GET/POST/PUT/DELETE` | `/v1/admin/tenants` | Admin JWT | CRUD de tenants (DELETE = desativação soft) |
 | `GET/POST/DELETE` | `/v1/admin/tenants/{tenantId}/api-keys` | Admin JWT | Gera/lista/revoga API keys de um tenant (chave em claro 1x) |
-| `GET/POST` | `/v1/admin/tenants/{tenantId}/certificados` | Admin JWT | Lista/upload de certificado em nome do tenant |
+| `GET/POST` | `/v1/admin/tenants/{tenantId}/certificados` | Admin JWT | Lista/upload de certificado em nome do tenant (upload rotaciona: 1 ativo/tenant) |
+| `DELETE` | `/v1/admin/tenants/{tenantId}/certificados/{id}` | Admin JWT | Desativa certificado (soft-delete, idempotente) |
+| `POST` | `/v1/admin/tenants/{tenantId}/certificados/{id}/ativar` | Admin JWT | Reativa um certificado (desativa os demais) |
 | `GET` | `/v1/admin/documentos-fiscais` | Admin JWT | Listagem cross-tenant (`tenantId, status, modelo, de, ate, page, pageSize`) |
 | `GET` | `/v1/admin/documentos-fiscais/{id}` | Admin JWT | Detalhe completo (XMLs, protocolo, tentativas) |
 | `POST` | `/v1/admin/documentos-fiscais/{id}/cancelamento` | Admin JWT | Cancela via painel (mesmas regras do endpoint de tenant) |
@@ -206,7 +212,9 @@ startup via seed (`ADMIN_EMAIL`/`ADMIN_PASSWORD`, segredo em
 | `POST` | `/v1/api-keys` | ApiKey | Cria nova chave (retorna em texto puro uma vez) |
 | `GET` | `/v1/api-keys` | ApiKey | Lista metadados |
 | `DELETE` | `/v1/api-keys/{id}` | ApiKey | Revoga chave |
-| `POST` | `/v1/certificados` | ApiKey | Upload de `.pfx` (multipart) — cifra com envelope AES-GCM |
+| `POST` | `/v1/certificados` | ApiKey | Upload de `.pfx` (multipart) — cifra com envelope AES-GCM; desativa o certificado anterior (rotação) |
+| `DELETE` | `/v1/certificados/{id}` | ApiKey | Desativa certificado (soft-delete, idempotente) |
+| `POST` | `/v1/certificados/{id}/ativar` | ApiKey | Reativa um certificado (desativa os demais) |
 | `GET` | `/v1/status-servico` | ApiKey | Status do serviço SEFAZ da UF do tenant (`?modelo=55|65&ambiente=`) — cache 60 s |
 | `GET` | `/v1/tenants/perfil` | ApiKey | Perfil fiscal do emitente (dados usados na NF-e/NFC-e) |
 | `PUT` | `/v1/tenants/perfil` | ApiKey | Atualiza emitente (IE + endereço) e CSC/IdCSC da NFC-e (cifrado) |
@@ -372,13 +380,23 @@ mesmo SQLite compartilhado.
 
 ### Checklist de homologação real (fora do CI)
 
-A emissão real fala com a SEFAZ e exige recursos que o pipeline não tem:
+A emissão real fala com a SEFAZ e exige recursos que o pipeline não tem.
+Roteiro detalhado e rejeições já encontradas:
+[docs/guia-primeira-emissao.md, seção 9](docs/guia-primeira-emissao.md).
 
 1. Certificado A1 válido do emitente (upload em `POST /v1/certificados`).
-2. `PUT /v1/tenants/perfil` com IE e endereço do emitente (e CSC/IdCSC para NFC-e).
-3. `Fiscal:ModoSandbox=false` no **Worker** (quem executa o job) e API key do ambiente correspondente.
-4. Emitir em homologação (`ambiente: "homologacao"`), conferir `motivoStatus`,
+2. **IE real do emitente** em `PUT /v1/tenants/perfil` — a SEFAZ valida IE
+   mesmo em homologação (PR rejeita com `209` IE de teste); CSC/IdCSC para NFC-e.
+3. `MODO_SANDBOX=false` na **API e no Worker** (`MODO_SANDBOX=false docker compose ... up`)
+   e API key do ambiente correspondente.
+4. Smoke: `GET /v1/status-servico?modelo=55&ambiente=homologacao` → `cStat 107`.
+5. Emitir em homologação (`ambiente: "homologacao"`), conferir `motivoStatus`,
    `chaveAcesso` e XMLs (`xmlAssinado`/`xmlRetornoSefaz`) no `GET /v1/documentos-fiscais/{id}`.
+
+Estado da bateria (2026-09-17, SEFAZ-PR, A1 real): status-serviço `cStat 107`;
+NF-e assinada e transmitida com sucesso; pendente autorização ponta a ponta
+(aguardando IE real). Rejeição `452` de lote unitário assíncrono já corrigida
+(`indSinc=1` sempre).
 
 ## Operações (backup / DR / go-live)
 
@@ -396,7 +414,8 @@ go-live estão em **[docs/backup-dr.md](docs/backup-dr.md)**:
 
 | Doc | Conteúdo |
 |---|---|
-| [docs/integracao-api.md](docs/integracao-api.md) | **Guia de integração** — autenticação, fluxo, endpoints, DTOs |
+| [docs/guia-primeira-emissao.md](docs/guia-primeira-emissao.md) | **Guia da primeira emissão** — onboarding do zero à nota + PDF em sandbox |
+| [docs/integracao-api.md](docs/integracao-api.md) | **Referência da API** — autenticação, fluxo, endpoints, DTOs |
 | [docs/status-atual.md](docs/status-atual.md) | **Status do projeto** — o que está pronto e o que falta |
 | [docs/arquitetura.md](docs/arquitetura.md) | Como funciona por dentro |
 | [docs/revisao-seguranca.md](docs/revisao-seguranca.md) | Validação de segurança |
@@ -413,4 +432,4 @@ go-live estão em **[docs/backup-dr.md](docs/backup-dr.md)**:
 
 ## Licença
 
-MIT (sujeito à confirmação da licença do `Unimake.DFe`).
+MIT. Licença da dependência `Unimake.DFe` confirmada como MIT.

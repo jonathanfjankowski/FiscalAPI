@@ -25,6 +25,7 @@ public interface IRepositorioCertificado
     Task<Certificado?> ObterAtivoPorTenantAsync(Guid tenantId, CancellationToken ct);
     Task<IReadOnlyList<Certificado>> ListarPorTenantAsync(Guid tenantId, CancellationToken ct);
     Task AdicionarAsync(Certificado certificado, CancellationToken ct);
+    Task AtualizarAsync(Certificado certificado, CancellationToken ct);
 }
 
 public interface IRepositorioDocumentoFiscal

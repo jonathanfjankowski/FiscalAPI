@@ -49,6 +49,10 @@ TestResult*.xml
 appsettings.Development.json
 appsettings.*.local.json
 
+# Certificados digitais (chave privada ICP-Brasil — jamais versionar)
+*.pfx
+*.p12
+
 # OS
 .DS_Store
 Thumbs.db

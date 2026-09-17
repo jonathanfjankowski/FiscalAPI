@@ -142,6 +142,8 @@ public class ProcessarDocumentoJob
         catch (Exception ex)
         {
             // Erro de transmissão genuíno (timeout, SEFAZ fora, etc.) → CONTINGENCIA + backoff.
+            _logger.LogError(ex, "Erro de transmissão ao emitir documento {Id} (tentativa {Tentativa}).",
+                doc.Id, doc.Tentativas);
             resultado = new ResultadoEmissao(
                 ResultadoEmissaoStatus.ErroTransmissao,
                 ChaveAcesso: null,

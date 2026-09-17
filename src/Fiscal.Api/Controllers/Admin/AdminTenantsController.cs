@@ -1,3 +1,4 @@
+using Fiscal.Api.Authentication;
 using Fiscal.Core.Entities;
 using Fiscal.Core.Enums;
 using Fiscal.Core.Interfaces;
@@ -25,7 +26,10 @@ public record AdminTenantRequest(
     string? NomeMunicipio,
     string? WebhookUrl,
     string? WebhookSecret,
-    bool? Ativo);
+    bool? Ativo,
+    // Opcional: "producao"|"homologacao" cria a primeira API key junto com o
+    // tenant (mesma transação). Ausente/null mantém o fluxo em 2 chamadas.
+    string? CriarApiKey = null);
 
 public record AdminTenantResponse(
     Guid Id,
@@ -47,6 +51,20 @@ public record AdminTenantResponse(
     DateTimeOffset CriadoEm,
     int ApiKeysAtivas,
     int CertificadosAtivos);
+
+/// <summary>
+/// Primeira API key criada junto com o tenant (criarApiKey). Mesma garantia
+/// do endpoint de keys: a chave completa aparece uma única vez, aqui.
+/// </summary>
+public record AdminTenantApiKeyCriadaResponse(
+    Guid Id,
+    string Chave,
+    string Prefixo,
+    string Ambiente,
+    string Aviso);
+
+/// <summary>Resposta do POST /v1/admin/tenants quando criarApiKey é informado.</summary>
+public record AdminTenantCriadoComApiKeyResponse(AdminTenantResponse Tenant, AdminTenantApiKeyCriadaResponse ApiKey);
 
 [ApiController]
 [Route("v1/admin/tenants")]
@@ -113,6 +131,9 @@ public class AdminTenantsController : ControllerBase
             return Problem(statusCode: 422, title: "UF inválida", detail: "Informe a UF com 2 letras (ex.: PR).");
         if (req.AmbientePadrao is not null && req.AmbientePadrao != "producao" && req.AmbientePadrao != "homologacao")
             return Problem(statusCode: 422, title: "AmbientePadrao inválido", detail: "Use 'producao' ou 'homologacao'.");
+        if (req.CriarApiKey is not null && req.CriarApiKey != "producao" && req.CriarApiKey != "homologacao")
+            return Problem(statusCode: 422, title: "CriarApiKey inválido",
+                detail: "Use 'producao' ou 'homologacao' (ou omita o campo para não criar chave).");
         if (req.RegimeTributario is < 1 or > 3)
             return Problem(statusCode: 422, title: "RegimeTributario inválido", detail: "Use 1 (Simples), 2 (Simples exceto sublimite) ou 3 (Regime Normal).");
 
@@ -143,6 +164,28 @@ public class AdminTenantsController : ControllerBase
         };
 
         _db.Tenants.Add(tenant);
+
+        // Primeira API key (opcional, criarApiKey): mesma geração/semântica do
+        // AdminApiKeysController, adicionada ao MESMO DbContext — tenant + key
+        // vão ao banco no mesmo SaveChanges (atômico).
+        ApiKey? apiKey = null;
+        string? chaveEmClaro = null;
+        if (req.CriarApiKey is not null)
+        {
+            chaveEmClaro = ApiKeyAuthenticationHandler.GenerateKey(req.CriarApiKey);
+            apiKey = new ApiKey
+            {
+                TenantId = tenant.Id,
+                Prefixo = chaveEmClaro[..12],
+                KeyHash = ApiKeyAuthenticationHandler.HashKey(chaveEmClaro),
+                Descricao = "Criada automaticamente junto com o tenant",
+                Ambiente = (short)(req.CriarApiKey == "producao" ? Ambiente.Producao : Ambiente.Homologacao),
+                Ativa = true,
+                CriadoEm = DateTimeOffset.UtcNow
+            };
+            _db.ApiKeys.Add(apiKey);
+        }
+
         await _db.SaveChangesAsync(ct);
 
         await _auditoria.RegistrarAsync(new Auditoria
@@ -153,9 +196,38 @@ public class AdminTenantsController : ControllerBase
             IpOrigem = HttpContext.Connection.RemoteIpAddress,
             Detalhe = $"{{\"cnpj\":\"{tenant.Cnpj}\"}}"
         }, ct);
+        if (apiKey is not null)
+        {
+            await _auditoria.RegistrarAsync(new Auditoria
+            {
+                TenantId = tenant.Id,
+                ApiKeyId = apiKey.Id,
+                Acao = "API_KEY_CRIADA",
+                RecursoId = apiKey.Id,
+                IpOrigem = HttpContext.Connection.RemoteIpAddress
+            }, ct);
+        }
         await _db.SaveChangesAsync(ct);
 
-        return CreatedAtAction(nameof(Obter), new { id = tenant.Id }, tenant.Id);
+        // Fluxo legado (criarApiKey ausente): corpo = GUID do tenant, igual a antes.
+        if (apiKey is null || chaveEmClaro is null)
+            return CreatedAtAction(nameof(Obter), new { id = tenant.Id }, tenant.Id);
+
+        var resposta = new AdminTenantCriadoComApiKeyResponse(
+            new AdminTenantResponse(
+                tenant.Id, tenant.Cnpj, tenant.RazaoSocial, tenant.Uf, tenant.CodigoMunicipioIbge,
+                tenant.RegimeTributario,
+                tenant.AmbientePadrao == (short)Ambiente.Producao ? "producao" : "homologacao",
+                tenant.InscricaoEstadual, tenant.Logradouro, tenant.Numero, tenant.Complemento,
+                tenant.Bairro, tenant.Cep, tenant.NomeMunicipio, tenant.WebhookUrl, tenant.Ativo,
+                tenant.CriadoEm,
+                ApiKeysAtivas: 1,   // tenant novo: só a chave que acabou de ser criada
+                CertificadosAtivos: 0),
+            new AdminTenantApiKeyCriadaResponse(
+                apiKey.Id, chaveEmClaro, apiKey.Prefixo,
+                apiKey.Ambiente == (short)Ambiente.Producao ? "producao" : "homologacao",
+                "Esta é a única vez que a chave completa é exibida. Guarde-a em local seguro."));
+        return CreatedAtAction(nameof(Obter), new { id = tenant.Id }, resposta);
     }
 
     /// <summary>Atualização parcial: campos nulos não são alterados.</summary>
@@ -163,6 +235,11 @@ public class AdminTenantsController : ControllerBase
     public async Task<IActionResult> Atualizar(Guid id, [FromBody] AdminTenantRequest req, CancellationToken ct)
     {
         if (req is null) return Problem(statusCode: 400, title: "Corpo da requisição é obrigatório.");
+
+        // criarApiKey só existe na criação — rejeita em vez de ignorar em silêncio.
+        if (req.CriarApiKey is not null)
+            return Problem(statusCode: 422, title: "CriarApiKey não é suportado na atualização",
+                detail: "Use POST /v1/admin/tenants (com criarApiKey) ou POST /v1/admin/tenants/{tenantId}/api-keys para criar chaves.");
 
         var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Id == id, ct);
         if (tenant is null) return NotFound();

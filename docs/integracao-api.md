@@ -3,6 +3,10 @@
 Documentação para integradores que desejam emitir **NF-e** (modelo 55) e **NFC-e** (modelo 65) e operar **eventos fiscais** (cancelamento, carta de correção, inutilização) através da FiscalAPI.
 
 > **Compatibilidade:** API `0.3.0-alpha`. Os exemplos usam a base `http://localhost:8080` (docker) — substitua pela URL do ambiente que for usar.
+>
+> **Novo por aqui?** Este documento é a referência completa. Para um roteiro
+> prático do zero à primeira nota autorizada (com PDF) em modo sandbox, veja
+> o [Guia da primeira emissão](guia-primeira-emissao.md).
 
 ---
 
@@ -51,7 +55,7 @@ Você envia os dados do documento, recebe imediatamente um `id` com status `PEND
 ## Conceitos básicos
 
 ### Tenant
-Sua empresa emitente, isolada dentro da API. Todo documento, chave, certificado e evento pertence a um tenant — um tenant nunca enxerga dados de outro. Os dados cadastrais do tenant (CNPJ, razão social, UF, regime tributário, endereço do emitente) são configurados administrativamente junto ao provedor da API, não via endpoint.
+Sua empresa emitente, isolada dentro da API. Todo documento, chave, certificado e evento pertence a um tenant — um tenant nunca enxerga dados de outro. Os dados cadastrais do tenant (CNPJ, razão social, UF, regime tributário, endereço do emitente) são criados via `POST /v1/admin/tenants` (operação administrativa; o campo opcional `criarApiKey` já cria a primeira API key junto com o tenant, na mesma transação) e atualizados pelo próprio tenant via `PUT /v1/tenants/perfil`.
 
 ### API Key por ambiente
 Cada chave de API está **atrelada a um ambiente** e só opera nele:
@@ -263,7 +267,11 @@ Cancelamento só é aceito para documentos `AUTORIZADA` (senão `409`). Ver [Est
    - `AUTORIZADA`, `REJEITADA`, `DENEGADA`, `CANCELADA`, `ERRO_INTERNO`.
 4. Se `CONTINGENCIA`/`CANCELAMENTO_PENDENTE`, continue no loop — são transitórios.
 
-Não há (ainda) webhook: **polling é o mecanismo oficial** de acompanhamento. Ver [Limitações conhecidas](#limitações-conhecidas).
+Não há webhook para mudanças de status de documento: **polling é o mecanismo
+oficial de acompanhamento da nota** — o webhook (capítulo próprio) cobre
+eventos de negócio (`documento.autorizado`, `documento.cancelado`,
+`certificado.vencendo`, etc.), não substitui a consulta pontual. Ver
+[Limitações conhecidas](#limitações-conhecidas).
 
 ---
 
@@ -374,6 +382,22 @@ curl -X POST "$BASE/v1/certificados" \
 ```
 
 Erros: `400` arquivo ou senha ausentes; `422` `.pfx` não abre com a senha informada. O PFX e a senha são guardados criptografados (envelope AES-GCM com chave mestra do provedor); só metadados são retornáveis.
+
+**Rotação**: só há **1 certificado ativo por tenant**. O upload desativa
+automaticamente o certificado ativo anterior (auditoria
+`CERTIFICADO_SUBSTITUIDO`) — para renovar, basta subir o novo `.pfx`.
+
+#### `DELETE /v1/certificados/{id}`
+
+Desativa o certificado (soft-delete — o histórico permanece listado com
+`ativo: false`). Idempotente: desativar um certificado já inativo devolve
+`204` de novo. `404` se não existir para o tenant.
+
+#### `POST /v1/certificados/{id}/ativar`
+
+Reativa um certificado anterior, desativando os demais ativos (volta atrás
+numa rotação). Idempotente: ativar um certificado já ativo só devolve o
+estado atual. `200 OK` com o mesmo corpo do upload; `404` se não existir.
 
 #### `GET /v1/certificados`
 
@@ -572,7 +596,10 @@ e dos certificados) e assina as entregas com HMAC-SHA256
 
 ### Eventos fiscais
 
-Os POSTs de evento exigem `Idempotency-Key`. Um evento é persistido e associado ao documento; a transmissão do evento à SEFAZ ainda não está implementada (ver [Limitações](#limitações-conhecidas)).
+Os POSTs de evento exigem `Idempotency-Key`. Um evento é persistido, associado
+ao documento e **transmitido à SEFAZ** pelo Worker (`TransmissorEventoUnimake` —
+cancelamento 110111, CC-e 110110, inutilização). O status do evento acompanha
+no `GET /v1/documentos-fiscais/{id}` (`eventos[].status`).
 
 #### `POST /v1/documentos-fiscais/{id}/cancelamento` 🔒
 
@@ -921,7 +948,7 @@ Resposta do `GET /v1/documentos-fiscais/{id}` (e do replay de idempotência):
 | Campo | Tipo | Descrição |
 |---|---|---|
 | `id` | string (GUID) | Identificador do documento na API |
-| `tipo` | string | `"NFE"` ou `"NFCE"` |
+| `tipo` | string | `"NFE"`, `"NFCE"` ou `"NFSE"` |
 | `status` | string | Ver [tabela de status](#statusdocumento) |
 | `ambiente` | string | `"producao"` ou `"homologacao"` |
 | `serie` | número | Série informada na emissão |
@@ -1012,7 +1039,7 @@ O `422` por aritmética vem com a extensão `campo` apontando o local exato:
 | Enum | Valores |
 |---|---|
 | `ambiente` (payload) | `"producao"`, `"homologacao"` |
-| `tipo` (response) | `"NFE"`, `"NFCE"` (NFS-e não disponível) |
+| `tipo` (response) | `"NFE"`, `"NFCE"`, `"NFSE"` |
 | `tipo` (eventos) | `"CANCELAMENTO"`, `"CCE"`, `"INUTILIZACAO"` |
 | status de evento | `"PENDENTE"`, `"PROCESSADO"` |
 
@@ -1085,13 +1112,15 @@ Problemas que acontecem **depois** do `202` não viram erro HTTP — aparecem co
 
 ## Limitações conhecidas
 
-Versão atual (`1.4.0-alpha`) — considere no desenho da sua integração:
+Versão atual (`1.12.0-alpha`) — considere no desenho da sua integração:
 
-- **Projeto em alpha** — sem homologação real contra SEFAZ ainda; a emissão
-  real de NF-e/NFC-e está implementada, a bateria de homologação exige
-  certificado A1 (checklist no README).
-- **NFS-e** (modelo de serviço, padrão Nacional/DPS): envelope completo com
-  sandbox (mock); a transmissão DPS real é a próxima sprint.
+- **Homologação real em andamento** (SEFAZ-PR, A1 real, 2026-09-17):
+  status-serviço e transmissão validados; autorização ponta a ponta pendente
+  de IE real do emitente (roteiro e rejeições vistas na seção 9 do
+  guia-primeira-emissao.md).
+- **NFS-e** (modelo de serviço, padrão Nacional/DPS): transmissão DPS real
+  implementada (Unimake, layout 1.01 síncrono); ainda sem bateria de
+  homologação dedicada.
 - **Mapper NF-e cobre ICMS completo** (CST 00–90, CSOSN 101–900, ST, FCP,
   DIFAL via `impostosV2`); **IPI/PIS/COFINS, desconto/frete/seguro, GTIN/
   unidade configuráveis, NF-ref e transporte** entram nas fases seguintes do

@@ -62,6 +62,12 @@ public class RepositorioCertificado : IRepositorioCertificado
 
     public async Task AdicionarAsync(Certificado certificado, CancellationToken ct) =>
         await _db.Certificados.AddAsync(certificado, ct);
+
+    public Task AtualizarAsync(Certificado certificado, CancellationToken ct)
+    {
+        _db.Certificados.Update(certificado);
+        return Task.CompletedTask;
+    }
 }
 
 public class RepositorioDocumentoFiscal : IRepositorioDocumentoFiscal
