@@ -12,11 +12,11 @@ using QuestPDF.Infrastructure;
 namespace Fiscal.Pdf;
 
 /// <summary>
-/// DANFE/DANFCe via QuestPDF (licença Community). Layout simplificado — não é
-/// o leiaute oficial de 20 campos do convênio, mas carrega todos os dados
-/// essenciais (identificação, emitente/destinatário, itens, totais, pagamento,
-/// chave de acesso e protocolo). Em homologação imprime marca d'água.
-/// NFS-e entra na Fase 4 (GerarDanfseAsync falha alto até lá).
+/// DANFE/DANFCe/DANFSe via QuestPDF (licença Community). Layouts
+/// simplificados — não são os leiautes oficiais (DANFE de 20 campos do
+/// convênio), mas carregam todos os dados essenciais (identificação,
+/// emitente/destinatário, itens/serviço, totais, pagamento, chave e
+/// protocolo). Em homologação imprime marca d'água.
 /// </summary>
 public class GeradorPdfQuestPdf : IGeradorPdf
 {
@@ -34,7 +34,7 @@ public class GeradorPdfQuestPdf : IGeradorPdf
         Task.FromResult(Gerar(documento, tenant, nfce: true));
 
     public Task<byte[]> GerarDanfseAsync(DocumentoFiscal documento, Tenant tenant, CancellationToken ct) =>
-        Task.FromResult(Gerar(documento, tenant, nfce: false));
+        Task.FromResult(GerarDanfse(documento, tenant));
 
     private static byte[] Gerar(DocumentoFiscal doc, Tenant tenant, bool nfce)
     {
@@ -244,6 +244,245 @@ public class GeradorPdfQuestPdf : IGeradorPdf
 
         return document.GeneratePdf();
     }
+
+    /// <summary>
+    /// DANFSe simplificado da NFS-e Nacional: prestador, tomador,
+    /// detalhamento do serviço, valores (incl. retenções federais e total de
+    /// tributos), identificador da NFS-e e protocolo. O payload é o
+    /// NfseDpsRequest (direto ou embrulhado em substituição) — mesma regra de
+    /// leitura do MapperDps. Payload legado (EmissaoRequest) ainda gera o PDF,
+    /// só sem as seções de serviço/tomador.
+    /// </summary>
+    private static byte[] GerarDanfse(DocumentoFiscal doc, Tenant tenant)
+    {
+        var req = TryDeserializeDps(doc.PayloadEntrada);
+        var servico = req?.Servico;
+        var valores = req?.Valores;
+        var tomador = req?.Tomador;
+        var homologacao = doc.Ambiente == (short)Ambiente.Homologacao;
+        var competencia = DateOnly.TryParse(req?.DataCompetencia, out var data)
+            ? data
+            : new DateOnly(doc.CriadoEm.Year, doc.CriadoEm.Month, doc.CriadoEm.Day);
+
+        var document = Document.Create(container =>
+        {
+            container.Page(page =>
+            {
+                page.Size(PageSizes.A4);
+                page.Margin(28);
+                page.DefaultTextStyle(x => x.FontSize(9));
+
+                page.Header().Column(col =>
+                {
+                    col.Item().Row(row =>
+                    {
+                        row.RelativeItem().Column(c =>
+                        {
+                            c.Item().Text(tenant.RazaoSocial).Bold().FontSize(11);
+                            c.Item().Text($"CNPJ: {FormatarCnpjCpf(tenant.Cnpj)}   IM: {tenant.InscricaoMunicipal ?? "-"}");
+                            c.Item().Text($"{tenant.Logradouro ?? "-"}, {tenant.Numero ?? "-"} — {tenant.Bairro ?? "-"}");
+                            c.Item().Text($"{tenant.NomeMunicipio ?? "-"} / {tenant.Uf} — CEP {FormatarCep(tenant.Cep)}");
+                        });
+
+                        row.RelativeItem().Column(c =>
+                        {
+                            c.Item().AlignCenter().Text("DANFSe").Bold().FontSize(16);
+                            c.Item().AlignCenter().Text("Documento Auxiliar da Nota Fiscal de Serviços Eletrônica").FontSize(7);
+                            c.Item().PaddingTop(4).AlignCenter().Text($"NFS-e Nº {doc.Numero}   SÉRIE {doc.Serie}").Bold();
+                            c.Item().AlignCenter().Text($"COMPETÊNCIA: {competencia:MM/yyyy}").FontSize(8);
+                        });
+
+                        row.RelativeItem().Column(c =>
+                        {
+                            c.Item().Text(homologacao ? "AMBIENTE: HOMOLOGAÇÃO" : "AMBIENTE: PRODUÇÃO").FontSize(8);
+                            c.Item().PaddingTop(2).Border(1).Padding(3).Column(k =>
+                            {
+                                k.Item().Text("IDENTIFICADOR NFS-e").Bold().FontSize(7);
+                                k.Item().Text(string.IsNullOrEmpty(doc.ChaveAcesso)
+                                    ? "-"
+                                    : string.Join(" ", Chunk(doc.ChaveAcesso, 4))).FontSize(8);
+                            });
+                            c.Item().PaddingTop(2).Text($"PROTOCOLO: {doc.ProtocoloAutorizacao ?? "-"}").FontSize(8);
+                        });
+                    });
+
+                    col.Item().PaddingTop(6).LineHorizontal(0.5f);
+                });
+
+                page.Content().PaddingVertical(8).Column(col =>
+                {
+                    if (homologacao)
+                    {
+                        col.Item().PaddingBottom(6).AlignCenter()
+                            .Text("EMISSÃO EM HOMOLOGAÇÃO — SEM VALOR FISCAL")
+                            .Bold().FontSize(11).FontColor(Colors.Red.Darken2);
+                    }
+
+                    col.Item().Table(t =>
+                    {
+                        t.ColumnsDefinition(c =>
+                        {
+                            c.RelativeColumn();
+                            c.RelativeColumn();
+                        });
+
+                        t.Cell().Border(0.5f).Padding(3).Column(x =>
+                        {
+                            x.Item().Text("PRESTADOR").Bold().FontSize(7);
+                            x.Item().Text($"{tenant.RazaoSocial} — CNPJ {FormatarCnpjCpf(tenant.Cnpj)}");
+                            x.Item().Text($"IM: {tenant.InscricaoMunicipal ?? "-"}   Município: {tenant.NomeMunicipio ?? "-"} / {tenant.Uf}");
+                        });
+                        t.Cell().Border(0.5f).Padding(3).Column(x =>
+                        {
+                            x.Item().Text("TOMADOR").Bold().FontSize(7);
+                            if (tomador is { } toma)
+                            {
+                                x.Item().Text($"{toma.Nome ?? "-"} — {FormatarCnpjCpf(toma.CnpjCpf)}");
+                                x.Item().Text(toma.Endereco is { } end
+                                    ? $"{end.Logradouro}, {end.Numero} — {end.Bairro} — CEP {FormatarCep(end.Cep)} — Mun. IBGE {end.CodigoMunicipioIbge}"
+                                    : "-");
+                            }
+                            else
+                            {
+                                x.Item().Text("-");
+                            }
+                        });
+                    });
+
+                    col.Item().PaddingTop(6).Text("DETALHAMENTO DO SERVIÇO").Bold().FontSize(8);
+                    col.Item().Table(t =>
+                    {
+                        t.ColumnsDefinition(c =>
+                        {
+                            c.ConstantColumn(120);
+                            c.RelativeColumn();
+                        });
+
+                        t.Cell().Border(0.5f).Padding(3).Text("DESCRIÇÃO").Bold().FontSize(7);
+                        t.Cell().Border(0.5f).Padding(3).Text(servico?.DescricaoServico ?? "-");
+                        t.Cell().Border(0.5f).Padding(3).Text("CÓD. TRIBUTÁRIO NACIONAL / MUNICIPAL").Bold().FontSize(7);
+                        t.Cell().Border(0.5f).Padding(3).Text($"{servico?.CodigoTributarioNacional ?? "-"} / {servico?.CodigoTributarioMunicipal ?? "-"}");
+                        t.Cell().Border(0.5f).Padding(3).Text("NBS / MUNICÍPIO DA PRESTAÇÃO (IBGE)").Bold().FontSize(7);
+                        t.Cell().Border(0.5f).Padding(3).Text(
+                            $"{servico?.CodigoNbs ?? "-"} / {servico?.CodigoMunicipioPrestacao?.ToString() ?? tenant.CodigoMunicipioIbge ?? "-"}");
+                    });
+
+                    col.Item().PaddingTop(6).Text("VALORES").Bold().FontSize(8);
+                    col.Item().Table(t =>
+                    {
+                        t.ColumnsDefinition(c =>
+                        {
+                            c.RelativeColumn();
+                            c.RelativeColumn();
+                            c.RelativeColumn();
+                            c.RelativeColumn();
+                        });
+
+                        foreach (var (titulo, valor) in ValoresNfse(valores))
+                        {
+                            t.Cell().Border(0.5f).Padding(3).Column(x =>
+                            {
+                                x.Item().Text(titulo).Bold().FontSize(7);
+                                x.Item().Text(valor);
+                            });
+                        }
+                    });
+
+                    if (!string.IsNullOrEmpty(req?.InformacoesComplementares))
+                    {
+                        col.Item().PaddingTop(8).Text(t =>
+                        {
+                            t.Span("INFORMAÇÕES COMPLEMENTARES: ").Bold().FontSize(8);
+                            t.Span(req.InformacoesComplementares).FontSize(8);
+                        });
+                    }
+
+                    if (!string.IsNullOrEmpty(doc.MotivoStatus))
+                    {
+                        col.Item().PaddingTop(8).Text(t =>
+                        {
+                            t.Span("OBSERVAÇÃO: ").Bold().FontSize(8);
+                            t.Span(doc.MotivoStatus).FontSize(8);
+                        });
+                    }
+                });
+
+                page.Footer().AlignCenter().Text(t =>
+                {
+                    t.Span($"FiscalAPI — DANFSe gerado a partir do XML autorizado em {DateTimeOffset.UtcNow:dd/MM/yyyy HH:mm}");
+                });
+            });
+        });
+
+        return document.GeneratePdf();
+    }
+
+    private static IEnumerable<(string Titulo, string Valor)> ValoresNfse(NfseValoresDto? valores)
+    {
+        yield return ("VALOR DOS SERVIÇOS", (valores?.ValorServicos ?? 0).ToString("N2"));
+        yield return ("DESCONTO INCONDICIONADO", (valores?.DescontoIncondicionado ?? 0).ToString("N2"));
+        yield return ("VALOR RECEBIDO", valores?.ValorRecebido?.ToString("N2") ?? "-");
+        yield return ("ALÍQUOTA ISSQN", valores?.AliquotaIssqn is { } aliq ? $"{aliq:N2}%" : "-");
+        yield return ("TRIBUTAÇÃO ISSQN", RotuloTributacaoIssqn(valores?.TributacaoIssqn));
+        yield return ("RETENÇÃO ISSQN", RotuloRetencaoIssqn(valores?.RetencaoIssqn));
+        var fed = valores?.TributacaoFederal;
+        yield return ("PIS / COFINS", fed is null ? "-" : $"{fed.ValorPis ?? 0:N2} / {fed.ValorCofins ?? 0:N2}");
+        yield return ("RETENÇÕES FEDERAIS (IRRF / CSLL / CPP)",
+            fed is null ? "-" : $"{fed.ValorRetidoIrrf ?? 0:N2} / {fed.ValorRetidoCsll ?? 0:N2} / {fed.ValorRetidoCpp ?? 0:N2}");
+        var tot = valores?.TotalTributos;
+        yield return ("TOTAL TRIBUTOS (FED / EST / MUN)",
+            tot is null ? "-" : $"{tot.Federal ?? 0:N2} / {tot.Estadual ?? 0:N2} / {tot.Municipal ?? 0:N2}");
+    }
+
+    private static string RotuloTributacaoIssqn(int? tipo) => tipo switch
+    {
+        1 => "Tributável no município",
+        2 => "Imunidade",
+        3 => "Exportação",
+        4 => "Não incidência",
+        _ => tipo?.ToString() ?? "-",
+    };
+
+    private static string RotuloRetencaoIssqn(int? tipo) => tipo switch
+    {
+        1 => "Não retido",
+        2 => "Retido pelo tomador",
+        3 => "Retido pelo intermediário",
+        _ => tipo?.ToString() ?? "-",
+    };
+
+    /// <summary>Lê o NfseDpsRequest do payload — direto ou embrulhado em
+    /// NfseDpsSubstituicaoRequest (detecta cMotivo), mesma regra do
+    /// MapperDps.LerRequest. Retorna null se não for um DPS (ex.: payload
+    /// legado da rota sandbox).</summary>
+    private static NfseDpsRequest? TryDeserializeDps(string payload)
+    {
+        try
+        {
+            using var json = JsonDocument.Parse(payload);
+            var root = json.RootElement.Clone();
+            if (root.TryGetProperty("cMotivo", out _))
+                return root.Deserialize<NfseDpsSubstituicaoRequest>(JsonOpts)?.Dps;
+            return root.Deserialize<NfseDpsRequest>(JsonOpts);
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static IEnumerable<string> Chunk(string valor, int tamanho)
+    {
+        for (var i = 0; i < valor.Length; i += tamanho)
+            yield return valor.Substring(i, Math.Min(tamanho, valor.Length - i));
+    }
+
+    private static string FormatarCnpjCpf(string valor) => valor.Length switch
+    {
+        14 => $"{valor[..2]}.{valor.Substring(2, 3)}.{valor.Substring(5, 3)}/{valor.Substring(8, 4)}-{valor[12..]}",
+        11 => $"{valor[..3]}.{valor.Substring(3, 3)}.{valor.Substring(6, 3)}-{valor[9..]}",
+        _ => valor,
+    };
 
     private static IEnumerable<string> CabecalhoItens()
     {

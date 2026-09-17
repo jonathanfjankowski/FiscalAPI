@@ -72,14 +72,74 @@ public class GeradorPdfQuestPdfTests
     }
 
     [Fact]
-    public async Task Danfse_gera_pdf_simplificado()
+    public async Task Danfse_com_payload_dps_gera_pdf_valido()
     {
-        var bytes = await new GeradorPdfQuestPdf().GerarDanfseAsync(
-            Documento(Fiscal.Core.ModelosDocumento.NFSeNacional, "AUTORIZADA"), Tenant(), CancellationToken.None);
+        var doc = Documento(Fiscal.Core.ModelosDocumento.NFSeNacional, "AUTORIZADA");
+        // Identificador NFS-e Nacional (inf.Id, 50 posições) — não é chave de 44.
+        doc.ChaveAcesso = "DPS" + new string('9', 47);
+        doc.PayloadEntrada = """
+            {
+              "ambiente": "homologacao",
+              "serie": 1,
+              "dataCompetencia": "2026-09-01",
+              "tomador": { "cnpjCpf": "12345678000199", "nome": "Tomador Teste",
+                "endereco": { "codigoMunicipioIbge": "4106902", "cep": "80000000",
+                  "logradouro": "Rua Y", "numero": "20", "bairro": "Centro" } },
+              "servico": { "codigoTributarioNacional": "010701",
+                "codigoTributarioMunicipal": "1273", "descricaoServico": "Desenvolvimento de software",
+                "codigoNbs": "112011000" },
+              "valores": { "valorServicos": 1500.00, "tributacaoIssqn": 1, "retencaoIssqn": 1,
+                "aliquotaIssqn": 5,
+                "tributacaoFederal": { "cstPisCofins": "01", "valorPis": 7.5, "valorCofins": 34.5,
+                  "valorRetidoIrrf": 0, "valorRetidoCsll": 0, "valorRetidoCpp": 0 },
+                "totalTributos": { "federal": 42.0, "estadual": 0, "municipal": 75.0 } },
+              "informacoesComplementares": "Serviço prestado conforme contrato 123."
+            }
+            """;
+
+        var bytes = await new GeradorPdfQuestPdf().GerarDanfseAsync(doc, Tenant(), CancellationToken.None);
 
         bytes.Should().NotBeEmpty();
         Encoding.ASCII.GetString(bytes, 0, 4).Should().Be("%PDF");
     }
+
+    [Fact]
+    public async Task Danfse_com_payload_de_substituicao_gera_pdf_valido()
+    {
+        var doc = Documento(Fiscal.Core.ModelosDocumento.NFSeNacional, "AUTORIZADA");
+        doc.PayloadEntrada = """
+            {
+              "cMotivo": 1,
+              "xMotivo": "Erro na emissão",
+              "chaveSubstituida": "DPS99999999999999999999999999999999999999999999999999",
+              "dps": {
+                "ambiente": "homologacao",
+                "serie": 1,
+                "servico": { "codigoTributarioNacional": "010701", "descricaoServico": "Correção de software" },
+                "valores": { "valorServicos": 100.00, "tributacaoIssqn": 1, "retencaoIssqn": 1 }
+              }
+            }
+            """;
+
+        var bytes = await new GeradorPdfQuestPdf().GerarDanfseAsync(doc, Tenant(), CancellationToken.None);
+
+        bytes.Should().NotBeEmpty();
+        Encoding.ASCII.GetString(bytes, 0, 4).Should().Be("%PDF");
+    }
+
+    [Fact]
+    public async Task Danfse_com_payload_legado_ainda_gera_pdf()
+    {
+        // Documentos antigos de sandbox gravavam EmissaoRequest no PayloadEntrada;
+        // o DANFSe deve continuar gerando (só sem as seções de serviço/tomador).
+        var doc = Documento(Fiscal.Core.ModelosDocumento.NFSeNacional, "AUTORIZADA");
+
+        var bytes = await new GeradorPdfQuestPdf().GerarDanfseAsync(doc, Tenant(), CancellationToken.None);
+
+        bytes.Should().NotBeEmpty();
+        Encoding.ASCII.GetString(bytes, 0, 4).Should().Be("%PDF");
+    }
+
     [Fact]
     public async Task Danfce_com_chave_e_qrcode_no_xml_gera_pdf_valido()
     {
