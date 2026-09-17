@@ -266,11 +266,16 @@ public static class MapperDps
             Trib = new NACIONAL.Trib
             {
                 TribMun = tribMun,
-                // totTrib é obrigatório no layout 1.01; indTotTrib 0 = não
-                // totaliza (o contrato ainda não expõe totais de tributos).
+                // totTrib é obrigatório (choice): vTotTrib zerado — a API não
+                // recebe totais aproximados de tributos no contrato NFS-e hoje.
                 TotTrib = new NACIONAL.TotTrib
                 {
-                    IndTotTrib = 0,
+                    VTotTrib = new NACIONAL.VTotTrib
+                    {
+                        VTotTribFed = 0,
+                        VTotTribEst = 0,
+                        VTotTribMun = 0,
+                    },
                 },
             },
         };
