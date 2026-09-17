@@ -160,7 +160,9 @@ public record EmissaoRequest(
     string? TipoOperacao = null,             // v2 F4: saida|entrada (tpNF)
     string? IndicadorPresenca = null,        // v2 F4: presencial|internet|teleatendimento|entrega_domicilio|fora_estabelecimento|outros (indPres)
     string? IndicadorConsumidorFinal = null, // v2 F4: sim|nao (indFinal)
-    List<NfRefDto>? NfesReferenciadas = null); // v2 F4 — grupo NFref; devolucao exige
+    List<NfRefDto>? NfesReferenciadas = null, // v2 F4 — grupo NFref; devolucao exige
+    int? IndicadorIntermediador = null,      // NT 2020.006 (indIntermed): 0=sem intermediador (default na NF-e), 1=site/plataforma de terceiros; só NF-e (mod 55)
+    string? CnpjIntermediador = null);       // CNPJ do intermediador — obrigatório quando indicadorIntermediador=1 (grupo infIntermed)
 
 public record NfRefDto(
     [Required, MaxLength(44)] string ChaveAcesso);

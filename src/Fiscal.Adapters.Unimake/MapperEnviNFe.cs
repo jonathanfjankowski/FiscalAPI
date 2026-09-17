@@ -95,6 +95,12 @@ public static class MapperEnviNFe
                 Fone = respTec.Fone,
             };
 
+        if (!nfce && req.CnpjIntermediador is { } cnpjInt && !string.IsNullOrWhiteSpace(cnpjInt))
+            nfe.InfNFeField.InfIntermed = new InfIntermed
+            {
+                CNPJ = new string(cnpjInt.Where(char.IsDigit).ToArray()),
+            };
+
         return new EnviNFe
         {
             Versao = "4.00",
@@ -145,7 +151,7 @@ public static class MapperEnviNFe
                 _ => throw new ErroNaoRecuperavelException(
                     $"tipoOperacao '{req.TipoOperacao}' inválido — use saida ou entrada."),
             },
-            IdDest = DestinoOperacao.OperacaoInterna,
+            IdDest = IdDestDe(req, nfce, tenant),
             CMunFG = int.Parse(tenant.CodigoMunicipioIbge!),
             TpImp = nfce ? FormatoImpressaoDANFE.NFCe : FormatoImpressaoDANFE.NormalRetrato,
             TpEmis = doc.ModoContingencia switch
@@ -174,6 +180,9 @@ public static class MapperEnviNFe
                     $"indicadorConsumidorFinal '{req.IndicadorConsumidorFinal}' inválido — use sim ou nao."),
             },
             IndPres = indPres,
+            // indIntermed (NT 2020.006): PR rejeita NF-e sem o campo (434).
+            // Default 0 = operação sem intermediador; só existe no leiaute mod 55.
+            IndIntermed = MapearIndIntermed(req, nfce),
             ProcEmi = ProcessoEmissao.AplicativoContribuinte,
             VerProc = VerProc,
             NFref = MapearNfref(req, numeroItem: 0),
@@ -187,6 +196,38 @@ public static class MapperEnviNFe
             && !string.Equals(ufDest, tenant.Uf, StringComparison.OrdinalIgnoreCase))
             return IndicadorPresenca.OperacaoInternet;
         return IndicadorPresenca.OperacaoPresencial;
+    }
+
+    /// <summary>IdDest: interna quando NFC-e ou sem UF de destinatário; senão,
+    /// interestadual quando a UF do destinatário difere da UF do emitente.</summary>
+    private static DestinoOperacao IdDestDe(EmissaoRequest req, bool nfce, Tenant tenant)
+    {
+        if (nfce || req.Destinatario?.Endereco?.Uf is not { Length: 2 } ufDest)
+            return DestinoOperacao.OperacaoInterna;
+        return string.Equals(ufDest, tenant.Uf, StringComparison.OrdinalIgnoreCase)
+            ? DestinoOperacao.OperacaoInterna
+            : DestinoOperacao.OperacaoInterestadual;
+    }
+
+    private static IndicadorIntermediario? MapearIndIntermed(EmissaoRequest req, bool nfce)
+    {
+        if (nfce)
+            return null; // grupo só existe no leiaute da NF-e (mod 55)
+
+        var v = req.IndicadorIntermediador;
+        if (v is null)
+            return IndicadorIntermediario.OperacaoSemIntermediador; // default: sem intermediador
+        if (v == 0)
+            return IndicadorIntermediario.OperacaoSemIntermediador;
+        if (v == 1)
+        {
+            if (string.IsNullOrWhiteSpace(req.CnpjIntermediador))
+                throw new ErroNaoRecuperavelException(
+                    "indicadorIntermediador=1 exige cnpjIntermediador (grupo infIntermed).");
+            return IndicadorIntermediario.OperacaoSitePlataformaTerceiro;
+        }
+        throw new ErroNaoRecuperavelException(
+            $"indicadorIntermediador {v} inválido — use 0 (sem intermediador) ou 1 (plataforma de terceiros).");
     }
 
     private static List<NFref> MapearNfref(EmissaoRequest req, int numeroItem)
@@ -499,6 +540,8 @@ public static class MapperEnviNFe
             GIBSUF = ibsUf,
             GIBSMun = ibsMun,
             GCBS = gcbs,
+            // vIBS do item = vIBSUF + vIBSMun (SEFAZ valida: rejeição 1150).
+            VIBS = (double)(dto.ValorIbsEstadual ?? 0m) + (double)(dto.ValorIbsMunicipal ?? 0m),
         };
         if (dto.BaseCalculo is { } bc) grupo.VBC = (double)bc;
 

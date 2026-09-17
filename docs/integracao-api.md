@@ -744,6 +744,8 @@ Corpo do POST de emissão (`/nfe` e `/nfce`):
 | `indicadorPresenca` | string | não | `presencial` \| `internet` \| `teleatendimento` \| `entrega_domicilio` \| `fora_estabelecimento` \| `outros` (indPres) |
 | `indicadorConsumidorFinal` | string | não | `sim` (default) \| `nao` (indFinal) |
 | `nfesReferenciadas` | array | devolução | Chaves de 44 dígitos (`[{ "chaveAcesso": "..." }]`) → grupo `NFref`. **Obrigatória quando `finalidade = "devolucao"`** |
+| `indicadorIntermediador` | int | não | NT 2020.006 (indIntermed, **só NF-e 55**): `0` = operação sem intermediador (default) \| `1` = operação em site/plataforma de terceiros. SEFAZ-PR rejeita com **434** quando ausente na NF-e |
+| `cnpjIntermediador` | string | quando `indicadorIntermediador = 1` | CNPJ do intermediador da transação → grupo `infIntermed` |
 
 ```json
 {

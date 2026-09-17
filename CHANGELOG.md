@@ -1,5 +1,25 @@
 # Changelog
 
+## [Não lançada]
+
+### Adicionado
+- **`indicadorIntermediador` / `cnpjIntermediador` no `EmissaoRequest`**
+  (NT 2020.006 — grupo `indIntermed`/`infIntermed`, só NF-e mod 55). Default
+  `0` (sem intermediador) quando ausente — SEFAZ-PR rejeitava toda NF-e sem
+  o campo com **434**. Com `1`, `cnpjIntermediador` é obrigatório e vira o
+  grupo `infIntermed` no XML. Validado em homologação real (PR): a 434 sai,
+  a emissão avança para as validações de cadastro.
+
+### Corrigido
+- **`vIBS` do item zerado** (`gIBSCBS`): o mapper nunca somava
+  `vIBSUF + vIBSMun` no total do item — SEFAZ-PR rejeitava com **1150**
+  ("vIBS informado 0.00, calculado 0.10") em qualquer item com IBS. Agora
+  o total é calculado no mapper.
+- **`IdDest` fixo em "operação interna"**: NF-e com destinatário de outra UF
+  ia como interna e a SEFAZ-PR rejeitava com **521**. Agora o mapper deriva
+  interna × interestadual comparando a UF do destinatário com a UF do
+  emitente (NFC-e segue sempre interna).
+
 ## [1.12.1-alpha] — 2026-09-17
 
 ### Corrigido — pendências da revisão técnica pós-release
