@@ -86,15 +86,17 @@ public class MapperDpsTests
         MapperDps.Criar(Documento(), Tenant(), req, Ambiente.Homologacao, subst);
 
     [Fact]
-    public void Id_do_dps_tem_44_digitos_no_formato_do_layout()
+    public void Id_do_dps_tem_45_digitos_no_formato_do_layout()
     {
         var dps = Mapear(Request());
 
-        // DPS + cLocEmi(7) + CNPJ(14) + série(5) + nDPS(15)
-        dps.InfDPS.Id.Should().Be("DPS4106902" + "12345678000199" + "00001" + "000000000000042");
+        // DPS + cLocEmi(7) + tpInsc(1) + CNPJ(14) + série(5) + nDPS(15) = 45
+        // posições (layout 1.01 — tpInsc "1" = CNPJ).
+        dps.InfDPS.Id.Should().Be("DPS4106902" + "1" + "12345678000199" + "00001" + "000000000000042");
         dps.Versao.Should().Be("1.01");
         dps.InfDPS.Serie.Should().Be("00001");
-        dps.InfDPS.NDPS.Should().Be("000000000000042");
+        // TSNumDPS: padrão [1-9][0-9]{0,14} — sem zeros à esquerda.
+        dps.InfDPS.NDPS.Should().Be("42");
         dps.InfDPS.DCompet.Should().Be(new DateTimeOffset(2026, 9, 5, 0, 0, 0, TimeSpan.Zero));
     }
 

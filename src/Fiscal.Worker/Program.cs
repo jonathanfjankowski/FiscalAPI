@@ -52,8 +52,9 @@ builder.Services.AddScoped<IRepositorioManifestacao, RepositorioManifestacao>();
 builder.Services.AddScoped<IRepositorioNsu, RepositorioNsu>();
 
 // ModoSandbox=true no Worker também registra EmissorMock (caso queira rodar
-// ponta-a-ponta sem certificado real). Default: false (produção).
-var modoSandbox = builder.Configuration.GetValue("Fiscal:ModoSandbox", false);
+// ponta-a-ponta sem certificado real). Default: true (falha segura, igual à
+// API) — produção sobe com Fiscal__ModoSandbox=false explícito.
+var modoSandbox = builder.Configuration.GetValue("Fiscal:ModoSandbox", true);
 if (modoSandbox)
 {
     builder.Services.AddSingleton<IEmissorFiscal, EmissorMock>();

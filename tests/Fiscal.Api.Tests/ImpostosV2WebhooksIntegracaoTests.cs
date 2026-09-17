@@ -360,9 +360,13 @@ public class ImpostosV2WebhooksIntegracaoTests(EmissaoIntegracaoTests.Factory fa
     // ---------- observabilidade (Fase 4) ----------
 
     [Fact]
-    public async Task Metrics_endpoint_responde_com_metricas_de_negocio()
+    public async Task Metrics_endpoint_exige_autenticacao_e_responde_com_metricas_de_negocio()
     {
-        var client = factory.CreateClient();
+        // Anônimo → 401 (/metrics expõe métricas de negócio; opt-in anônimo via config).
+        var anonimo = factory.CreateClient();
+        (await anonimo.GetAsync("/metrics")).StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+
+        var client = Client();
 
         var resp = await client.GetAsync("/metrics");
 

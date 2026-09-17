@@ -232,9 +232,12 @@ builder.Services.AddAuthentication(ApiKeyAuthenticationOptions.SchemeName)
 builder.Services.AddSingleton<IAdminTokenService, AdminTokenService>();
 builder.Services.AddAuthorization(o => o.AddPolicy("Admin", p => p.RequireRole("admin")));
 
-// --- CORS (painel admin em dev via Vite; em prod o SPA é servido pela própria API) ---
+// --- CORS (painel admin em dev via Vite; em prod o SPA é servido pela própria API).
+// Origens configuráveis — ex.: Fiscal__Cors__Origens__0=https://admin.exemplo.com
+var corsOrigens = builder.Configuration.GetSection("Fiscal:Cors:Origens").Get<string[]>()
+    ?? ["http://localhost:5173", "http://localhost:4173"];
 builder.Services.AddCors(o => o.AddPolicy("frontend", p => p
-    .WithOrigins("http://localhost:5173", "http://localhost:4173")
+    .WithOrigins(corsOrigens)
     .AllowAnyHeader()
     .AllowAnyMethod()));
 
@@ -315,14 +318,25 @@ if (!app.Environment.IsEnvironment("Testing"))
     });
 }
 
-app.MapPrometheusScrapingEndpoint("/metrics");
+// /metrics exige autenticação (API key/JWT) por padrão — expõe métricas de
+// negócio. Opt-in anônimo para clusters que raspam Prometheus na rede interna
+// sem credencial (Fiscal:Observabilidade:MetricsAnonimos=true).
+if (builder.Configuration.GetValue("Fiscal:Observabilidade:MetricsAnonimos", false))
+    app.MapPrometheusScrapingEndpoint("/metrics");
+else
+    app.MapPrometheusScrapingEndpoint("/metrics").RequireAuthorization();
 app.MapHealthChecks("/health/live");
 app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("ready")
 });
 
-if (app.Environment.IsDevelopment())
+// Migrations rodam sempre em Development; fora dele, só com
+// Fiscal:RodarMigrations=true (compose: só a API roda — o Worker espera a API
+// ficar healthy, evitando corrida de schema/Hangfire entre instâncias).
+var rodarMigrations = app.Environment.IsDevelopment()
+    || builder.Configuration.GetValue("Fiscal:RodarMigrations", false);
+if (rodarMigrations)
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();

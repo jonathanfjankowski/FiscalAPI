@@ -9,10 +9,10 @@
 
 | | |
 |---|---|
-| **Versão atual** | `1.10.0-alpha` (2026-09-06) |
+| **Versão atual** | `1.12.1-alpha` (2026-09-17) |
 | **Estágio** | Alpha — funcional ponta a ponta em sandbox; emissão real NF-e/NFC-e/NFS-e(DPS) implementada, homologação contra SEFAZ pendente de certificado A1 |
 | **Stack** | .NET 10 (API + Worker Hangfire), PostgreSQL/EF Core, React 19 + Vite + Tailwind v4 (painel admin), Unimake.DFe (adapters SEFAZ), QuestPDF (DANFE/DANFCe) |
-| **Testes** | 173/173 (116 unitários em `Fiscal.Core.Tests`, 57 de integração em `Fiscal.Api.Tests`) |
+| **Testes** | 182/182 (118 unitários em `Fiscal.Core.Tests`, 64 de integração em `Fiscal.Api.Tests`) |
 | **Licença** | MIT — licença da `Unimake.DFe` **confirmada (MIT)**, sem bloqueios de licença |
 | **Repositório** | https://github.com/jonathanfjankowski/FiscalAPI |
 

@@ -76,6 +76,10 @@ curl http://localhost:8080/health/ready
       boot; volume criptografado continua sendo opção do host.
 - [x] Role da aplicação sem UPDATE/DELETE em `auditoria` — **migration
       `EnforceAuditoriaAppendOnly` aplica o REVOKE no startup** (verificado).
+- [x] Migrations em produção — **suportado (1.12.1-alpha)**: `MigrateAsync`
+      roda em Development ou com `Fiscal:RodarMigrations=true`; no compose,
+      só a API roda (`true`) e o Worker espera `api: healthy`. Em
+      multi-instância, manter a flag em uma única réplica (ou job de init).
 - [ ] Backup da KEK em cofre separado do backup do banco. *(ops)*
 - [ ] Teste de restore executado e documentado (data + resultado). *(ops —
       agora também há `docker/restore-pitr.sh` para testar o PITR)*

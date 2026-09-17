@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.12.1-alpha] — 2026-09-17
+
+### Corrigido — pendências da revisão técnica pós-release
+- **DANFSe próprio**: `GerarDanfseAsync` reutilizava o gerador de DANFE —
+  NFS-e saía com layout de NF-e, silenciosamente e com 200 (o comentário do
+  código prometia "falha alto" que nunca existiu). Agora há DANFSe
+  simplificado da NFS-e Nacional: prestador/tomador, detalhamento do serviço
+  (cTribNac/cTribMun/NBS), valores (ISSQN, retenções federais, total de
+  tributos), identificador NFS-e e protocolo. Lê `NfseDpsRequest` direto ou
+  embrulhado em substituição (mesma regra do `MapperDps`); payload legado da
+  rota sandbox segue gerando PDF, sem as seções de serviço/tomador.
+- **`/metrics` passa a exigir autenticação** (API key/JWT) — expunha métricas
+  de negócio anonimamente. Opt-in anônimo para raspagem Prometheus em rede
+  interna: `Fiscal:Observabilidade:MetricsAnonimos=true`.
+- **Worker alinhado à API no default de `Fiscal:ModoSandbox` (true)** —
+  rodando sem config, a API ia de mock e o Worker de SEFAZ real. Produção
+  segue com `Fiscal__ModoSandbox=false` explícito (compose/appsettings já
+  fixam o valor).
+- **CORS configurável**: `Fiscal:Cors:Origens` (env
+  `Fiscal__Cors__Origens__0=…`), fallback para os defaults de dev do Vite.
+- **Migrations fora do Development**: `MigrateAsync` agora roda também com
+  `Fiscal:RodarMigrations=true` (antes produção não tinha caminho de schema).
+  Compose: só a API roda (`true`), Worker fica `false` e espera
+  `api: healthy` — sem corrida de schema/Hangfire.
+- **Healthchecks no compose**: API via `/health/ready` (busybox wget) e
+  Worker por processo (`pgrep` — não serve HTTP).
+- **Higiene de segredos**: `.pfx` A1 real saiu da raiz do repositório (estava
+  com a senha no nome do arquivo — gitignored, mas exposto no disco).
+- **182/182 testes** (118 + 64): DANFSe ganha DPS/substituição/legado;
+  `/metrics` anônimo → 401 e autenticado → 200; Id do DPS atualizado ao
+  layout 1.01 (45 posições com tpInsc, NDPS sem zeros à esquerda) — teste
+  que o 1.12.0 deixou defasado contra o mapper.
+
 ## [1.12.0-alpha] — 2026-09-17
 
 ### Adicionado — ciclo de vida de certificado + bateria de homologação real iniciada (SEFAZ-PR, A1 real)
