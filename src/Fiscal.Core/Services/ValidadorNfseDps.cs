@@ -77,6 +77,20 @@ public class ValidadorNfseDps
         if (v.ValorServicos < 0)
             erros.Add(new("valores.valorServicos", "valorServicos não pode ser negativo."));
 
+        // R-NFS014 — exportação de serviços: resultado da prestação no exterior
+        // (cPaisResult, tabela ISO 3166-1 numérica) e ISS não devido.
+        if (v.TributacaoIssqn == 3)
+        {
+            if (string.IsNullOrWhiteSpace(v.CodigoPaisResultado) ||
+                !System.Text.RegularExpressions.Regex.IsMatch(v.CodigoPaisResultado, @"^\d{3}$"))
+                erros.Add(new("valores.codigoPaisResultado",
+                    "Exportação (tribISSQN = 3) exige codigoPaisResultado com 3 dígitos (ISO 3166-1 numérico — ex.: 840 = EUA)."));
+
+            if (v.AliquotaIssqn is > 0)
+                erros.Add(new("valores.aliquotaIssqn",
+                    "Exportação (tribISSQN = 3) não é tributável pelo ISS — aliquotaIssqn deve ser nula ou zero."));
+        }
+
         if (v.TributacaoFederal is { } fed)
         {
             if (fed.CstPisCofins is not null &&

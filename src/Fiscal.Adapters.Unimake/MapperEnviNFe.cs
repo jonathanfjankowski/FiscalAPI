@@ -30,7 +30,7 @@ public static class MapperEnviNFe
 {
     // verAplic no XML — da versão do assembly (VersionPrefix no Directory.Build.props),
     // não hardcoded: campos "verAplic > 20 chars" rejeitam na SEFAZ.
-    private static readonly string VerProc =
+    internal static readonly string VerProc =
         "FiscalAPI " + (typeof(MapperEnviNFe).Assembly.GetName().Version?.ToString(3) ?? "1.12.2");
 
     /// <summary>
@@ -77,12 +77,7 @@ public static class MapperEnviNFe
                 Emit = MapearEmit(tenant, ufEmit),
                 Det = MapearDets(req, nfce),
                 Total = MapearTotal(req),
-                Transp = new Transp
-                {
-                    ModFrete = req.Totais.ValorFrete is > 0
-                        ? ModalidadeFrete.ContratacaoFretePorContaRemetente_CIF
-                        : ModalidadeFrete.SemOcorrenciaTransporte,
-                },
+                Transp = MapearTransp(req),
                 Pag = MapearPag(req, nfce),
             }
         };
@@ -161,6 +156,8 @@ public static class MapperEnviNFe
             {
                 "SVCAN" => TipoEmissao.ContingenciaSVCAN,
                 "SVCRS" => TipoEmissao.ContingenciaSVCRS,
+                "EPEC" => TipoEmissao.ContingenciaEPEC,
+                "OFFLINE" => TipoEmissao.ContingenciaOffLine,
                 _ => TipoEmissao.Normal,
             },
             TpAmb = ambiente == Ambiente.Producao ? TipoAmbiente.Producao : TipoAmbiente.Homologacao,
@@ -357,6 +354,7 @@ public static class MapperEnviNFe
             if (v2?.Cofins is not null) imposto.COFINS = MapearCofins(v2.Cofins, i + 1, item.Codigo);
             if (v2?.IbsCbs is not null) imposto.IBSCBS = MapearIbsCbs(v2.IbsCbs, i + 1, item.Codigo);
             if (v2?.Is is not null) imposto.IS = MapearIs(v2.Is, i + 1, item.Codigo);
+            if (v2?.Ii is not null) imposto.II = MapearIi(v2.Ii, i + 1, item.Codigo);
 
             var unidade = string.IsNullOrWhiteSpace(item.Unidade) ? "UN" : item.Unidade;
 
@@ -389,8 +387,71 @@ public static class MapperEnviNFe
             });
             if (item.ValorDesconto is { } desconto)
                 dets[^1].Prod.VDesc = (double)desconto;
+            if (item.Dis is { Count: > 0 })
+                dets[^1].Prod.DI = MapearDis(item.Dis, i + 1, item.Codigo);
         }
         return dets;
+    }
+
+    /// <summary>v2 §7 — grupo DI (Declaração de Importação) por item.</summary>
+    private static List<DI> MapearDis(List<DiDto> dis, int numeroItem, string codigoItem)
+    {
+        return dis.Select(diDto =>
+        {
+            if (diDto.ViaTransporte is < 1 or > 12)
+                throw new ErroNaoRecuperavelException(
+                    $"Item {numeroItem} ('{codigoItem}'): DI viaTransporte {diDto.ViaTransporte} inválida — use 1 a 12 (tabela SEFAZ).");
+            if (diDto.FormaIntermediacao is < 1 or > 3)
+                throw new ErroNaoRecuperavelException(
+                    $"Item {numeroItem} ('{codigoItem}'): DI formaIntermediacao {diDto.FormaIntermediacao} inválida — use 1 (conta própria), 2 (conta e ordem) ou 3 (encomenda).");
+
+            return new DI
+            {
+                NDI = diDto.NumeroDi,
+                DDI = diDto.DataRegistro.DateTime,
+                XLocDesemb = diDto.LocalDesembaraco,
+                UFDesemb = ParseUf(diDto.UfDesembaraco, numeroItem, codigoItem),
+                DDesemb = diDto.DataDesembaraco.DateTime,
+                TpViaTransp = (ViaTransporteInternacional)diDto.ViaTransporte,
+                VAFRMM = (double)(diDto.ValorAfrmm ?? 0),
+                TpIntermedio = (FormaImportacaoIntermediacao)diDto.FormaIntermediacao,
+                CNPJ = string.IsNullOrWhiteSpace(diDto.CnpjAdquirente)
+                    ? null
+                    : new string(diDto.CnpjAdquirente.Where(char.IsDigit).ToArray()),
+                CExportador = diDto.CodigoExportador,
+                Adi = (diDto.Adicoes ?? []).Select(a => new Adi
+                {
+                    NAdicao = a.NumeroAdicao,
+                    NSeqAdic = a.Sequencial,
+                    CFabricante = a.CodigoFabricante,
+                    VDescDI = (double)(a.ValorDescontoDi ?? 0),
+                    NDraw = a.NumeroDrawback,
+                }).ToList(),
+            };
+        }).ToList();
+    }
+
+    private static UFBrasil ParseUf(string uf, int numeroItem, string codigoItem)
+    {
+        if (!Enum.TryParse<UFBrasil>(uf, ignoreCase: true, out var parsed) || parsed == UFBrasil.NaoDefinido)
+            throw new ErroNaoRecuperavelException(
+                $"Item {numeroItem} ('{codigoItem}'): UF inválida no grupo DI: '{uf}'.");
+        return parsed;
+    }
+
+    /// <summary>v2 §7 — grupo II (Imposto de Importação). Valores prontos do ERP.</summary>
+    private static II MapearIi(IiDto ii, int numeroItem, string codigoItem)
+    {
+        if (ii.ValorIi is null)
+            throw new ErroNaoRecuperavelException(
+                $"Item {numeroItem} ('{codigoItem}'): grupo II exige valorIi (vII).");
+        return new II
+        {
+            VBC = (double)(ii.BaseCalculo ?? 0),
+            VDespAdu = (double)(ii.ValorDespesasAduaneiras ?? 0),
+            VII = (double)ii.ValorIi.Value,
+            VIOF = (double)(ii.ValorIof ?? 0),
+        };
     }
 
     private static IPI MapearIpi(IpiDto ipi, int numeroItem, string codigoItem)
@@ -638,6 +699,24 @@ public static class MapperEnviNFe
                     };
                     PreencherFcp(icms00, icms);
                     return new ICMS { ICMS00 = icms00 };
+
+                case "10" when icms.PercentualBcOperacao is not null || icms.UfSt is not null:
+                    // v2 §7 — ICMSPart: partilha do ICMS na operação interestadual
+                    // (mesma tag ICMS10; distingue-se por pBCOp/UFST informados).
+                    Exigir(icms.BaseCalculo is not null && icms.Aliquota is not null && icms.Valor is not null,
+                        "CST 10 (partilha) exige baseCalculo, aliquota e valor.", numeroItem, codigoItem);
+                    var icmsPart = new ICMSPart
+                    {
+                        Orig = origem,
+                        CST = "10",
+                        ModBC = MapearModBc(icms.ModBc, numeroItem, codigoItem),
+                        VBC = (double)icms.BaseCalculo!.Value,
+                        PICMS = (double)icms.Aliquota!.Value,
+                        VICMS = (double)icms.Valor!.Value,
+                        PBCOp = (double)(icms.PercentualBcOperacao ?? 0),
+                    };
+                    if (icms.UfSt is not null) icmsPart.UFST = ParseUf(icms.UfSt, numeroItem, codigoItem);
+                    return new ICMS { ICMSPart = icmsPart };
 
                 case "10":
                     var st10 = ExigirSt(st, numeroItem, codigoItem, "10");
@@ -1023,7 +1102,7 @@ public static class MapperEnviNFe
         var vFrete = req.Totais.ValorFrete ?? 0;
         var vSeg = req.Totais.ValorSeguro ?? 0;
         var vOutro = req.Totais.OutrasDespesas ?? 0;
-        decimal vIpi = 0, vPis = 0, vCofins = 0;
+        decimal vIpi = 0, vPis = 0, vCofins = 0, vIi = 0;
         decimal vBcIbsCbs = 0, vIbsUf = 0, vIbsMun = 0, vCbsTotal = 0, vIsTotal = 0;
 
         foreach (var item in req.Itens)
@@ -1032,6 +1111,8 @@ public static class MapperEnviNFe
                 vDesc += descontoItem;
             if (item.ImpostosV2?.Ipi is { } ipi)
                 vIpi += ipi.Valor ?? 0;
+            if (item.ImpostosV2?.Ii is { } ii)
+                vIi += ii.ValorIi ?? 0;
             if (item.ImpostosV2?.Pis is { } pis)
                 vPis += pis.Valor ?? 0;
             if (item.ImpostosV2?.Cofins is { } cofins)
@@ -1095,6 +1176,7 @@ public static class MapperEnviNFe
         if (vSeg != 0) tot.VSeg = (double)vSeg;
         if (vOutro != 0) tot.VOutro = (double)vOutro;
         if (vIpi != 0) tot.VIPI = (double)vIpi;
+        if (vIi != 0) tot.VII = (double)vIi;
         if (vPis != 0) tot.VPIS = (double)vPis;
         if (vCofins != 0) tot.VCOFINS = (double)vCofins;
 
@@ -1118,6 +1200,55 @@ public static class MapperEnviNFe
         return total;
     }
 
+    /// <summary>v2 §7 — grupo transp: modalidade, transportadora, volumes/lacres.
+    /// Sem transporte informado: CIF quando há frete, senão "sem ocorrência" (9).</summary>
+    private static Transp MapearTransp(EmissaoRequest req)
+    {
+        var t = req.Transporte;
+        var modalidade = t?.ModalidadeFrete is { Length: > 0 } mod
+            ? int.TryParse(mod, out var m) && m is >= 0 and <= 9
+                ? (ModalidadeFrete)m
+                : throw new ErroNaoRecuperavelException(
+                    $"transporte.modalidadeFrete '{mod}' inválido — use 0–9 (código SEFAZ).")
+            : req.Totais.ValorFrete is > 0
+                ? ModalidadeFrete.ContratacaoFretePorContaRemetente_CIF
+                : ModalidadeFrete.SemOcorrenciaTransporte;
+
+        var transp = new Transp { ModFrete = modalidade };
+
+        if (t?.Transportadora is { } tra)
+        {
+            transp.Transporta = new Transporta
+            {
+                CNPJ = tra.CnpjCpf is { Length: 14 } ? new string(tra.CnpjCpf.Where(char.IsDigit).ToArray()) : null,
+                CPF = tra.CnpjCpf is { Length: 11 } ? new string(tra.CnpjCpf.Where(char.IsDigit).ToArray()) : null,
+                XNome = tra.Nome,
+                IE = tra.InscricaoEstadual,
+                XEnder = tra.EnderecoLogradouro,
+                XMun = tra.EnderecoMunicipio,
+                UF = string.IsNullOrWhiteSpace(tra.EnderecoUf) ? null : ParseUf(tra.EnderecoUf, 0, "transporte"),
+            };
+        }
+
+        if (t?.Volumes is { Count: > 0 } vols)
+        {
+            if (vols.Count > 100)
+                throw new ErroNaoRecuperavelException("transporte.volumes aceita no máximo 100 grupos vol.");
+            transp.Vol = vols.Select(v => new Vol
+            {
+                QVol = (double)(v.Quantidade ?? 0),
+                Esp = v.Especie,
+                Marca = v.Marca,
+                NVol = v.Numeracao,
+                PesoL = (double)(v.PesoLiquido ?? 0),
+                PesoB = (double)(v.PesoBruto ?? 0),
+                Lacres = (v.Lacres ?? []).Select(l => new Lacres { NLacre = l.Numero }).ToList(),
+            }).ToList();
+        }
+
+        return transp;
+    }
+
     private static Pag MapearPag(EmissaoRequest req, bool nfce)
     {
         var formas = req.Pagamento ?? [];
@@ -1135,7 +1266,31 @@ public static class MapperEnviNFe
             {
                 if (!int.TryParse(p.Forma, out var forma))
                     throw new ErroNaoRecuperavelException($"Forma de pagamento inválida (use o código numérico da SEFAZ): '{p.Forma}'.");
-                return new DetPag { TPag = (MeioPagamento)forma, VPag = (double)p.Valor };
+                var detPag = new DetPag { TPag = (MeioPagamento)forma, VPag = (double)p.Valor };
+
+                // v2 §7 — transação de cartão (regra SEFAZ: dados do cartão são
+                // obrigatórios quando a operação é integrada à credenciadora).
+                if (p.TipoIntegracao is not null || p.Bandeira is not null || p.Autorizacao is not null)
+                {
+                    if (string.IsNullOrWhiteSpace(p.TipoIntegracao) ||
+                        string.IsNullOrWhiteSpace(p.Bandeira) ||
+                        string.IsNullOrWhiteSpace(p.Autorizacao))
+                        throw new ErroNaoRecuperavelException(
+                            "Pagamento com cartão exige tipoIntegracao, bandeira e autorização juntos (grupo card).");
+                    detPag.Card = new Card
+                    {
+                        TpIntegra = p.TipoIntegracao == "1"
+                            ? TipoIntegracaoPagamento.PagamentoIntegrado
+                            : TipoIntegracaoPagamento.PagamentoNaoIntegrado,
+                        CNPJ = string.IsNullOrWhiteSpace(p.CnpjCredenciadora)
+                            ? null
+                            : new string(p.CnpjCredenciadora.Where(char.IsDigit).ToArray()),
+                        TBand = (BandeiraOperadoraCartao)int.Parse(p.Bandeira),
+                        CAut = p.Autorizacao,
+                    };
+                }
+
+                return detPag;
             }).ToList(),
         };
     }

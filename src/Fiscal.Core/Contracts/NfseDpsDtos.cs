@@ -53,8 +53,9 @@ public record NfseValoresDto(
     [Range(1, 4)] int TributacaoIssqn,                          // 1 tributável, 2 imunidade, 3 exportação, 4 não incidência
     [Range(1, 3)] int RetencaoIssqn,                            // 1 não retido, 2 retido pelo tomador, 3 pelo intermediário
     [Range(0, 100)] decimal? AliquotaIssqn,
-    NfseTribFedDto? TributacaoFederal,
-    NfseTotTribDto? TotalTributos);
+    [MaxLength(3)] string? CodigoPaisResultado = null,          // cPaisResult — R-NFS014: obrigatório na exportação (tribISSQN = 3), ISO 3166-1 numérico
+    NfseTribFedDto? TributacaoFederal = null,
+    NfseTotTribDto? TotalTributos = null);
 
 public record NfseTribFedDto(
     [MaxLength(3)] string? CstPisCofins,

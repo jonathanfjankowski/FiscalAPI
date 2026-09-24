@@ -256,6 +256,7 @@ public static class MapperDps
             TpRetISSQN = (TipoRetencaoISSQN)v.RetencaoIssqn,
         };
         if (v.AliquotaIssqn is { } aliquota) tribMun.PAliq = (double)aliquota;
+        if (!string.IsNullOrWhiteSpace(v.CodigoPaisResultado)) tribMun.CPaisResult = v.CodigoPaisResultado;
 
         var valores = new NACIONAL.Valores
         {

@@ -285,4 +285,42 @@ public class ValidadorNfseDpsTests
 
         Validar(req).Should().Contain(e => e.Contains("tpOper informado exige tpEnteGov"));
     }
+
+    // ------------------------------------------------------ R-NFS014 (exportação)
+
+    [Fact]
+    public void Exportacao_sem_codigo_pais_resultado_falha()
+    {
+        var req = RequestBase() with
+        {
+            Valores = new NfseValoresDto(100, null, null, TributacaoIssqn: 3, RetencaoIssqn: 1,
+                AliquotaIssqn: null, CodigoPaisResultado: null, null, null),
+        };
+
+        Validar(req).Should().Contain(e => e.Contains("codigoPaisResultado"));
+    }
+
+    [Fact]
+    public void Exportacao_com_pais_e_iss_zerado_passa()
+    {
+        var req = RequestBase() with
+        {
+            Valores = new NfseValoresDto(100, null, null, TributacaoIssqn: 3, RetencaoIssqn: 1,
+                AliquotaIssqn: null, CodigoPaisResultado: "840", null, null),
+        };
+
+        Validar(req).Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Exportacao_com_aliquota_iss_positiva_falha()
+    {
+        var req = RequestBase() with
+        {
+            Valores = new NfseValoresDto(100, null, null, TributacaoIssqn: 3, RetencaoIssqn: 1,
+                AliquotaIssqn: 5, CodigoPaisResultado: "840", null, null),
+        };
+
+        Validar(req).Should().Contain(e => e.Contains("não é tributável pelo ISS"));
+    }
 }

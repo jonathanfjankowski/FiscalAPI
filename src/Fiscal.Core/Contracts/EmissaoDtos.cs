@@ -41,7 +41,8 @@ public record ItemDto(
     [MaxLength(7)] string? Cest = null,          // v2 F2 — 7 dígitos
     [MaxLength(14)] string? Gtin = null,         // v2 F2 — EAN 8/12/13/14
     [MaxLength(6)] string? Unidade = null,       // v2 F2 — uCom/uTrib, default "UN"
-    [Range(0, double.MaxValue)] decimal? ValorDesconto = null);  // v2 F2 — vDesc do item
+    [Range(0, double.MaxValue)] decimal? ValorDesconto = null,  // v2 F2 — vDesc do item
+    List<DiDto>? Dis = null);                    // v2 §7 — grupo DI (importação) do item
 
 // Contrato v2 dos grupos de imposto (evolução aditiva — ver docs/plano-evolucao-contrato-v2.md).
 // Um item usa 'impostos' (legado, ICMS 00/40/41/50) OU 'impostosV2' — nunca os dois.
@@ -53,7 +54,8 @@ public record ItemImpostosDtoV2(
     PisDto? Pis = null,        // v2 F3
     CofinsDto? Cofins = null,  // v2 F3
     IbsCbsDto? IbsCbs = null,  // v2 F5 — reforma (LC 214/2025, NT 2025.x)
-    IsDto? Is = null);         // v2 F5 — Imposto Seletivo
+    IsDto? Is = null,          // v2 F5 — Imposto Seletivo
+    IiDto? Ii = null);         // v2 §7 — Imposto de Importação (grupo II, item importado)
 
 /// <summary>Reforma tributária (IBS/CBS). vIBS informado = UF + municipal.</summary>
 public record IbsCbsDto(
@@ -109,7 +111,9 @@ public record IcmsDto(
     decimal? PercentualDiferimento = null,    // pDif — CST 51
     decimal? ValorIcmsDiferido = null,        // vICMSDif — CST 51
     IcmsStDto? St = null,
-    DifalDto? Difal = null);                  // interestadual consumidor final (ICMSUFDest)
+    DifalDto? Difal = null,                   // interestadual consumidor final (ICMSUFDest)
+    decimal? PercentualBcOperacao = null,     // v2 §7 — pBCOp (CST 10, ICMSPart)
+    [MaxLength(2)] string? UfSt = null);      // v2 §7 — UFST (CST 10: UF da ST partilhada)
 
 public record IcmsStDto(
     string? ModBcSt = null,            // 0–6 — obrigatório no ST próprio (10/70/90, CSOSN 201/202/203/900)
@@ -146,7 +150,11 @@ public record TotaisDto(
 
 public record PagamentoDto(
     [Required, MaxLength(2)] string Forma,
-    [Range(0, double.MaxValue)] decimal Valor);
+    [Range(0, double.MaxValue)] decimal Valor,
+    [MaxLength(2)] string? TipoIntegracao = null,     // v2 §7 — tpIntegra: "1" integrado/credenciado, "2" não integrado
+    [MaxLength(2)] string? Bandeira = null,           // v2 §7 — tBand (01 Visa, 02 Mastercard, 03 Amex…)
+    [MaxLength(20)] string? Autorizacao = null,       // v2 §7 — cAut (código de autorização da operação)
+    [MaxLength(14)] string? CnpjCredenciadora = null); // v2 §7 — CNPJ da credenciadora (CNPJ do card)
 
 public record EmissaoRequest(
     [Required] string Ambiente,
@@ -162,10 +170,70 @@ public record EmissaoRequest(
     string? IndicadorConsumidorFinal = null, // v2 F4: sim|nao (indFinal)
     List<NfRefDto>? NfesReferenciadas = null, // v2 F4 — grupo NFref; devolucao exige
     int? IndicadorIntermediador = null,      // NT 2020.006 (indIntermed): 0=sem intermediador (default na NF-e), 1=site/plataforma de terceiros; só NF-e (mod 55)
-    string? CnpjIntermediador = null);       // CNPJ do intermediador — obrigatório quando indicadorIntermediador=1 (grupo infIntermed)
+    string? CnpjIntermediador = null,        // CNPJ do intermediador — obrigatório quando indicadorIntermediador=1 (grupo infIntermed)
+    TransporteDto? Transporte = null,        // v2 §7 — grupo transp (modalidade, transportadora, volumes/lacres)
+    bool? ContingenciaOffline = null);       // v2 §7 — NFC-e offline (tpEmis 9): emite sem contato com a SEFAZ, transmite depois
 
 public record NfRefDto(
     [Required, MaxLength(44)] string ChaveAcesso);
+
+// ---- v2 §7 — transporte/volumes ------------------------------------------------
+
+public record TransporteDto(
+    [MaxLength(2)] string? ModalidadeFrete = null, // modFrete "0"-"9"; default "9" (sem ocorrência) / "0" (CIF) quando há frete
+    TransportadoraDto? Transportadora = null,
+    List<VolumeDto>? Volumes = null);              // grupo vol (máx. 100)
+
+public record TransportadoraDto(
+    [MaxLength(14)] string? CnpjCpf = null,        // CNPJ (14) ou CPF (11)
+    [MaxLength(60)] string? Nome = null,
+    [MaxLength(14)] string? InscricaoEstadual = null,
+    [MaxLength(100)] string? EnderecoLogradouro = null,
+    [MaxLength(60)] string? EnderecoMunicipio = null,
+    [MaxLength(2)] string? EnderecoUf = null);
+
+public record VolumeDto(
+    [Range(0, int.MaxValue)] int? Quantidade = null,              // qVol
+    [MaxLength(60)] string? Especie = null,                       // esp (caixa, pallet…)
+    [MaxLength(60)] string? Marca = null,                         // marca
+    [MaxLength(60)] string? Numeracao = null,                     // nVol
+    [Range(0, double.MaxValue)] decimal? PesoLiquido = null,      // pesoL (kg)
+    [Range(0, double.MaxValue)] decimal? PesoBruto = null,        // pesoB (kg)
+    List<VolumeLacreDto>? Lacres = null);                         // grupo lacres (máx. 5000)
+
+public record VolumeLacreDto(
+    [Required, MaxLength(60)] string Numero);                     // nLacre
+
+// ---- v2 §7 — importação (DI + II) ----------------------------------------------
+
+public record DiDto(
+    [Required, MaxLength(12)] string NumeroDi,                    // nDI
+    [Required] DateTimeOffset DataRegistro,                       // dDI
+    [Required, MaxLength(60)] string LocalDesembaraco,            // xLocDesemb
+    [Required, MaxLength(2)] string UfDesembaraco,                // UFDesemb
+    [Required] DateTimeOffset DataDesembaraco,                    // dDesemb
+    [Required] int ViaTransporte,                                 // tpViaTransp 1–12
+    [Required] int FormaIntermediacao,                            // tpIntermedio 1–4
+    [Required, MaxLength(19)] string CodigoExportador,            // cExportador
+    [Range(0, double.MaxValue)] decimal? ValorAfrmm = null,       // vAFRMM
+    [MaxLength(14)] string? CnpjAdquirente = null,                // CNPJ adquirente/encomendante
+    [MaxLength(14)] string? CnpjProdutor = null,                  // CNPJ produtor estrangeiro
+    List<DiAdicaoDto>? Adicoes = null);                           // grupo adi (máx. 999)
+
+public record DiAdicaoDto(
+    [Required] int NumeroAdicao,                                  // nAdicao
+    [Required] int Sequencial,                                    // nSeqAdic
+    [Required, MaxLength(20)] string CodigoFabricante,            // cFabricante
+    [Range(0, double.MaxValue)] decimal? ValorDescontoDi = null,  // vDescDI
+    [MaxLength(11)] string? NumeroDrawback = null);               // nDraw
+
+/// <summary>Imposto de Importação (grupo II) — item importado. Valores prontos
+/// do ERP; compõem o total da nota junto com vIPI/vFrete etc.</summary>
+public record IiDto(
+    [Range(0, double.MaxValue)] decimal? BaseCalculo = null,             // vBC
+    [Range(0, double.MaxValue)] decimal? ValorDespesasAduaneiras = null, // vDespAdu
+    [Range(0, double.MaxValue)] decimal? ValorIi = null,                 // vII
+    [Range(0, double.MaxValue)] decimal? ValorIof = null);               // vIOF
 
 public record EmissaoResponse(
     Guid Id,

@@ -178,7 +178,7 @@ public class ValidadorImpostosV2
             {
                 erros.Add(new(P("cst"),
                     $"CST '{cst}' não suportado (suporta {string.Join("/", CstsSuportados)}). " +
-                    "CST 02/15/30/53/61, ICMSPart e ICMSST não fazem parte do contrato atual."));
+                    "CST 02/15/30/53/61 e ICMSST (próprio) não fazem parte do contrato atual. ICMSPart usa CST 10 com percentualBcOperacao/ufSt."));
                 return;
             }
             ValidarPorCst(cst, icms, P, erros);
@@ -204,6 +204,12 @@ public class ValidadorImpostosV2
         {
             case "00":
                 ExigirTributacao("00", icms, P, erros);
+                break;
+            case "10" when icms.PercentualBcOperacao is not null || icms.UfSt is not null:
+                // v2 §7 — ICMSPart (partilha do ICMS na operação interestadual,
+                // mesma tag ICMS10): ST própria é opcional — quando informada,
+                // o ST vai para a UF partilhada (ufSt).
+                ExigirTributacao("10", icms, P, erros);
                 break;
             case "10":
                 ExigirTributacao("10", icms, P, erros);
@@ -329,6 +335,12 @@ public class ValidadorImpostosV2
         }
         if (difal.BaseDestino is null || difal.ValorIcmsDestino is null || difal.ValorIcmsOrigem is null)
             erros.Add(new(P("difal"), "DIFAL exige baseDestino, valorIcmsDestino e valorIcmsOrigem."));
+
+        // Espelho da guarda da FiscalLIB (V004 audit): vICMSUFDest negativo só
+        // acontece com pICMSUFDest < pICMSInter — entrada impossível no MOC.
+        if (difal.ValorIcmsDestino is < -Tolerancia)
+            erros.Add(new(P("difal.valorIcmsDestino"),
+                $"vICMSUFDest negativo ({difal.ValorIcmsDestino:N2}) — alíquota interna da UF de destino menor que a interestadual."));
 
         // Fórmula do MOC (rejeições SEFAZ 815/816): vICMSUFDest =
         // vBCUFDest × (pICMSUFDest − pICMSInter) — o ICMS próprio já remete

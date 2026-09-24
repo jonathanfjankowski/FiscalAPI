@@ -365,4 +365,81 @@ public class ValidadorImpostosV2Tests
 
         Validar(item).Should().Contain(e => e.Contains("unidadeTributavel e quantidadeTributavel juntos"));
     }
+
+    // --------------------------------------------------- espelho FiscalLIB V004
+    // A FiscalLIB emite base × alíquota / 100 com arredondamento bancário
+    // (half-to-even) em 2 casas. Estes casos travam o contrato entre as duas
+    // pontas: os valores V004 da lib passam na tolerância de R$ 0,01; acima
+    // dela, rejeita. Espelho dos casos de tests/Unit/MatematicaTest.php.
+
+    [Fact]
+    public void Valores_arredondamento_bancario_V004_da_lib_passam()
+    {
+        // 100 × 12,3456% = 12,3456 → V004 = 12,35 (o truncamento daria 12,34)
+        // 333,33 × 18% = 59,9994 → V004 = 60,00 (o truncamento daria 59,99)
+        // 10 × 0,05% = 0,005 → V004 = 0,00 (meio → dígito par) · 10 × 0,15% = 0,015 → V004 = 0,02
+        var casos = new (decimal BaseCalculo, decimal Aliquota, decimal Valor)[]
+        {
+            (100m, 12.3456m, 12.35m),
+            (333.33m, 18m, 60.00m),
+            (10m, 0.05m, 0.00m),
+            (10m, 0.15m, 0.02m),
+        };
+
+        foreach (var (bc, aliq, valor) in casos)
+        {
+            var erros = Validar(Item(new IcmsDto(Origem: 0, Cst: "00",
+                BaseCalculo: bc, Aliquota: aliq, Valor: valor)));
+
+            erros.Should().BeEmpty($"base {bc} × {aliq}% = V004 {valor} deve passar");
+        }
+    }
+
+    [Fact]
+    public void Valor_alem_da_tolerancia_de_um_centavo_falha()
+    {
+        // 333,33 × 18% = 59,9994 — V004 60,00 passa; 59,98 difere 0,0194 > 0,01
+        var erros = Validar(Item(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 333.33m, Aliquota: 18, Valor: 59.98m)));
+
+        erros.Should().Contain(e => e.Contains("impostosV2.icms.valor"));
+    }
+
+    [Fact]
+    public void Cst_51_com_diferimento_minimo_omitindo_valor_passa()
+    {
+        // pDif 0,004 (< 0,005): a lib agora compara em 4 casas — diferimento
+        // existe, então `valor` (próprio) fica nulo e vICMSDif vai 0,00.
+        var erros = Validar(Item(new IcmsDto(Origem: 0, Cst: "51",
+            BaseCalculo: 1000, Aliquota: 12,
+            ValorIcmsOperacao: 120, PercentualDiferimento: 0.004m, ValorIcmsDiferido: 0.00m)));
+
+        erros.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Difal_com_interna_menor_que_interestadual_falha()
+    {
+        // Espelho da guarda da FiscalLIB: vICMSUFDest negativo é entrada
+        // impossível (pICMSUFDest < pICMSInter).
+        var erros = Validar(Item(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 12, Valor: 12,
+            Difal: new DifalDto(AliquotaInterestadual: 12,
+                BaseDestino: 100, AliquotaDestino: 10,
+                ValorIcmsDestino: -2, ValorIcmsOrigem: 0))));
+
+        erros.Should().Contain(e => e.Contains("vICMSUFDest negativo"));
+    }
+
+    [Fact]
+    public void Difal_com_interna_igual_interestadual_passa()
+    {
+        var erros = Validar(Item(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 12, Valor: 12,
+            Difal: new DifalDto(AliquotaInterestadual: 12,
+                BaseDestino: 100, AliquotaDestino: 12,
+                ValorIcmsDestino: 0, ValorIcmsOrigem: 0))));
+
+        erros.Should().BeEmpty();
+    }
 }
