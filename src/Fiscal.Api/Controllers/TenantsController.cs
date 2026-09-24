@@ -1,4 +1,5 @@
 using Fiscal.Api.Authentication;
+using Fiscal.Api.Infrastructure;
 using Fiscal.Core.Entities;
 using Fiscal.Core.Interfaces;
 using Fiscal.Persistence;
@@ -32,12 +33,14 @@ public class TenantsController : ControllerBase
     private readonly FiscalDbContext _db;
     private readonly ICertificadoStore _certStore;
     private readonly IRepositorioAuditoria _auditoria;
+    private readonly bool _sandbox;
 
-    public TenantsController(FiscalDbContext db, ICertificadoStore certStore, IRepositorioAuditoria auditoria)
+    public TenantsController(FiscalDbContext db, ICertificadoStore certStore, IRepositorioAuditoria auditoria, IConfiguration configuration)
     {
         _db = db;
         _certStore = certStore;
         _auditoria = auditoria;
+        _sandbox = configuration.GetValue("Fiscal:ModoSandbox", true);
     }
 
     /// <summary>Perfil fiscal do tenant (dados do emitente usados na NFe/NFC-e).</summary>
@@ -151,14 +154,10 @@ public class TenantsController : ControllerBase
 
         if (req.WebhookUrl is not null)
         {
+            var problema = ValidadorWebhookUrl.Validar(req.WebhookUrl, _sandbox);
+            if (problema is not null)
+                return Problem(statusCode: 422, title: "webhookUrl inválida", detail: problema);
             var url = req.WebhookUrl.Trim();
-            if (url.Length > 0 &&
-                (!Uri.TryCreate(url, UriKind.Absolute, out var uri) ||
-                 (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)))
-            {
-                return Problem(statusCode: 422, title: "webhookUrl inválida",
-                    detail: "Use uma URL absoluta http(s) (ex.: https://integrador.example.com/webhooks).");
-            }
             tenant.WebhookUrl = url.Length == 0 ? null : url;
         }
 

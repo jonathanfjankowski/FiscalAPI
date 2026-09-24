@@ -37,6 +37,14 @@ public class ApiKeysController : ControllerBase
         if (req.Ambiente != "producao" && req.Ambiente != "homologacao")
             return Problem(statusCode: 422, title: "Ambiente inválido", detail: "Use 'producao' ou 'homologacao'.");
 
+        // Separação de privilégio entre ambientes: key de homologação vazada não
+        // pode mintar key de produção do tenant. Só admin (endpoint próprio) cria
+        // chave de produção sem ter uma em mãos.
+        if (req.Ambiente == "producao" && HttpContext.GetAmbiente() != Ambiente.Producao)
+            return Problem(statusCode: 403,
+                title: "API Key de homologação não pode criar chave de produção.",
+                detail: "Use uma chave de produção já existente ou solicite ao administrador via painel.");
+
         var key = ApiKeyAuthenticationHandler.GenerateKey(req.Ambiente);
         var hash = ApiKeyAuthenticationHandler.HashKey(key);
         var apiKey = new ApiKey

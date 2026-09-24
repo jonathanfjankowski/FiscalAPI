@@ -74,12 +74,15 @@ public class AdminTenantsController : ControllerBase
     private readonly FiscalDbContext _db;
     private readonly IRepositorioAuditoria _auditoria;
     private readonly ICertificadoStore _certStore;
+    private readonly bool _sandbox;
 
-    public AdminTenantsController(FiscalDbContext db, IRepositorioAuditoria auditoria, ICertificadoStore certStore)
+    public AdminTenantsController(
+        FiscalDbContext db, IRepositorioAuditoria auditoria, ICertificadoStore certStore, IConfiguration configuration)
     {
         _db = db;
         _auditoria = auditoria;
         _certStore = certStore;
+        _sandbox = configuration.GetValue("Fiscal:ModoSandbox", true);
     }
 
     [HttpGet]
@@ -136,6 +139,9 @@ public class AdminTenantsController : ControllerBase
                 detail: "Use 'producao' ou 'homologacao' (ou omita o campo para não criar chave).");
         if (req.RegimeTributario is < 1 or > 3)
             return Problem(statusCode: 422, title: "RegimeTributario inválido", detail: "Use 1 (Simples), 2 (Simples exceto sublimite) ou 3 (Regime Normal).");
+        var problemaWebhook = Infrastructure.ValidadorWebhookUrl.Validar(req.WebhookUrl, _sandbox);
+        if (problemaWebhook is not null)
+            return Problem(statusCode: 422, title: "WebhookUrl inválida", detail: problemaWebhook);
 
         if (await _db.Tenants.AnyAsync(t => t.Cnpj == cnpj, ct))
             return Problem(statusCode: 409, title: "Já existe um tenant com este CNPJ.");
@@ -280,7 +286,13 @@ public class AdminTenantsController : ControllerBase
         if (req.Bairro is not null) tenant.Bairro = req.Bairro;
         if (req.Cep is not null) tenant.Cep = SomenteDigitos(req.Cep) is { Length: 8 } cep ? cep : req.Cep;
         if (req.NomeMunicipio is not null) tenant.NomeMunicipio = req.NomeMunicipio;
-        if (req.WebhookUrl is not null) tenant.WebhookUrl = req.WebhookUrl;
+        if (req.WebhookUrl is not null)
+        {
+            var problema = Infrastructure.ValidadorWebhookUrl.Validar(req.WebhookUrl, _sandbox);
+            if (problema is not null)
+                return Problem(statusCode: 422, title: "WebhookUrl inválida", detail: problema);
+            tenant.WebhookUrl = req.WebhookUrl.Trim() is { Length: > 0 } url ? url : null;
+        }
         if (req.WebhookSecret is not null)
         {
             // Sempre cifrado em repouso (envelope KEK); texto plano legado é limpo.

@@ -19,6 +19,7 @@ public class StatusServicoController : ControllerBase
     private readonly ICertificadoStore _certStore;
     private readonly IRepositorioTenant _tenantRepo;
     private readonly IDistributedCache _cache;
+    private readonly ILogger<StatusServicoController> _logger;
     private readonly bool _sandbox;
 
     public StatusServicoController(
@@ -27,13 +28,15 @@ public class StatusServicoController : ControllerBase
         ICertificadoStore certStore,
         IRepositorioTenant tenantRepo,
         IDistributedCache cache,
-        IConfiguration configuration)
+        IConfiguration configuration,
+        ILogger<StatusServicoController> logger)
     {
         _consulta = consulta;
         _certRepo = certRepo;
         _certStore = certStore;
         _tenantRepo = tenantRepo;
         _cache = cache;
+        _logger = logger;
         _sandbox = configuration.GetValue("Fiscal:ModoSandbox", true);
     }
 
@@ -87,10 +90,14 @@ public class StatusServicoController : ControllerBase
                 }, ct);
             return Ok(ParaResponse(status, false));
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
+            // Detalhe interno (ex.Message pode carregar endpoint/stack) fica no
+            // log — o cliente recebe só o 503 genérico em RFC 7807.
+            _logger.LogError(ex, "Consulta de status-servico falhou para tenant {TenantId} (modelo {Modelo}).",
+                tenantId, modelo);
             return Problem(statusCode: 503, title: "Consulta de status indisponível",
-                detail: $"{ex.GetType().Name}: {ex.Message}");
+                detail: "A SEFAZ não respondeu à consulta de status. Tente novamente em instantes.");
         }
     }
 

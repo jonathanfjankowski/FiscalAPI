@@ -2,7 +2,6 @@ using System.Threading.RateLimiting;
 using Fiscal.Adapters.Unimake;
 using Fiscal.Api.Authentication;
 using Fiscal.Api.Infrastructure;
-using Fiscal.Api.Validators;
 using Fiscal.Core.Entities;
 using Fiscal.Core.Interfaces;
 using Fiscal.Core.Services;
@@ -243,7 +242,6 @@ builder.Services.AddCors(o => o.AddPolicy("frontend", p => p
 
 // --- Controllers + Rate Limiting (in-memory por enquanto; Redis entra na F3.1) ---
 builder.Services.AddControllers();
-builder.Services.AddValidatorsFromAssemblyContaining<EmissaoRequestValidator>();
 builder.Services.AddRateLimiter(opt =>
 {
     opt.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -283,7 +281,27 @@ builder.Services.AddHealthChecks()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
+// Problemas RFC 7807 para exceções não tratadas (sem stack/erro interno no corpo).
+builder.Services.AddProblemDetails();
+
 var app = builder.Build();
+
+// Exceções não tratadas → application/problem+json (500 genérico; detalhe fica no log).
+app.UseExceptionHandler();
+
+// Atrás de proxy TLS (nginx/compose), RemoteIpAddress é o do proxy — sem
+// ForwardedHeaders o rate limit por IP colapsa todos os clientes num único
+// balde. Configure Fiscal__Proxies__KnownProxies__0=<ip do proxy> (por padrão,
+// só o loopback é confiável).
+var forwardedOptions = new Microsoft.AspNetCore.Builder.ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+        | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto,
+};
+foreach (var proxy in builder.Configuration.GetSection("Fiscal:Proxies:KnownProxies").Get<string[]>() ?? [])
+    if (System.Net.IPAddress.TryParse(proxy, out var ip))
+        forwardedOptions.KnownProxies.Add(ip);
+app.UseForwardedHeaders(forwardedOptions);
 
 if (app.Environment.IsDevelopment())
 {
@@ -366,13 +384,16 @@ if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 }
 
 // --- Fallback do SPA: rotas do painel que não são arquivo (history API) ---
+// /metrics precisa estar na exclusão — senão o SPA sombreia o endpoint do
+// Prometheus quando o painel está publicado (wwwroot/index.html existe).
 if (File.Exists(spaIndex))
 {
     app.MapWhen(
         ctx => !(ctx.Request.Path.StartsWithSegments("/v1")
                  || ctx.Request.Path.StartsWithSegments("/health")
                  || ctx.Request.Path.StartsWithSegments("/hangfire")
-                 || ctx.Request.Path.StartsWithSegments("/openapi")),
+                 || ctx.Request.Path.StartsWithSegments("/openapi")
+                 || ctx.Request.Path.StartsWithSegments("/metrics")),
         spa => spa.Run(ctx => ctx.Response.SendFileAsync(spaIndex)));
 }
 
