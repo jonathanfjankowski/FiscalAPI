@@ -1,5 +1,77 @@
 # Changelog
 
+## [Não released]
+
+### Adicionado
+- **Download do XML de eventos (cancelamento/CC-e)** — `GET /v1/documentos-fiscais/{id}/eventos/{eventoId}/xml`
+  devolve o XML protocolado persistido em `EventoFiscal.XmlRetorno` (`application/xml`; 409
+  "ainda não disponível" enquanto o evento não chega a PROCESSADO/REJEITADO; 404 se o evento
+  não pertence ao documento). Consumidores arquivam o XML para o contador sem depender de
+  reprocesso.
+- **Campo `xml` na resposta de cancelamento/CC-e** — no replay idempotente de evento já
+  processado o corpo traz `xml` (o XML protocolado); no primeiro aceite (PENDENTE) vem nulo.
+- **Payload do webhook de evento identifica o evento** — `documento.cancelado` e
+  `documento.carta_correcao` agora incluem `evento: {id, protocolo, status, criadoEm}` para o
+  consumidor casar o webhook com o registro local e baixar o XML na hora.
+- **Estado terminal `FALHA_EMISSAO`** — emissão esgotada (`MaxTentativas` 48 em
+  CONTINGENCIA, ~8h) não reprocessa mais para sempre: terminal + webhook
+  `documento.falha_emissao`. Eventos esgotam em `ERRO`.
+- **Guarda SSRF no webhook** — o despachante bloqueia IPs privados/loopback/link-local na
+  conexão (`ConnectCallback`, imune a DNS rebinding). Opt-out on-premise:
+  `Fiscal:Webhooks:PermitirRedesPrivadas=true`.
+- **Lockout no login admin** — 5 falhas por (IP, e-mail) em 15 min retornam 429
+  (contador no `IDistributedCache`, compatível com Redis).
+- **Rotação de KEK** — envelope de criptografia versado (`[0x02, kid]`): config
+  `Certificados:ChaveMestraKEKAnterior` mantém o legado legível enquanto os dados novos
+  nascem com a KEK nova (envelopes antigos continuam lendo sem prefixo).
+- **`nfeProc` na recuperação CONSIT** — autorização recuperada por consulta de protocolo
+  agora reconstrói o XML de distribuição (XML assinado salvo + protNFe da consulta);
+  NFC-e recuperada sai com QR code. `ProtocoloConsultado` ganhou `XmlProtNFe`.
+- **`Fiscal:Proxies:KnownProxies`** — `UseForwardedHeaders` configurável; atrás de proxy
+  TLS o rate limit por IP volta a discriminar clientes.
+
+### Corrigido
+- **Cancelamento/CC-e via painel admin não transmitiam** — o evento era criado PENDENTE sem
+  enfileirar `ProcessarEventoJob` e o varredor ignorava eventos sem agenda (`ProximaTentativaEm`
+  nula): documento ficava em `CANCELAMENTO_PENDENTE` para sempre. O admin enfileira o job e o
+  `VarrerEventosJob` também resgata PENDENTES sem agenda (redes contra restart).
+- **Distribuição DFe avançava o cursor com `MaxNSU`** — com mais de 50 notas pendentes, todo
+  NSU não entregue na página era pulado para sempre. O cursor agora é o `UltNSU` da resposta,
+  com loop até consumir a fila (cStat 138, limite de 20 iterações); documento sem chave
+  extraível é logado em `Error` (nunca silenciosamente descartado).
+- **Corridas nos jobs (dupla transmissão/sobrescrita de status)** — `[DisableConcurrentExecution]`
+  + claim atômico (`UPDATE ... WHERE status IN (enfileiráveis)`) em documentos, eventos,
+  manifestações e webhooks; `ProximaTentativaEm` vira lease (+15/+30 min) e os varredores
+  resgatam órfãos em `PROCESSANDO`/`ENTREGANDO` (crash no meio da execução). O método morto
+  `ObterParaLockAsync` (SELECT FOR UPDATE sem chamadores) foi removido.
+- **Idempotência concorrente devolvia 500** — duas requests simultâneas com a mesma
+  `Idempotency-Key`: a segunda agora devolve o documento/evento vencedor (replay) em vez de
+  violar o índice único. Em emissão, evento, inutilização, manifestação e caminho admin.
+- **Manifestações sem backoff** — `VarrerManifestacoesJob` re-enfileirava a cada 30 s (sem
+  `ProximaTentativaEm`) e ignorava manifestações com `Tentativas == 0` (enqueue perdido ficava
+  preso). Coluna nova `manifestacoes.proxima_tentativa_em` (migration) + backoff real + resgate.
+- **Órfãos em `PROCESSANDO` travados para sempre** — nenhum varredor cobria o status;
+  agora resgatados por lease vencido.
+- **Notas recebidas: `Take(1000)` sem ORDER BY no SQL** — com mais de 1000 notas as recentes
+  podiam não aparecer; agora ordenação (`RecebidaEm DESC`) e paginação (`page`/`pageSize`,
+  máx. 200) no banco.
+- **`/metrics` sombreado pelo fallback do SPA** — com o painel publicado, request a
+  `/metrics` recebia `index.html` (Prometheus parava de raspar); `/metrics` entrou na lista
+  de exclusões do `MapWhen`.
+- **Exceção não tratada sem RFC 7807** — `AddProblemDetails` + `UseExceptionHandler` global;
+  `/v1/status-servico` não vaza mais `ex.Message` para o cliente (503 genérico, detalhe no log).
+- **FluentValidation registrado e nunca executado** — pacote e validadores mortos removidos
+  (a validação real é DataAnnotations + validadores fiscais manuais).
+- **`Math.Abs(GetHashCode())` podia lançar OverflowException** — substituído por
+  `& 0x7fffffff` (lote/protocolo idem em mock e transmissores).
+- **Inutilização aceitava modelos 56–64** (`[Range(55,65)]`) — agora só 55/65; cancelamento
+  admin também valida modelo 55/65.
+- **`MetricasFiscais.VersaoServico` hardcoded "1.10.0"** — versão do assembly (mesmo
+  mecanismo do `verAplic`).
+- **`catch (Exception)` engolia cancelamento no shutdown** do DFe (OperationCanceledException
+  repropagada).
+- **`.gitignore` não cobria variantes de `.env`** (`.env*` + `!.env.example`).
+
 ## [1.12.2-alpha] — 2026-09-17
 
 ### Corrigido

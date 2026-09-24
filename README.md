@@ -6,7 +6,7 @@
 
 > **API open source para emissão de NF-e, NFC-e e NFS-e (padrão Nacional) — multi-tenant, assíncrona, .NET 10.**
 
-> 🚧 **PROJETO EM DESENVOLVIMENTO — ALPHA (`1.12.0-alpha`).**
+> 🚧 **PROJETO EM DESENVOLVIMENTO — ALPHA (`1.12.2-alpha`).**
 > Está funcional ponta a ponta em **modo sandbox** e a emissão real de
 > NF-e/NFC-e está implementada. A **bateria de homologação contra a SEFAZ
 > começou** (SEFAZ-PR, A1 real): status-serviço OK (`cStat 107`), emissão
@@ -34,8 +34,8 @@ numeração isolados.
 - **NF-e (55)** — emissão real via Unimake.DFe, fluxo assíncrono em duas
   fases (lote → recibo → consulta), layout 4.00 (ICMS CST 00/40/41/50).
 - **NFC-e (65)** — emissão síncrona com CSC/IdCSC do tenant (cifrado) e QR code.
-- **NFS-e Nacional (DPS)** — envelope REST completo com sandbox; transmissão
-  real é a próxima sprint.
+- **NFS-e Nacional (DPS)** — envelope REST completo; transmissão real
+  implementada (sandbox via `EmissorMock`).
 - **Eventos** — cancelamento, carta de correção e inutilização transmitidos
   à SEFAZ com retry próprio.
 - **Contingência SVC-AN/SVC-RS** — em timeout/rede, consulta o protocolo e
@@ -91,7 +91,7 @@ curl http://localhost:8080/health/ready
 ```bash
 dotnet restore
 dotnet build
-dotnet test              # 75 testes (unitários + integração)
+dotnet test              # 199 testes (120 unitários + 79 integração)
 dotnet run --project src/Fiscal.Api      # API em http://localhost:5039
 dotnet run --project src/Fiscal.Worker   # host Hangfire (jobs)
 ```
@@ -221,7 +221,7 @@ startup via seed (`ADMIN_EMAIL`/`ADMIN_PASSWORD`, segredo em
 | `GET` | `/v1/certificados` | ApiKey | Lista metadados |
 | `POST` | `/v1/documentos-fiscais/nfe` | ApiKey | Emite NF-e (assíncrono, `202 Accepted` com `{id, status, links}`) |
 | `POST` | `/v1/documentos-fiscais/nfce` | ApiKey | Emite NFC-e (assíncrono, `202 Accepted`) |
-| `POST` | `/v1/documentos-fiscais/nfse` | ApiKey | Emite NFS-e Nacional/DPS (assíncrono; sandbox via mock; transmissão real na próxima sprint NFS-e) |
+| `POST` | `/v1/documentos-fiscais/nfse` | ApiKey | Emite NFS-e Nacional/DPS (assíncrono; sandbox via mock; transmissão real implementada — DPS) |
 | `GET` | `/v1/documentos-fiscais/{id}` | ApiKey | Consulta status e metadados |
 | `GET` | `/v1/documentos-fiscais/{id}/pdf` | ApiKey | DANFE/DANFCe (PDF binário; `?formato=base64` para JSON) — só AUTORIZADA/CANCELADA |
 | `POST` | `/v1/documentos-fiscais/{id}/cancelamento` | ApiKey | Cancela NF-e/NFC-e autorizada (até janela da SEFAZ) |
@@ -372,7 +372,7 @@ para `FALHA` (terminal, visível na tabela `outbox_webhooks`).
 dotnet test
 ```
 
-75 testes (42 unitários no `Fiscal.Core.Tests`, 33 de integração no
+199 testes (120 unitários no `Fiscal.Core.Tests`, 79 de integração no
 `Fiscal.Api.Tests`), incluindo segurança (PBKDF2, envelope AES-GCM, API
 keys, upload de certificado), contingência, distribuição DFe/manifestação e
 webhooks. Classes de integração rodam serializadas (`[Collection]`) sobre o

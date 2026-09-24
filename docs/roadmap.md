@@ -33,8 +33,8 @@ Tudo abaixo de "Feito" está implementado e coberto por testes automatizados;
 1. **Homologação real NFe/NFC-e/eventos/NFS-e** contra SEFAZ (exige
    certificado A1 — checklist no README) + ajustes de default por UF que
    ela revelar. A NFS-e Nacional exige ainda credenciamento do prestador.
-2. **Confirmação da licença da `Unimake.DFe`** (o MIT do projeto depende
-   dessa checagem).
+2. ~~Confirmação da licença da `Unimake.DFe`~~ — **confirmada MIT**
+   (CHANGELOG 1.12.0).
 
 ## Como votar/propor
 

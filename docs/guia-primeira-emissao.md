@@ -68,6 +68,8 @@ O que cada variável faz (modelo em `.env.example`):
 | `MODO_SANDBOX=true` | Registra o `EmissorMock` no lugar dos adapters SEFAZ | É o que dispensa certificado A1 e contato externo |
 | `ADMIN_EMAIL` / `ADMIN_PASSWORD` | Primeiro operador do painel (seed no startup) | Sem eles o painel não tem login |
 | `ADMIN_JWT_SECRET` | Assina os JWT do painel admin | **Mín. 32 caracteres**; sem valor, login do painel desabilitado |
+| `REDIS_CONNECTION_STRING` | Cache distribuído + rate limit compartilhado | Opcional; compose já define default |
+| `RESPTEC_CNPJ` / `RESPTEC_CONTATO` / `RESPTEC_EMAIL` / `RESPTEC_FONE` | Grupo `infRespTec` do XML | Obrigatório em algumas SEFAZ (rejeição **972** sem ele) |
 
 > O compose sobe **dois** serviços da aplicação — a **API** (HTTP, porta
 > 8080) e o **Worker** (host Hangfire). Quem executa a fila e autoriza a nota

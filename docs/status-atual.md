@@ -9,10 +9,10 @@
 
 | | |
 |---|---|
-| **Versão atual** | `1.12.1-alpha` (2026-09-17) |
+| **Versão atual** | `1.12.2-alpha` (2026-09-24) |
 | **Estágio** | Alpha — funcional ponta a ponta em sandbox; emissão real NF-e/NFC-e/NFS-e(DPS) implementada, homologação contra SEFAZ pendente de certificado A1 |
 | **Stack** | .NET 10 (API + Worker Hangfire), PostgreSQL/EF Core, React 19 + Vite + Tailwind v4 (painel admin), Unimake.DFe (adapters SEFAZ), QuestPDF (DANFE/DANFCe) |
-| **Testes** | 182/182 (118 unitários em `Fiscal.Core.Tests`, 64 de integração em `Fiscal.Api.Tests`) |
+| **Testes** | 199/199 (120 unitários em `Fiscal.Core.Tests`, 79 de integração em `Fiscal.Api.Tests`) |
 | **Licença** | MIT — licença da `Unimake.DFe` **confirmada (MIT)**, sem bloqueios de licença |
 | **Repositório** | https://github.com/jonathanfjankowski/FiscalAPI |
 
@@ -120,7 +120,7 @@ As principais:
 | Indicador | Estado |
 |---|---|
 | Build + testes no CI | ✅ verde (`build-and-test.yml`) |
-| Cobertura de testes automatizados | 173 testes — segurança, ICMS/CSOSN, IPI/PIS/COFINS, NF-ref/devolução, reforma IBS/CBS/IS, DPS/substituição, contingência, DFe, webhooks, painel, métricas, secrets |
+| Cobertura de testes automatizados | 199 testes — segurança, ICMS/CSOSN, IPI/PIS/COFINS, NF-ref/devolução, reforma IBS/CBS/IS, DPS/substituição, contingência, DFe, webhooks, painel, métricas, secrets |
 | `dotnet format --verify-no-changes` | ✅ exigido no CI |
 | Migrations | Aplicadas automaticamente no startup (hand-written com atributos `[Migration]`/`[DbContext]`) |
 | Documentação | README + 18 docs em `docs/` + CHANGELOG completo 0.1 → 1.8 |

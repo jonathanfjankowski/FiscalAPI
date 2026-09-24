@@ -249,6 +249,84 @@ public class EmissaoIntegracaoTests : IClassFixture<EmissaoIntegracaoTests.Facto
     }
 
     [Fact]
+    public async Task Xml_do_evento_disponivel_apos_processamento_e_no_replay()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("ApiKey", _factory.BootstrapKey);
+
+        // Cria documento e força AUTORIZADA (requisito da CC-e).
+        var idem = $"xmlev-{Guid.NewGuid()}";
+        var resp = await client.SendAsync(BuildEmissaoRequest(idem));
+        resp.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        var docId = body.GetProperty("id").GetGuid();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
+            var doc = await db.DocumentosFiscais.FindAsync(docId);
+            doc!.Status = StatusDocumento.AUTORIZADA;
+            doc.ChaveAcesso = new string('3', 44);
+            doc.ProtocoloAutorizacao = "135000000000002";
+            await db.SaveChangesAsync();
+        }
+
+        // CC-e: aceite imediato (PENDENTE) — xml ainda não existe.
+        var cceKey = $"xmlev-cce-{Guid.NewGuid()}";
+        var cceReq = new HttpRequestMessage(HttpMethod.Post, $"/v1/documentos-fiscais/{docId}/carta-correcao")
+        {
+            Content = JsonContent.Create(new { correcao = "Correcao via teste de integracao do XML do evento" })
+        };
+        cceReq.Headers.Add("Idempotency-Key", cceKey);
+        var cceResp = await client.SendAsync(cceReq);
+        cceResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var cceBody = await cceResp.Content.ReadFromJsonAsync<JsonElement>();
+        var eventoId = cceBody.GetProperty("eventoId").GetGuid();
+        cceBody.GetProperty("status").GetString().Should().Be("PENDENTE");
+        cceBody.GetProperty("xml").ValueKind.Should().Be(JsonValueKind.Null);
+
+        // Antes do processamento: XML protocolado não existe → 409.
+        var antes = await client.GetAsync($"/v1/documentos-fiscais/{docId}/eventos/{eventoId}/xml");
+        antes.StatusCode.Should().Be(HttpStatusCode.Conflict);
+
+        // Processa o evento in-process (mock responde PROCESSADO com XmlRetorno).
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
+            var job = scope.ServiceProvider.GetRequiredService<Fiscal.Worker.Jobs.ProcessarEventoJob>();
+            await job.ExecutarAsync(eventoId, CancellationToken.None);
+
+            var evento = await db.EventosFiscais.SingleAsync(e => e.Id == eventoId);
+            evento.Status.Should().Be("PROCESSADO", because: "motivoStatus={0}", evento.MotivoStatus);
+            evento.XmlRetorno.Should().NotBeNullOrEmpty();
+        }
+
+        // Após o processamento: XML binário com o retorno protocolado.
+        var depois = await client.GetAsync($"/v1/documentos-fiscais/{docId}/eventos/{eventoId}/xml");
+        depois.StatusCode.Should().Be(HttpStatusCode.OK);
+        depois.Content.Headers.ContentType!.MediaType.Should().Be("application/xml");
+        var xml = await depois.Content.ReadAsStringAsync();
+        xml.Should().Contain("retEnvEvento").And.Contain("135");
+
+        // Replay idempotente da CC-e (doc segue AUTORIZADA) traz o xml no corpo.
+        var replayReq = new HttpRequestMessage(HttpMethod.Post, $"/v1/documentos-fiscais/{docId}/carta-correcao")
+        {
+            Content = JsonContent.Create(new { correcao = "Correcao via teste de integracao do XML do evento" })
+        };
+        replayReq.Headers.Add("Idempotency-Key", cceKey);
+        var replay = await client.SendAsync(replayReq);
+        replay.StatusCode.Should().Be(HttpStatusCode.OK);
+        var replayBody = await replay.Content.ReadFromJsonAsync<JsonElement>();
+        replayBody.GetProperty("status").GetString().Should().Be("PROCESSADO");
+        replayBody.GetProperty("xml").GetString().Should().Contain("retEnvEvento");
+
+        // Evento de outro documento → 404 (não vaza por id).
+        var roubado = await client.GetAsync($"/v1/documentos-fiscais/{Guid.NewGuid()}/eventos/{eventoId}/xml");
+        roubado.StatusCode.Should().Be(HttpStatusCode.NotFound);
+    }
+
+    [Fact]
     public async Task Emissao_autorizada_grava_outbox_webhook_e_entrega()
     {
         var client = _factory.CreateClient();

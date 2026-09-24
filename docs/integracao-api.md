@@ -1043,7 +1043,9 @@ O `422` por aritmética vem com a extensão `campo` apontando o local exato:
 | `ambiente` (payload) | `"producao"`, `"homologacao"` |
 | `tipo` (response) | `"NFE"`, `"NFCE"`, `"NFSE"` |
 | `tipo` (eventos) | `"CANCELAMENTO"`, `"CCE"`, `"INUTILIZACAO"` |
-| status de evento | `"PENDENTE"`, `"PROCESSADO"` |
+| status de evento | `"PENDENTE"`, `"PROCESSANDO"`, `"PROCESSADO"`, `"REJEITADO"`, `"ERRO"` |
+| status de documento | `"PENDENTE"`, `"PROCESSANDO"`, `"AUTORIZADA"`, `"REJEITADA"`, `"CONTINGENCIA"`, `"CANCELAMENTO_PENDENTE"`, `"CANCELADA"`, `"ERRO_CANCELAMENTO"`, `"DENEGADA"`, `"ERRO_INTERNO"`, `"FALHA_EMISSAO"` |
+| tipos de webhook | `documento.autorizado`, `documento.rejeitado`, `documento.denegado`, `documento.falha_emissao`, `documento.cancelado`, `documento.carta_correcao`, `nota.recebida`, `manifestacao.processada` |
 
 ---
 
@@ -1114,7 +1116,7 @@ Problemas que acontecem **depois** do `202` não viram erro HTTP — aparecem co
 
 ## Limitações conhecidas
 
-Versão atual (`1.12.0-alpha`) — considere no desenho da sua integração:
+Versão atual (`1.12.2-alpha`) — considere no desenho da sua integração:
 
 - **Homologação real em andamento** (SEFAZ-PR, A1 real, 2026-09-17):
   status-serviço e transmissão validados; autorização ponta a ponta pendente

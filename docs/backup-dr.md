@@ -19,7 +19,7 @@ versionamento e acesso restrito). Sem ela, os PFX cifrados são irrecuperáveis.
 | Item | Meta | Como |
 |---|---|---|
 | Backup lógico diário | RPO ≤ 24 h | `docker/backup.sh` (`pg_dump` custom format) em cron do host |
-| Retenção | 7 diários + 4 semanais | o script roda `find -mtime` e apaga backups antigos |
+| Retenção | 7 diários | `backup.sh` apaga dumps com `find -mtime +7` (camada semanal ainda não implementada) |
 | Restore testado | trimestral | `docker/restore.sh` num Postgres limpo + `dotnet test` de fumaça |
 | RTO alvo | ≤ 1 h | subir Postgres + `restore.sh` + API/Worker (docker compose) |
 | WAL archiving / PITR | RPO ≤ 5 min | **ativo no compose (1.9.0-alpha)**: `archive_mode=on` + volume `wal_archive` (journal a cada 5 min, `archive_timeout=300`); restore com `docker/restore-pitr.sh` |
