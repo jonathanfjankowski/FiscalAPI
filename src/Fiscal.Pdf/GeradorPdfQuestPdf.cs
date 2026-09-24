@@ -113,6 +113,48 @@ public class GeradorPdfQuestPdf : IGeradorPdf
                             .Bold().FontSize(11).FontColor(Colors.Red.Darken2);
                     }
 
+                    // ---- Canhoto (recebimento) — só NF-e ----
+                    if (!nfce)
+                    {
+                        col.Item().Table(t =>
+                        {
+                            t.ColumnsDefinition(c =>
+                            {
+                                c.RelativeColumn(3);
+                                c.RelativeColumn(2);
+                            });
+                            t.Cell().Border(0.5f).Padding(4).Column(x =>
+                            {
+                                x.Item().Text($"RECEBEMOS DE {tenant.RazaoSocial} OS PRODUTOS/SERVIÇOS CONSTANTES DA NOTA FISCAL INDICADA AO LADO").FontSize(7);
+                                x.Item().PaddingTop(3).Text("DATA DE RECEBIMENTO").FontSize(6);
+                                x.Item().BorderBottom(0.5f).Text(" ").FontSize(10);
+                                x.Item().Text("IDENTIFICAÇÃO E ASSINATURA DO RECEBEDOR").FontSize(6);
+                            });
+                            t.Cell().Border(0.5f).Padding(4).Column(x =>
+                            {
+                                x.Item().Row(r =>
+                                {
+                                    r.RelativeItem().Column(k =>
+                                    {
+                                        k.Item().Text("NF-e").FontSize(6);
+                                        k.Item().Text($"{doc.Modelo}").Bold().FontSize(10);
+                                    });
+                                    r.RelativeItem().Column(k =>
+                                    {
+                                        k.Item().Text("SÉRIE").FontSize(6);
+                                        k.Item().Text($"{doc.Serie}").Bold().FontSize(10);
+                                    });
+                                    r.RelativeItem().Column(k =>
+                                    {
+                                        k.Item().Text("NÚMERO").FontSize(6);
+                                        k.Item().Text($"{doc.Numero}").Bold().FontSize(10);
+                                    });
+                                });
+                            });
+                        });
+                        col.Item().PaddingTop(4);
+                    }
+
                     col.Item().Table(t =>
                     {
                         t.ColumnsDefinition(c =>
@@ -128,6 +170,43 @@ public class GeradorPdfQuestPdf : IGeradorPdf
                             $"{(homologacao ? "HOMOLOGAÇÃO" : "PRODUÇÃO")}   {doc.CriadoEm:dd/MM/yyyy HH:mm}   (FiscalAPI)");
                     });
 
+                    // ---- F6: CÁLCULO DO IMPOSTO (quadro oficial) ----
+                    if (req is not null)
+                    {
+                        var t2 = req.Totais;
+                        col.Item().PaddingTop(6).Text("CÁLCULO DO IMPOSTO").Bold().FontSize(8);
+                        col.Item().Table(t =>
+                        {
+                            t.ColumnsDefinition(c =>
+                            {
+                                for (var i = 0; i < 4; i++) c.RelativeColumn();
+                            });
+
+                            foreach (var (titulo, valor) in new[]
+                            {
+                                ("BASE DE CÁLC. DO ICMS", SomaBaseIcms(req).ToString("N2")),
+                                ("VALOR DO ICMS", SomaIcms(req).ToString("N2")),
+                                ("BASE CÁLC. ICMS ST", SomaBcSt(req).ToString("N2")),
+                                ("VALOR ICMS ST", SomaSt(req).ToString("N2")),
+                                ("V. TOTAL PRODUTOS", t2.ValorProdutos.ToString("N2")),
+                                ("VALOR DO FRETE", (t2.ValorFrete ?? 0).ToString("N2")),
+                                ("VALOR DO SEGURO", (t2.ValorSeguro ?? 0).ToString("N2")),
+                                ("DESCONTO", (t2.ValorDesconto ?? 0).ToString("N2")),
+                                ("VALOR DO II", SomaIi(req).ToString("N2")),
+                                ("VALOR DO IPI", SomaIpi(req).ToString("N2")),
+                                ("OUTRAS DESPESAS", (t2.OutrasDespesas ?? 0).ToString("N2")),
+                                ("VALOR TOTAL DA NOTA", t2.ValorNota.ToString("N2")),
+                            })
+                            {
+                                t.Cell().Border(0.5f).Padding(2).Column(x =>
+                                {
+                                    x.Item().Text(titulo).Bold().FontSize(6);
+                                    x.Item().Text(valor).FontSize(8);
+                                });
+                            }
+                        });
+                    }
+
                     if (req?.Destinatario is { } dest)
                     {
                         col.Item().PaddingTop(6).Text("DESTINATÁRIO / REMETENTE").Bold().FontSize(8);
@@ -135,27 +214,159 @@ public class GeradorPdfQuestPdf : IGeradorPdf
                         {
                             t.ColumnsDefinition(c =>
                             {
-                                c.ConstantColumn(150);
-                                c.ConstantColumn(140);
-                                c.RelativeColumn();
+                                c.RelativeColumn(2);
+                                c.RelativeColumn(1);
+                                c.RelativeColumn(1);
                             });
                             t.Cell().Border(0.5f).Padding(3).Column(x =>
                             {
-                                x.Item().Text("NOME / RAZÃO SOCIAL").Bold().FontSize(7);
+                                x.Item().Text("NOME / RAZÃO SOCIAL").Bold().FontSize(6);
                                 x.Item().Text(dest.Nome);
                             });
                             t.Cell().Border(0.5f).Padding(3).Column(x =>
                             {
-                                x.Item().Text("CNPJ / CPF").Bold().FontSize(7);
+                                x.Item().Text("CNPJ / CPF").Bold().FontSize(6);
                                 x.Item().Text(dest.CnpjCpf);
                             });
                             t.Cell().Border(0.5f).Padding(3).Column(x =>
                             {
-                                x.Item().Text("ENDEREÇO").Bold().FontSize(7);
-                                x.Item().Text(dest.Endereco is null ? "-"
-                                    : $"{dest.Endereco.Logradouro ?? "-"}, {dest.Endereco.Numero ?? "-"} — " +
-                                      $"{dest.Endereco.Bairro ?? "-"} — {dest.Endereco.NomeMunicipio ?? "-"}/{dest.Endereco.Uf ?? "-"}");
+                                x.Item().Text("INSCRIÇÃO ESTADUAL").Bold().FontSize(6);
+                                x.Item().Text(dest.InscricaoEstadual ?? "-");
                             });
+                            t.Cell().ColumnSpan(2).Border(0.5f).Padding(3).Column(x =>
+                            {
+                                x.Item().Text("ENDEREÇO").Bold().FontSize(6);
+                                x.Item().Text(dest.Endereco is null ? "-"
+                                    : $"{dest.Endereco.Logradouro ?? "-"}, {dest.Endereco.Numero ?? "-"}" +
+                                      (string.IsNullOrEmpty(dest.Endereco.Complemento) ? "" : $" — {dest.Endereco.Complemento}"));
+                            });
+                            t.Cell().Border(0.5f).Padding(3).Column(x =>
+                            {
+                                x.Item().Text("BAIRRO").Bold().FontSize(6);
+                                x.Item().Text(dest.Endereco?.Bairro ?? "-");
+                            });
+                            t.Cell().Border(0.5f).Padding(3).Column(x =>
+                            {
+                                x.Item().Text("MUNICÍPIO").Bold().FontSize(6);
+                                x.Item().Text(dest.Endereco?.NomeMunicipio ?? "-");
+                            });
+                            t.Cell().Border(0.5f).Padding(3).Column(x =>
+                            {
+                                x.Item().Text("UF").Bold().FontSize(6);
+                                x.Item().Text(dest.Endereco?.Uf ?? "-");
+                            });
+                            t.Cell().Border(0.5f).Padding(3).Column(x =>
+                            {
+                                x.Item().Text("CEP").Bold().FontSize(6);
+                                x.Item().Text(FormatarCep(dest.Endereco?.Cep));
+                            });
+                            t.Cell().Border(0.5f).Padding(3).Column(x =>
+                            {
+                                x.Item().Text("CÓD. MUNICÍPIO (IBGE)").Bold().FontSize(6);
+                                x.Item().Text(dest.Endereco?.CodigoMunicipioIbge ?? "-");
+                            });
+                        });
+                    }
+
+                    // ---- F6: FATURA / PAGAMENTOS (com dados de cartão do v2 §7) ----
+                    if (req?.Pagamento is { Count: > 0 } pags)
+                    {
+                        col.Item().PaddingTop(6).Text("FATURA / PAGAMENTOS").Bold().FontSize(8);
+                        col.Item().Table(t =>
+                        {
+                            t.ColumnsDefinition(c =>
+                            {
+                                c.RelativeColumn();
+                                c.RelativeColumn();
+                                c.RelativeColumn(2);
+                            });
+                            foreach (var pag in pags)
+                            {
+                                t.Cell().Border(0.5f).Padding(2).Column(x =>
+                                {
+                                    x.Item().Text("FORMA").Bold().FontSize(6);
+                                    x.Item().Text(pag.Forma).FontSize(8);
+                                });
+                                t.Cell().Border(0.5f).Padding(2).Column(x =>
+                                {
+                                    x.Item().Text("VALOR (R$)").Bold().FontSize(6);
+                                    x.Item().Text(pag.Valor.ToString("N2")).FontSize(8);
+                                });
+                                t.Cell().Border(0.5f).Padding(2).Column(x =>
+                                {
+                                    x.Item().Text("CARTÃO").Bold().FontSize(6);
+                                    x.Item().Text(pag.Bandeira is null ? "-"
+                                        : $"bandeira {pag.Bandeira} — aut. {pag.Autorizacao ?? "-"}").FontSize(7);
+                                });
+                            }
+                        });
+                    }
+
+                    // ---- F6: TRANSPORTADOR / VOLUMES ----
+                    if (!nfce)
+                    {
+                        var tra = req?.Transporte;
+                        col.Item().PaddingTop(6).Text("TRANSPORTADOR / VOLUMES TRANSPORTADOS").Bold().FontSize(8);
+                        col.Item().Table(t =>
+                        {
+                            t.ColumnsDefinition(c =>
+                            {
+                                c.RelativeColumn();
+                                c.RelativeColumn();
+                                c.RelativeColumn();
+                            });
+                            t.Cell().Border(0.5f).Padding(2).Column(x =>
+                            {
+                                x.Item().Text("MODALIDADE DO FRETE").Bold().FontSize(6);
+                                x.Item().Text(tra?.ModalidadeFrete is not null
+                                    ? $"código {tra.ModalidadeFrete}"
+                                    : (req?.Totais.ValorFrete is > 0 ? "0 — CIF (conta do remetente)" : "9 — sem ocorrência")).FontSize(8);
+                            });
+                            t.Cell().Border(0.5f).Padding(2).Column(x =>
+                            {
+                                x.Item().Text("TRANSPORTADORA").Bold().FontSize(6);
+                                x.Item().Text(tra?.Transportadora?.Nome ?? "-").FontSize(8);
+                            });
+                            t.Cell().Border(0.5f).Padding(2).Column(x =>
+                            {
+                                x.Item().Text("CNPJ / CPF").Bold().FontSize(6);
+                                x.Item().Text(tra?.Transportadora?.CnpjCpf ?? "-").FontSize(8);
+                            });
+                            t.Cell().Border(0.5f).Padding(2).Column(x =>
+                            {
+                                x.Item().Text("INSCRIÇÃO ESTADUAL").Bold().FontSize(6);
+                                x.Item().Text(tra?.Transportadora?.InscricaoEstadual ?? "-").FontSize(8);
+                            });
+                            t.Cell().Border(0.5f).Padding(2).Column(x =>
+                            {
+                                x.Item().Text("ENDEREÇO").Bold().FontSize(6);
+                                x.Item().Text(tra?.Transportadora?.EnderecoLogradouro ?? "-").FontSize(8);
+                            });
+                            t.Cell().Border(0.5f).Padding(2).Column(x =>
+                            {
+                                x.Item().Text("MUNICÍPIO / UF").Bold().FontSize(6);
+                                x.Item().Text(tra?.Transportadora is null ? "-"
+                                    : $"{tra.Transportadora.EnderecoMunicipio ?? "-"}/{tra.Transportadora.EnderecoUf ?? "-"}").FontSize(8);
+                            });
+                            foreach (var vol in tra?.Volumes ?? [])
+                            {
+                                t.Cell().ColumnSpan(2).Border(0.5f).Padding(2).Column(x =>
+                                {
+                                    x.Item().Text("QTD / ESPÉCIE / MARCA / NUMERAÇÃO").Bold().FontSize(6);
+                                    x.Item().Text($"{vol.Quantidade?.ToString() ?? "-"} / {vol.Especie ?? "-"} / {vol.Marca ?? "-"} / {vol.Numeracao ?? "-"}").FontSize(8);
+                                });
+                                t.Cell().Border(0.5f).Padding(2).Column(x =>
+                                {
+                                    x.Item().Text("PESO LÍQ. / BRUTO (kg)").Bold().FontSize(6);
+                                    x.Item().Text($"{(vol.PesoLiquido?.ToString("N3") ?? "-")} / {(vol.PesoBruto?.ToString("N3") ?? "-")}").FontSize(8);
+                                });
+                                t.Cell().ColumnSpan(3).Border(0.5f).Padding(2).Column(x =>
+                                {
+                                    x.Item().Text("LACRES").Bold().FontSize(6);
+                                    x.Item().Text(vol.Lacres is { Count: > 0 }
+                                        ? string.Join(", ", vol.Lacres.Select(l => l.Numero)) : "-").FontSize(8);
+                                });
+                            }
                         });
                     }
 
@@ -164,26 +375,29 @@ public class GeradorPdfQuestPdf : IGeradorPdf
                     {
                         t.ColumnsDefinition(c =>
                         {
-                            c.ConstantColumn(18);
-                            c.ConstantColumn(52);
+                            c.ConstantColumn(12);
+                            c.ConstantColumn(38);
                             c.RelativeColumn();
-                            c.ConstantColumn(58);
-                            c.ConstantColumn(30);
-                            c.ConstantColumn(42);
+                            c.ConstantColumn(40);
                             c.ConstantColumn(20);
-                            c.ConstantColumn(52);
-                            c.ConstantColumn(52);
+                            c.ConstantColumn(26);
+                            c.ConstantColumn(13);
+                            c.ConstantColumn(34);
+                            c.ConstantColumn(34);
+                            c.ConstantColumn(36);
+                            c.ConstantColumn(34);
+                            c.ConstantColumn(32);
                         });
 
                         foreach (var titulo in CabecalhoItens())
-                            t.Cell().Border(0.5f).Background("#EFEFEF").Padding(2).Text(titulo).Bold().FontSize(7);
+                            t.Cell().Border(0.5f).Background("#EFEFEF").Padding(2).Text(titulo).Bold().FontSize(6);
 
                         var itens = req?.Itens ?? [];
                         for (var i = 0; i < itens.Count; i++)
                         {
                             var item = itens[i];
                             foreach (var valor in ValoresItem(i + 1, item))
-                                t.Cell().Border(0.5f).Padding(2).Text(valor).FontSize(7);
+                                t.Cell().Border(0.5f).Padding(2).Text(valor).FontSize(6);
                         }
                     });
 
@@ -215,24 +429,18 @@ public class GeradorPdfQuestPdf : IGeradorPdf
                         });
                     });
 
-                    if (req?.Pagamento is { Count: > 0 } pags)
+                    // ---- F6: DADOS ADICIONAIS ----
+                    col.Item().PaddingTop(8).Border(0.5f).Padding(4).Column(x =>
                     {
-                        col.Item().PaddingTop(6).Text("PAGAMENTO").Bold().FontSize(8);
-                        col.Item().Row(row =>
-                        {
-                            foreach (var pag in pags)
-                                row.RelativeItem().Text($"{pag.Forma}: R$ {pag.Valor:N2}").FontSize(8);
-                        });
-                    }
-
-                    if (!string.IsNullOrEmpty(doc.MotivoStatus))
-                    {
-                        col.Item().PaddingTop(8).Text(t =>
-                        {
-                            t.Span("OBSERVAÇÃO: ").Bold().FontSize(8);
-                            t.Span(doc.MotivoStatus).FontSize(8);
-                        });
-                    }
+                        x.Item().Text("DADOS ADICIONAIS").Bold().FontSize(7);
+                        var obs = "DANFE gerado pelo FiscalAPI a partir do XML autorizado.";
+                        if (!string.IsNullOrEmpty(doc.MotivoStatus))
+                            obs += $"  {doc.MotivoStatus}";
+                        if (doc.ModoContingencia is not null)
+                            obs += $"  [Contingência: {doc.ModoContingencia}" +
+                                   (doc.EpecProtocolo is not null ? $" — EPEC {doc.EpecProtocolo}" : "") + "]";
+                        x.Item().Text(obs).FontSize(7);
+                    });
                 });
 
                 page.Footer().AlignCenter().Text(t =>
@@ -490,25 +698,49 @@ public class GeradorPdfQuestPdf : IGeradorPdf
         yield return "CÓDIGO";
         yield return "DESCRIÇÃO";
         yield return "NCM";
+        yield return "CST";
         yield return "CFOP";
-        yield return "QTD";
         yield return "UN";
+        yield return "QTD";
         yield return "V. UNIT";
         yield return "V. TOTAL";
+        yield return "BC ICMS";
+        yield return "V. ICMS";
     }
 
     private static IEnumerable<string> ValoresItem(int numero, ItemDto item)
     {
+        var icms = item.ImpostosV2?.Icms;
+        var cst = icms?.Cst ?? icms?.Csosn ?? item.Impostos?.FirstOrDefault()?.Cst ?? "-";
         yield return numero.ToString();
         yield return item.Codigo;
         yield return item.Descricao;
         yield return item.Ncm ?? "-";
+        yield return cst;
         yield return item.Cfop ?? "-";
+        yield return item.Unidade ?? "UN";
         yield return item.Quantidade.ToString("N3");
-        yield return "UN";
         yield return item.ValorUnitario.ToString("N2");
         yield return item.ValorTotal.ToString("N2");
+        yield return (icms?.BaseCalculo ?? item.Impostos?.FirstOrDefault()?.BaseCalculo ?? 0).ToString("N2");
+        yield return (icms?.Valor ?? item.Impostos?.FirstOrDefault()?.Valor ?? 0).ToString("N2");
     }
+
+    private static decimal SomaBaseIcms(EmissaoRequest? req) =>
+        req?.Itens.SelectMany(i => i.Impostos ?? []).Sum(im => im.BaseCalculo ?? 0)
+            ?? req?.Itens.Sum(i => i.ImpostosV2?.Icms?.BaseCalculo ?? 0) ?? 0;
+
+    private static decimal SomaBcSt(EmissaoRequest? req) =>
+        req?.Itens.Sum(i => i.ImpostosV2?.Icms?.St?.BaseCalculoSt ?? 0) ?? 0;
+
+    private static decimal SomaSt(EmissaoRequest? req) =>
+        req?.Itens.Sum(i => i.ImpostosV2?.Icms?.St?.ValorSt ?? 0) ?? 0;
+
+    private static decimal SomaIpi(EmissaoRequest? req) =>
+        req?.Itens.Sum(i => i.ImpostosV2?.Ipi?.Valor ?? 0) ?? 0;
+
+    private static decimal SomaIi(EmissaoRequest? req) =>
+        req?.Itens.Sum(i => i.ImpostosV2?.Ii?.ValorIi ?? 0) ?? 0;
 
     private static decimal SomaIcms(EmissaoRequest? req) =>
         req?.Itens.SelectMany(i => i.Impostos ?? [])
