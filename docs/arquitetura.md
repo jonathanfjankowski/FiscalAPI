@@ -170,8 +170,8 @@ manualmente.
 
 ## 12. Testes
 
-199 testes (120 unitários em `Fiscal.Core.Tests` — mapper EnviNFe, contingência,
-extrator DFe, assinatura webhook, PDF, validador, mocks; 79 de integração em
+224 testes (128 unitários em `Fiscal.Core.Tests` — mapper EnviNFe, contingência,
+extrator DFe, assinatura webhook, PDF, validador, mocks; 96 de integração em
 `Fiscal.Api.Tests` — emissão ponta a ponta, eventos, webhooks, distribuição +
 manifestação, admin, **segurança** (PBKDF2, envelope AES-GCM, API keys
 criar/usar/revogar, upload de certificado real, idempotency guard)).

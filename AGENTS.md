@@ -11,7 +11,7 @@ a API valida estrutura e aritmética — nunca inventa valores. Não adicione c�
 
 ```bash
 dotnet build                                  # TreatWarningsAsErrors=true
-dotnet test                                   # 199 testes (Core unit + Api integração)
+dotnet test                                   # 224 testes (Core unit + Api integração)
 dotnet format --verify-no-changes             # os 3 acima são obrigatórios antes de PR (CI roda os 3)
 
 dotnet run --project src/Fiscal.Api           # API em http://localhost:5039

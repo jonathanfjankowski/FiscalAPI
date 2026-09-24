@@ -236,7 +236,7 @@ public class RegressaoAuditoriaTests : IClassFixture<EmissaoIntegracaoFactory.Fa
         await db.Entry(doc).ReloadAsync();
         doc.Status.Should().Be(StatusDocumento.FALHA_EMISSAO,
             "janela SVC de 168h expirada → terminal, sem retransmissão em loop");
-        doc.MotivoStatus.Should().Contain("168h");
+        doc.MotivoStatus.Should().Contain("SVCAN");
     }
 }
 

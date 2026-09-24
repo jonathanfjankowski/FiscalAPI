@@ -12,7 +12,7 @@
 | **Versão atual** | `1.12.2-alpha` (2026-09-24) |
 | **Estágio** | Alpha — funcional ponta a ponta em sandbox; emissão real NF-e/NFC-e/NFS-e(DPS) implementada, homologação contra SEFAZ pendente de certificado A1 |
 | **Stack** | .NET 10 (API + Worker Hangfire), PostgreSQL/EF Core, React 19 + Vite + Tailwind v4 (painel admin), Unimake.DFe (adapters SEFAZ), QuestPDF (DANFE/DANFCe) |
-| **Testes** | 199/199 (120 unitários em `Fiscal.Core.Tests`, 79 de integração em `Fiscal.Api.Tests`) |
+| **Testes** | 224/224 (128 unitários em `Fiscal.Core.Tests`, 96 de integração em `Fiscal.Api.Tests`) |
 | **Licença** | MIT — licença da `Unimake.DFe` **confirmada (MIT)**, sem bloqueios de licença |
 | **Repositório** | https://github.com/jonathanfjankowski/FiscalAPI |
 
@@ -110,8 +110,8 @@ As principais:
 - Certificado **A1 apenas** (A3/HSM fora de escopo).
 - NFS-e real exige credenciamento do prestador na SEFAZ Nacional +
   certificado A1 (homologação manual).
-- Sem página de reenvio manual de webhooks (consultável via
-  `outbox_webhooks`).
+- Reenvio manual de webhooks via API (`POST /v1/webhooks/{id}/reenviar`);
+  painel segue como evolução.
 - Homologação real exige certificado A1 válido (não existe certificado
   "de teste" separado na SEFAZ).
 
@@ -120,8 +120,8 @@ As principais:
 | Indicador | Estado |
 |---|---|
 | Build + testes no CI | ✅ verde (`build-and-test.yml`) |
-| Cobertura de testes automatizados | 199 testes — segurança, ICMS/CSOSN, IPI/PIS/COFINS, NF-ref/devolução, reforma IBS/CBS/IS, DPS/substituição, contingência, DFe, webhooks, painel, métricas, secrets |
+| Cobertura de testes automatizados | 224 testes — segurança, ICMS/CSOSN, IPI/PIS/COFINS, NF-ref/devolução, reforma IBS/CBS/IS, DPS/substituição, contingência, DFe, webhooks, painel, métricas, secrets |
 | `dotnet format --verify-no-changes` | ✅ exigido no CI |
 | Migrations | Aplicadas automaticamente no startup (hand-written com atributos `[Migration]`/`[DbContext]`) |
 | Documentação | README + 18 docs em `docs/` + CHANGELOG completo 0.1 → 1.8 |
-| Dívida documentada | EPEC/NFC-e offline, leiaute visual completo do DANFE, backlog v2 (transporte, batch, ICMSPart) |
+| Dívida documentada | EPEC/DANFCe offline: QR modo 2 embutido no XML (depende do comportamento interno da Unimake), batch de emissão, exportação/DUE, pentest externo com rede real |

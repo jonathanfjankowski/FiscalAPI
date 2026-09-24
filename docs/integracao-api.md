@@ -1049,6 +1049,32 @@ O `422` por aritmética vem com a extensão `campo` apontando o local exato:
 
 ---
 
+### Webhooks (outbox do tenant)
+
+| Método | Rota | Auth | Descrição |
+|---|---|---|---|
+| `GET` | `/v1/webhooks?page=1&pageSize=50&status=FALHA` | ApiKey | Lista entregas de webhook do tenant (mais recentes primeiro; filtro `status`: PENDENTE, ENTREGANDO, ENTREGUE, FALHA) |
+| `POST` | `/v1/webhooks/{id}/reenviar` | ApiKey | Reenvio manual: FALHA volta a PENDENTE com ciclo novo (8 tentativas); PENDENTE tem a tentativa adiantada para agora; ENTREGUE/ENTREGANDO → 409. Retorna 202 com o estado da entrega |
+
+### NFC-e offline (tpEmis 9)
+
+`POST /v1/documentos-fiscais/nfce` aceita `contingenciaOffline: true` — o XML é
+gerado com tpEmis 9 e a transmissão segue pelo fluxo de contingência (janela de
+**24h**; fora dela o documento vai para `FALHA_EMISSAO`). Indicado quando o ERP
+precisa registrar a venda antes da autorização.
+
+### Campos do backlog v2 (§7 do plano-evolucao-contrato-v2)
+
+- `transporte`: `modalidadeFrete` (0–9), `transportadora` (cnpjCpf, nome, IE,
+  endereço) e `volumes[]` (quantidade, espécie, marca, numeração, pesos, lacres[]).
+- `pagamento[]`: `tipoIntegracao` ("1"/"2"), `bandeira` (código tBand),
+  `autorizacao` (cAut), `cnpjCredenciadora` — informados juntos formam o grupo card.
+- `impostosV2.icms` CST 10 partilha: `percentualBcOperacao` (pBCOp) e/ou `ufSt`
+  (UFST) presentes → grupo ICMSPart (ST própria passa a ser opcional).
+- `itens[].dis[]`: grupo DI por item importado (número, datas, local/UF de
+  desembaraço, via transporte 1–12, forma intermediação 1–3, exportador,
+  adicoes[]) + `impostosV2.ii` (vBC, vDespAdu, vII, vIOF — vII soma nos totais).
+
 ## Modelo de erros
 
 Erros de negócio seguem **RFC 7807** (`application/problem+json`):

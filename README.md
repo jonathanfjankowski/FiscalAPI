@@ -91,7 +91,7 @@ curl http://localhost:8080/health/ready
 ```bash
 dotnet restore
 dotnet build
-dotnet test              # 199 testes (120 unitários + 79 integração)
+dotnet test              # 224 testes (128 unitários + 96 integração)
 dotnet run --project src/Fiscal.Api      # API em http://localhost:5039
 dotnet run --project src/Fiscal.Worker   # host Hangfire (jobs)
 ```
@@ -272,8 +272,9 @@ transmissão** (timeout/rede) dispara, na ordem:
    reemite via **SVC-AN/SVC-RS** (tpEmis 6/7) — a Unimake roteia ao
    webservice certo.
 
-EPEC (nota pré-notificada offline) e NFC-e offline (tpEmis 9) ficam para
-sprint futura.
+NFC-e offline (tpEmis 9, `contingenciaOffline: true`) e EPEC
+(`Fiscal:Contingencia:Modo=EPEC`) implementados; o QR modo 2 embutido no
+XML do DANFCe offline ainda depende de comportamento interno da Unimake.
 
 ## Webhooks (outbox + HMAC)
 
@@ -359,10 +360,11 @@ para `FALHA` (terminal, visível na tabela `outbox_webhooks`).
 - **Distribuição DFe sincroniza por NSU** a cada 60 s no Worker; em produção
   exige certificado A1; em sandbox a consulta responde "sem documentos" (mock).
 - **PDF (DANFE/DANFCe/DANFSe)** em leiaute **simplificado** (com barcode
-  CODE-128 da chave e QR do DANFCe extraído do XML) — o quadro visual
-  oficial de 20 campos segue como evolução no plano v2.
-- **Webhooks** sem página de reenvio manual na outbox (consultável via
-  banco: tabela `outbox_webhooks`).
+  CODE-128 da chave e QR do DANFCe extraído do XML) — implementado com
+  canhoto, quadro de cálculo do imposto, fatura, transportador/volumes e
+  dados adicionais (F6).
+- **Webhooks**: reenvio manual via API (`POST /v1/webhooks/{id}/reenviar`);
+  página no painel segue como evolução.
 - **Em homologação real** você precisa de um certificado A1 válido (a SEFAZ
   aceita o mesmo certificado de produção; não há certificado "de teste").
 
@@ -372,7 +374,7 @@ para `FALHA` (terminal, visível na tabela `outbox_webhooks`).
 dotnet test
 ```
 
-199 testes (120 unitários no `Fiscal.Core.Tests`, 79 de integração no
+224 testes (128 unitários no `Fiscal.Core.Tests`, 96 de integração no
 `Fiscal.Api.Tests`), incluindo segurança (PBKDF2, envelope AES-GCM, API
 keys, upload de certificado), contingência, distribuição DFe/manifestação e
 webhooks. Classes de integração rodam serializadas (`[Collection]`) sobre o

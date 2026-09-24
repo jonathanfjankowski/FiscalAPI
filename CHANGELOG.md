@@ -3,6 +3,44 @@
 ## [Não released]
 
 ### Adicionado
+- **Reenvio manual de webhooks** — `GET /v1/webhooks` (lista paginada da outbox
+  do tenant, filtro por status) e `POST /v1/webhooks/{id}/reenviar` (FALHA volta
+  a PENDENTE com ciclo novo de tentativas; PENDENTE tem a tentativa adiantada
+  para agora; ENTREGUE/ENTREGANDO → 409).
+- **NFC-e offline (tpEmis 9)** — `contingenciaOffline: true` no POST de NFC-e
+  marca o documento como OFFLINE: o mapper gera o XML com tpEmis 9 e a
+  transmissão segue pelo fluxo de contingência (janela de 24h — fora dela o
+  documento vai para FALHA_EMISSAO com motivo explícito).
+- **Contingência EPEC (NF-e)** — `Fiscal:Contingencia:Modo=EPEC`: em falha de
+  transmissão o documento é marcado EPEC, o evento prévio 110140 é enviado à
+  SVRS (`ITransmissorEpec`/`TransmissorEpecUnimake`) e, autorizado, o protocolo
+  fica salvo (`documentos_fiscais.epec_protocolo`) — a NF-e completa (tpEmis 4)
+  é transmitida no ciclo seguinte, dentro da janela de 168h.
+- **Backlog v2 §7 (contrato)** — grupo `transporte` (modalidade, transportadora,
+  volumes com lacres), dados de cartão no pagamento (`tipoIntegracao`, `bandeira`,
+  `autorizacao`, `cnpjCredenciadora` → grupo card/tpIntegra/tBand/cAut),
+  `impostosV2.icms` CST 10 com partilha (`percentualBcOperacao`/`ufSt` → ICMSPart)
+  e importação (`dis[]` → grupo DI com adições; `impostosV2.ii` → grupo II, somado
+  ao vII dos totais).
+- **DANFE leiaute completo (F6)** — canhoto de recebimento, quadro "Cálculo do
+  Imposto" (12 campos), DEST/REM completo (IE/endereço/bairro/município/UF/CEP/IBGE),
+  Fatura/Pagamentos com dados de cartão, Transportador/Volumes com lacres, tabela
+  de itens com CST/BC-ICMS/V-ICMS por item e bloco Dados Adicionais (inclui
+  contingência/protocolo EPEC).
+- **Espelho do arredondamento bancário V004 da FiscalLIB** — a lib passa a
+  emitir `base × alíquota / 100` com half-to-even em 2 casas (antes truncava
+  via bcmath, mascarado pela tolerância). Testes travam o contrato nos dois
+  lados: valores V004 (ex.: 100 × 12,3456% → 12,35 · 333,33 × 18% → 60,00 ·
+  meio-exato → dígito par) passam na tolerância de R$ 0,01; divergência acima
+  disso continua rejeitando.
+- **Guarda DIFAL negativo (espelho FiscalLIB)** — `vICMSUFDest < 0` só existe
+  com pICMSUFDest < pICMSInter (entrada impossível no MOC): agora vira 422 no
+  `ValidadorImpostosV2` em vez de passar pela aritmética.
+- **R-NFS014 (exportação de serviços) no `ValidadorNfseDps`** —
+  `tribISSQN = 3` exige `valores.codigoPaisResultado` (cPaisResult, ISO
+  3166-1 numérico, 3 dígitos) e alíquota ISS nula/zero. Campo novo e opcional
+  no `NfseDpsRequest`, mapeado para o DPS pelo `MapperDps`. Espelho da
+  `FiscalLIB` (`NfseBuilder::codigoPaisResultado()`).
 - **Download do XML de eventos (cancelamento/CC-e)** — `GET /v1/documentos-fiscais/{id}/eventos/{eventoId}/xml`
   devolve o XML protocolado persistido em `EventoFiscal.XmlRetorno` (`application/xml`; 409
   "ainda não disponível" enquanto o evento não chega a PROCESSADO/REJEITADO; 404 se o evento
