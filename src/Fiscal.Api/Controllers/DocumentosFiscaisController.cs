@@ -9,6 +9,7 @@ using Fiscal.Core.Services;
 using Fiscal.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Fiscal.Api.Controllers;
 
@@ -365,7 +366,19 @@ public class DocumentosFiscaisController : ControllerBase
             AtualizadoEm = DateTimeOffset.UtcNow
         };
         await _docRepo.AdicionarAsync(doc, ct);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Corrida: outra request com a mesma Idempotency-Key gravou primeiro —
+            // devolve o documento vencedor (replay) em vez de 500. O número
+            // reservado nesta corrida fica com gap — aceitável.
+            var vencedor = await _docRepo.ObterPorIdempotencyKeyAsync(tenantId, tipo, idemKey, ct);
+            if (vencedor is null) throw;
+            return Ok(ParaResponse(vencedor));
+        }
 
         await _fila.EnfileirarAsync(doc.Id, ct);
 

@@ -20,7 +20,7 @@ public class EmissorMock : IEmissorFiscal
     {
         // Simula autorização com chave determinística baseada no id do documento.
         var chave = DeterministicChave(documento.Id);
-        var protocolo = "1" + Math.Abs(documento.Id.GetHashCode()).ToString("D14")[..14];
+        var protocolo = "1" + (documento.Id.GetHashCode() & 0x7fffffff).ToString("D14")[..14];
 
         var xmlAssinado = $"""
             <nfeProc xmlns="http://www.portalfiscal.inf.br/nfe" versao="4.00">

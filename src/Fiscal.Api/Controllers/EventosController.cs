@@ -9,6 +9,7 @@ using Fiscal.Worker.Jobs;
 using Hangfire;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
 
 namespace Fiscal.Api.Controllers;
@@ -85,7 +86,10 @@ public class EventosController : ControllerBase
             eventoId = evento.Id,
             tipo = evento.TipoEvento,
             status = evento.Status,
-            criadoEm = evento.CriadoEm
+            criadoEm = evento.CriadoEm,
+            // Preenchido no replay idempotente de evento já PROCESSADO; no
+            // primeiro aceite (PENDENTE) o XML protocolado ainda não existe.
+            xml = evento.XmlRetorno,
         });
     }
 
@@ -121,7 +125,10 @@ public class EventosController : ControllerBase
             eventoId = evento.Id,
             tipo = evento.TipoEvento,
             status = evento.Status,
-            criadoEm = evento.CriadoEm
+            criadoEm = evento.CriadoEm,
+            // Preenchido no replay idempotente de evento já PROCESSADO; no
+            // primeiro aceite (PENDENTE) o XML protocolado ainda não existe.
+            xml = evento.XmlRetorno,
         });
     }
 
@@ -136,6 +143,9 @@ public class EventosController : ControllerBase
 
         if (req.Ambiente != "producao" && req.Ambiente != "homologacao")
             return Problem(statusCode: 422, title: "Ambiente inválido", detail: "Use 'producao' ou 'homologacao'.");
+
+        if (req.Modelo is not (55 or 65))
+            return Problem(statusCode: 422, title: "Modelo inválido", detail: "Inutilização aplica-se apenas a NF-e (55) e NFC-e (65).");
 
         if (req.NumeroFinal < req.NumeroInicial)
             return Problem(statusCode: 422, title: "Faixa inválida", detail: "numeroFinal deve ser >= numeroInicial.");
@@ -169,7 +179,19 @@ public class EventosController : ControllerBase
             CriadoEm = DateTimeOffset.UtcNow
         };
         await _eventoRepo.AdicionarAsync(evento, ct);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Corrida: outra request com a mesma Idempotency-Key gravou primeiro —
+            // devolve a inutilização vencedora (replay) em vez de 500.
+            var vencedor = await _eventoRepo.ObterPorIdempotencyAsync(
+                tenantId, null, EventoInutilizacao, idempotencyKey!, ct);
+            if (vencedor is null) throw;
+            return Ok(new { eventoId = vencedor.Id, status = vencedor.Status, criadoEm = vencedor.CriadoEm });
+        }
         EnfileirarSePendente(evento);
 
         await _auditoria.RegistrarAsync(new Auditoria
@@ -210,6 +232,35 @@ public class EventosController : ControllerBase
             status = evento.Status,
             criadoEm = evento.CriadoEm
         });
+    }
+
+    /// <summary>
+    /// XML de retorno do evento (cancelamento/CC-e) protocolado na SEFAZ —
+    /// o que o ERP arquiva para o contador. Disponível após o evento chegar
+    /// a PROCESSADO/REJEITADO (XmlRetorno vem da transmissão).
+    /// </summary>
+    [HttpGet("documentos-fiscais/{id:guid}/eventos/{eventoId:guid}/xml")]
+    public async Task<IActionResult> BaixarXmlEvento(Guid id, Guid eventoId, CancellationToken ct)
+    {
+        var tenantId = HttpContext.GetTenantId();
+
+        var doc = await _docRepo.ObterPorIdAsync(id, tenantId, ct);
+        if (doc is null) return NotFound();
+
+        var evento = await _eventoRepo.ObterPorIdAsync(eventoId, tenantId, ct);
+        if (evento is null || evento.DocumentoId != doc.Id)
+            return NotFound();
+
+        if (string.IsNullOrWhiteSpace(evento.XmlRetorno))
+            return Problem(
+                statusCode: 409,
+                title: "XML do evento ainda não disponível.",
+                detail: $"Evento {evento.Id} está em status {evento.Status} — o XML protocolado existe após o processamento na SEFAZ.");
+
+        return File(
+            System.Text.Encoding.UTF8.GetBytes(evento.XmlRetorno),
+            "application/xml",
+            $"evento-{evento.TipoEvento.ToLowerInvariant()}-{evento.Id:N}.xml");
     }
 
     private void EnfileirarSePendente(EventoFiscal evento)
@@ -256,7 +307,19 @@ public class EventosController : ControllerBase
             CriadoEm = DateTimeOffset.UtcNow
         };
         await _eventoRepo.AdicionarAsync(evento, ct);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Corrida: outra request com a mesma Idempotency-Key gravou primeiro —
+            // devolve o evento vencedor (replay) em vez de 500.
+            var vencedor = await _eventoRepo.ObterPorIdempotencyAsync(
+                doc.TenantId, doc.Id, tipo, idempotencyKey, ct);
+            if (vencedor is null) throw;
+            return vencedor;
+        }
 
         await _auditoria.RegistrarAsync(new Auditoria
         {

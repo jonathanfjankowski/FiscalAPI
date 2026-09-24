@@ -12,7 +12,11 @@ namespace Fiscal.Core.Services;
 public class MetricasFiscais
 {
     public const string NomeMedidor = "FiscalAPI";
-    public const string VersaoServico = "1.10.0";
+
+    // Versão do assembly (VersionPrefix no Directory.Build.props) — nunca
+    // hardcoded, senão o service_version do OTel/Prometheus fica defasado.
+    public static readonly string VersaoServico =
+        typeof(MetricasFiscais).Assembly.GetName().Version?.ToString(3) ?? "0.0.0";
 
     private readonly Counter<long> _documentos;
     private readonly Histogram<double> _latenciaAutorizacao;

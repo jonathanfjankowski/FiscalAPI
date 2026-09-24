@@ -157,10 +157,15 @@ public class EmissorNFe : IEmissorFiscal
                     tenant, 55, chaveOriginal, ambiente, certificado, ct);
                 if (consultado is not null)
                 {
+                    // Autorizada sem retorno do lote: reconstrói o nfeProc de
+                    // distribuição a partir do XML assinado (tentativa anterior,
+                    // cStat 103) + protNFe recuperado na consulta.
+                    var nfeProc = MontadorNfeProc.Montar(doc.XmlAssinado, consultado.XmlProtNFe);
                     return new ResultadoEmissao(
                         ResultadoEmissaoStatus.Autorizada,
                         consultado.ChNFe, consultado.NProt,
-                        XmlAssinado: null, XmlRetornoSefaz: null,
+                        XmlAssinado: doc.XmlAssinado,
+                        XmlRetornoSefaz: nfeProc ?? consultado.XmlProtNFe,
                         Motivo: null,
                         XmlGerado: xmlGerado,
                         ReciboLote: null);

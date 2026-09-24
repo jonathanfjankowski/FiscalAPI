@@ -19,7 +19,7 @@ public class TransmissorEventoMock : ITransmissorEventoFiscal
         Ambiente ambiente,
         CancellationToken cancellationToken)
     {
-        var protocolo = "MOCK" + Math.Abs(evento.Id.GetHashCode()).ToString("D13")[..13];
+        var protocolo = "MOCK" + (evento.Id.GetHashCode() & 0x7fffffff).ToString("D13")[..13];
 
         var xmlRetorno = evento.TipoEvento == "INUTILIZACAO"
             ? $"""

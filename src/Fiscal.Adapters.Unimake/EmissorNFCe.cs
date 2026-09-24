@@ -117,10 +117,15 @@ public class EmissorNFCe : IEmissorFiscal
                     var consultado = await _consultaProtocolo.ConsultarAsync(tenant, 65, chaveOriginal, ambiente, certificado, ct);
                     if (consultado is not null)
                     {
+                        // Autorizada sem protNFe no retorno: reconstrói o nfeProc
+                        // (XML assinado salvo antes + protNFe da consulta) — sem
+                        // isso o DANFCe sai sem QR e o consumidor fica sem XML.
+                        var nfeProc = MontadorNfeProc.Montar(doc.XmlAssinado, consultado.XmlProtNFe);
                         return new ResultadoEmissao(
                             ResultadoEmissaoStatus.Autorizada,
                             consultado.ChNFe, consultado.NProt,
-                            XmlAssinado: null, XmlRetornoSefaz: null,
+                            XmlAssinado: doc.XmlAssinado,
+                            XmlRetornoSefaz: nfeProc ?? consultado.XmlProtNFe,
                             Motivo: null,
                             XmlGerado: xmlGerado);
                     }

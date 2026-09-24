@@ -1149,5 +1149,5 @@ public static class MapperEnviNFe
         return valor.ToString("D8");
     }
 
-    private static string LoteDe(Guid id) => Math.Abs(id.GetHashCode()).ToString();
+    private static string LoteDe(Guid id) => (id.GetHashCode() & 0x7fffffff).ToString();
 }

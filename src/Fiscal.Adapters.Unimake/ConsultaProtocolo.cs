@@ -32,30 +32,32 @@ public class ConsultaProtocoloUnimake : IConsultaProtocolo
             XServ = "CONSIT",
         };
 
-        (int cStat, string motivo, string? nProt) = modelo == 65
+        (int cStat, string motivo, string? nProt, string? xmlProt) = modelo == 65
             ? ConsultarNFCe(cons, config)
             : ConsultarNFe(cons, config);
 
         // 217 = "NF-e não consta na base" — não autorizada, não recuperada.
         if (cStat is 100 or 150)
-            return Task.FromResult<ProtocoloConsultado?>(new ProtocoloConsultado(cStat, motivo, nProt, chaveAcesso));
+            return Task.FromResult<ProtocoloConsultado?>(new ProtocoloConsultado(cStat, motivo, nProt, chaveAcesso, xmlProt));
         return Task.FromResult<ProtocoloConsultado?>(null);
     }
 
-    private static (int, string, string?) ConsultarNFe(ConsSitNFe cons, Configuracao config)
+    private static (int, string, string?, string?) ConsultarNFe(ConsSitNFe cons, Configuracao config)
     {
         using var servico = new NFeConsultaProtocolo(cons, config);
         RetornoUnimake.Executar(servico);
         var ret = servico.Result;
-        return (ret.CStat, ret.XMotivo, ret.ProtNFe?.InfProt?.NProt);
+        return (ret.CStat, ret.XMotivo, ret.ProtNFe?.InfProt?.NProt,
+            ExtratorDfe.ExtrairElemento(servico.RetornoWSString, "protNFe"));
     }
 
-    private static (int, string, string?) ConsultarNFCe(ConsSitNFe cons, Configuracao config)
+    private static (int, string, string?, string?) ConsultarNFCe(ConsSitNFe cons, Configuracao config)
     {
         using var servico = new NFCeConsultaProtocolo(cons, config);
         RetornoUnimake.Executar(servico);
         var ret = servico.Result;
-        return (ret.CStat, ret.XMotivo, ret.ProtNFe?.InfProt?.NProt);
+        return (ret.CStat, ret.XMotivo, ret.ProtNFe?.InfProt?.NProt,
+            ExtratorDfe.ExtrairElemento(servico.RetornoWSString, "protNFe"));
     }
 }
 
