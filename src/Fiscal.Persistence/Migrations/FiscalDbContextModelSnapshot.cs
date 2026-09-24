@@ -244,6 +244,11 @@ namespace Fiscal.Persistence.Migrations
                         .HasColumnType("smallint")
                         .HasColumnName("modelo");
 
+                    b.Property<string>("EpecProtocolo")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("epec_protocolo");
+
                     b.Property<string>("ModoContingencia")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")

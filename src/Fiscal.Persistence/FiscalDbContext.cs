@@ -110,6 +110,7 @@ public class FiscalDbContext : DbContext
             b.Property(x => x.MotivoStatus).HasColumnName("motivo_status");
             b.Property(x => x.Tentativas).HasColumnName("tentativas");
             b.Property(x => x.ModoContingencia).HasColumnName("modo_contingencia").HasMaxLength(20);
+            b.Property(x => x.EpecProtocolo).HasColumnName("epec_protocolo").HasMaxLength(20);
             b.Property(x => x.ProximaTentativaEm).HasColumnName("proxima_tentativa_em");
             b.Property(x => x.CriadoEm).HasColumnName("criado_em");
             b.Property(x => x.AtualizadoEm).HasColumnName("atualizado_em");

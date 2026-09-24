@@ -32,15 +32,13 @@ public class ProcessarDocumentoJob
     /// esgotou → FALHA_EMISSAO (terminal) + webhook — nunca retry infinito.</summary>
     private const int MaxTentativas = 48;
 
-    /// <summary>Janela de aceitação da SVC: DF-e emitido há mais de 168h (7 dias)
-    /// é rejeitado — não adianta retransmitir (evita loop etário de rejeições).</summary>
-    private static readonly TimeSpan JanelaSvc = TimeSpan.FromHours(168);
 
     private readonly FiscalDbContext _db;
     private readonly IRepositorioDocumentoFiscal _docRepo;
     private readonly IRepositorioCertificado _certRepo;
     private readonly IRepositorioAuditoria _auditoria;
     private readonly IEnumerable<IEmissorFiscal> _emissores;
+    private readonly IEnumerable<ITransmissorEpec> _transmissoresEpec;
     private readonly ICertificadoStore _certStore;
     private readonly MetricasFiscais _metricas;
     private readonly bool _sandbox;
@@ -52,6 +50,7 @@ public class ProcessarDocumentoJob
         IRepositorioCertificado certRepo,
         IRepositorioAuditoria auditoria,
         IEnumerable<IEmissorFiscal> emissores,
+        IEnumerable<ITransmissorEpec> transmissoresEpec,
         ICertificadoStore certStore,
         MetricasFiscais metricas,
         IConfiguration configuration,
@@ -62,6 +61,7 @@ public class ProcessarDocumentoJob
         _certRepo = certRepo;
         _auditoria = auditoria;
         _emissores = emissores;
+        _transmissoresEpec = transmissoresEpec;
         _certStore = certStore;
         _metricas = metricas;
         _sandbox = configuration.GetValue("Fiscal:ModoSandbox", false);
@@ -99,14 +99,36 @@ public class ProcessarDocumentoJob
             return;
         }
 
-        // Janela SVC: documento em SVC cuja dhEmi (CriadoEm determinístico) tem
-        // mais de 168h nunca será autorizado — falha alto em vez de rejeição em loop.
-        if (doc.ModoContingencia is not null && doc.CriadoEm < DateTimeOffset.UtcNow - JanelaSvc)
+        // Janela de contingência: OFFLINE (NFC-e tpEmis 9) = 24h; demais
+        // (SVC/EPEC) = 168h. Fora da janela a SEFAZ rejeita — falha alto
+        // em vez de rejeição em loop.
+        var janela = doc.ModoContingencia switch
         {
-            _logger.LogError("DocumentoFiscal {Id}: janela de 168h da SVC ({Modo}) expirada — marcando FALHA_EMISSAO.",
+            "OFFLINE" => TimeSpan.FromHours(24),
+            null => TimeSpan.Zero,
+            _ => TimeSpan.FromHours(168),
+        };
+        if (janela > TimeSpan.Zero && doc.CriadoEm < DateTimeOffset.UtcNow - janela)
+        {
+            _logger.LogError("DocumentoFiscal {Id}: janela de contingência ({Modo}) expirada — marcando FALHA_EMISSAO.",
                 doc.Id, doc.ModoContingencia);
             await MarcarErroTerminalAsync(doc,
-                $"Janela de 168h da contingência SVC ({doc.ModoContingencia}) expirada — reemita o documento com nova numeração.", ct);
+                $"Janela de contingência ({doc.ModoContingencia}) expirada — reemita o documento com nova numeração.", ct);
+            return;
+        }
+
+        // Contingência EPEC: o evento prévio (110140, SVRS) precisa ser
+        // autorizado ANTES da transmissão da NF-e completa (tpEmis 4).
+        // Sucesso → protocolo salvo; a NF-e vai no próximo ciclo.
+        if (doc.ModoContingencia == "EPEC" && doc.EpecProtocolo is null && !_sandbox)
+        {
+            var epecOk = await TransmitirEpecAsync(doc, ct);
+            if (!epecOk) return; // CONTINGENCIA/ERRO já persistidos em TransmitirEpecAsync
+            doc.Status = StatusDocumento.CONTINGENCIA;
+            doc.ProximaTentativaEm = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
+            await _docRepo.AtualizarAsync(doc, ct);
+            await _db.SaveChangesAsync(ct);
+            _logger.LogInformation("DocumentoFiscal {Id}: EPEC autorizado — NF-e completa entra na fila.", doc.Id);
             return;
         }
 
@@ -301,6 +323,81 @@ public class ProcessarDocumentoJob
 
     private static TimeSpan ProximoBackoff(int tentativa) =>
         tentativa <= 0 ? Backoff[0] : Backoff[Math.Min(tentativa - 1, Backoff.Length - 1)];
+
+    /// <summary>
+    /// Envia o evento prévio EPEC (110140) para a SVRS. true = autorizado
+    /// (protocolo salvo); false = falha já persistida (documento volta a
+    /// CONTINGENCIA com backoff — ou ERRO_INTERNO nos casos não recuperáveis).
+    /// </summary>
+    private async Task<bool> TransmitirEpecAsync(DocumentoFiscal doc, CancellationToken ct)
+    {
+        var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Id == doc.TenantId, ct);
+        if (tenant is null)
+        {
+            await MarcarErroInternoAsync(doc, $"Tenant {doc.TenantId} não encontrado (EPEC).", ct);
+            return false;
+        }
+        var cert = await _certRepo.ObterAtivoPorTenantAsync(doc.TenantId, ct);
+        if (cert is null)
+        {
+            doc.MotivoStatus = "EPEC sem certificado ativo para o tenant.";
+            doc.AtualizadoEm = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return false;
+        }
+
+        var transmissor = _transmissoresEpec.FirstOrDefault()
+            ?? throw new ErroNaoRecuperavelException("Nenhum transmissor EPEC registrado.");
+        doc.Status = StatusDocumento.CONTINGENCIA;
+        doc.ProximaTentativaEm = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
+
+        try
+        {
+            using var x509 = await _certStore.CarregarAsync(cert, ct);
+            var resultado = await transmissor.TransmitirAsync(doc, tenant, x509, (Ambiente)doc.Ambiente, ct);
+
+            if (resultado.Status == ResultadoEventoStatus.Processado && resultado.Protocolo is not null)
+            {
+                doc.EpecProtocolo = resultado.Protocolo;
+                doc.XmlRetornoSefaz = resultado.XmlRetorno;
+                doc.MotivoStatus = $"EPEC autorizado ({resultado.Protocolo}); NF-e completa será transmitida em seguida.";
+                doc.AtualizadoEm = DateTimeOffset.UtcNow;
+                await _db.SaveChangesAsync(ct);
+                _metricas.ContingenciaAcionada("epec");
+                return true;
+            }
+
+            doc.Status = StatusDocumento.CONTINGENCIA;
+            doc.ProximaTentativaEm = DateTimeOffset.UtcNow + ProximoBackoff(doc.Tentativas + 1);
+            doc.MotivoStatus = resultado.Status == ResultadoEventoStatus.Rejeitado
+                ? $"EPEC rejeitado: {resultado.Motivo}"
+                : $"Erro de transmissão do EPEC: {resultado.Motivo}";
+            doc.XmlRetornoSefaz = resultado.XmlRetorno;
+            doc.AtualizadoEm = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return false;
+        }
+        catch (ErroNaoRecuperavelException ex)
+        {
+            _logger.LogError(ex, "Erro não recuperável no EPEC do documento {Id}.", doc.Id);
+            await MarcarErroInternoAsync(doc, ex.Message, ct);
+            return false;
+        }
+        catch (NotImplementedException ex)
+        {
+            await MarcarErroInternoAsync(doc, ex.Message, ct);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            doc.Status = StatusDocumento.CONTINGENCIA;
+            doc.ProximaTentativaEm = DateTimeOffset.UtcNow + ProximoBackoff(doc.Tentativas + 1);
+            doc.MotivoStatus = $"Erro de transmissão do EPEC: {ex.GetType().Name}: {ex.Message}";
+            doc.AtualizadoEm = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return false;
+        }
+    }
 
     private async Task MarcarErroInternoAsync(DocumentoFiscal doc, string motivo, CancellationToken ct)
     {

@@ -69,6 +69,7 @@ if (modoSandbox)
     builder.Services.AddSingleton<ITransmissorEventoFiscal, TransmissorEventoMock>();
 }
 builder.Services.AddSingleton<ITransmissorEventoFiscal, TransmissorEventoUnimake>();
+builder.Services.AddSingleton<ITransmissorEpec, TransmissorEpecUnimake>();
 
 // Distribuição DFe + manifestação: mesma regra do emissor (sandbox → mock).
 if (modoSandbox)

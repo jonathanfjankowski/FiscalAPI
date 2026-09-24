@@ -25,6 +25,10 @@ public class DocumentoFiscal
     public string? MotivoStatus { get; set; }
     public int Tentativas { get; set; }
     public string? ModoContingencia { get; set; }
+
+    /// <summary>Protocolo do evento EPEC (110140) autorizado pela SVRS — presente
+    /// quando a contingência EPEC foi transmitida; a NF-e completa segue depois.</summary>
+    public string? EpecProtocolo { get; set; }
     public DateTimeOffset? ProximaTentativaEm { get; set; }
     public DateTimeOffset CriadoEm { get; set; } = DateTimeOffset.UtcNow;
     public DateTimeOffset AtualizadoEm { get; set; } = DateTimeOffset.UtcNow;

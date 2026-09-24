@@ -132,6 +132,7 @@ if (modoSandbox)
     builder.Services.AddSingleton<ITransmissorEventoFiscal, TransmissorEventoMock>();
 }
 builder.Services.AddSingleton<ITransmissorEventoFiscal, TransmissorEventoUnimake>();
+builder.Services.AddSingleton<ITransmissorEpec, TransmissorEpecUnimake>();
 
 // Distribuição DFe + manifestação: mesma regra do emissor (sandbox → mock).
 if (modoSandbox)
@@ -251,7 +252,9 @@ builder.Services.AddRateLimiter(opt =>
             httpContext.Connection.RemoteIpAddress?.ToString() ?? "anon",
             _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
             {
-                PermitLimit = limitePorMinuto,
+                // Lido por requisição — assim overrides de config (WAF/ambiente)
+                // valem mesmo lidos antes de builder.Build().
+                PermitLimit = builder.Configuration.GetValue("Fiscal:RateLimit:PorMinuto", 100),
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
             }));

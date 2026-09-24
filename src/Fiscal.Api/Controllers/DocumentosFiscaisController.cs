@@ -328,8 +328,22 @@ public class DocumentosFiscaisController : ControllerBase
                 extensions: new Dictionary<string, object?> { ["campo"] = "valorNota" });
         }
 
+        // NFC-e offline (tpEmis 9, v2 §7): marca o documento para o mapper
+        // gerar o XML com contingência offline — a transmissão (e a janela de
+        // 24h) seguem pelo fluxo de contingência do Worker.
+        string? modoContingencia = null;
+        if (modelo == 65 && req.ContingenciaOffline == true)
+        {
+            modoContingencia = "OFFLINE";
+        }
+        else if (modelo != 65 && req.ContingenciaOffline == true)
+        {
+            return Problem(statusCode: 422, title: "contingenciaOffline só se aplica a NFC-e.",
+                detail: "NF-e usa contingência SVC/EPEC automática do servidor, não emissão offline.");
+        }
+
         return await AceitarAsync(
-            idemKey!, tipo, modelo, ambienteReq, req.Serie, JsonSerializer.Serialize(req), ct);
+            idemKey!, tipo, modelo, ambienteReq, req.Serie, JsonSerializer.Serialize(req), ct, modoContingencia);
     }
 
     /// <summary>
@@ -338,7 +352,7 @@ public class DocumentosFiscaisController : ControllerBase
     /// </summary>
     private async Task<IActionResult> AceitarAsync(
         string idemKey, TipoDocumento tipo, short modelo, Ambiente ambienteReq,
-        short serie, string payloadJson, CancellationToken ct)
+        short serie, string payloadJson, CancellationToken ct, string? modoContingencia = null)
     {
         var tenantId = HttpContext.GetTenantId();
 
@@ -362,6 +376,7 @@ public class DocumentosFiscaisController : ControllerBase
             Numero = numero,
             PayloadEntrada = payloadJson,
             Status = StatusDocumento.PENDENTE,
+            ModoContingencia = modoContingencia,
             CriadoEm = DateTimeOffset.UtcNow,
             AtualizadoEm = DateTimeOffset.UtcNow
         };

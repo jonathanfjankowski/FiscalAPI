@@ -33,3 +33,21 @@ public interface ITransmissorEventoFiscal
         Ambiente ambiente,
         CancellationToken cancellationToken);
 }
+
+/// <summary>
+/// Transmite o evento prévio EPEC (110140) à SVRS — contingência NF-e: a
+/// venda é registrada na SEFAZ antes da transmissão da NF-e completa
+/// (tpEmis 4, janela de 168h). Implementação real: Unimake; sandbox não usa
+/// (o mock não entra em contingência).
+/// </summary>
+public interface ITransmissorEpec
+{
+    /// <summary>Evento EPEC montado a partir do payload do documento (dados de
+    /// emissão/destinatário/totais — o XML completo ainda não existe).</summary>
+    Task<ResultadoEvento> TransmitirAsync(
+        DocumentoFiscal documento,
+        Tenant tenant,
+        X509Certificate2 certificado,
+        Ambiente ambiente,
+        CancellationToken cancellationToken);
+}
