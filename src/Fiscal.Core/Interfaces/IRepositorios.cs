@@ -32,7 +32,6 @@ public interface IRepositorioDocumentoFiscal
 {
     Task<DocumentoFiscal?> ObterPorIdAsync(Guid id, Guid tenantId, CancellationToken ct);
     Task<DocumentoFiscal?> ObterPorIdempotencyKeyAsync(Guid tenantId, TipoDocumento tipo, string key, CancellationToken ct);
-    Task<DocumentoFiscal?> ObterParaLockAsync(Guid id, CancellationToken ct);
     Task AdicionarAsync(DocumentoFiscal doc, CancellationToken ct);
     Task AtualizarAsync(DocumentoFiscal doc, CancellationToken ct);
     Task<long> ReservarProximoNumeroAsync(Guid tenantId, short modelo, short serie, short ambiente, CancellationToken ct);
@@ -57,7 +56,7 @@ public interface IRepositorioNotaRecebida
 {
     Task<NotaRecebida?> ObterPorIdAsync(Guid id, Guid tenantId, CancellationToken ct);
     Task<NotaRecebida?> ObterPorChaveAsync(Guid tenantId, string chave, CancellationToken ct);
-    Task<IReadOnlyList<NotaRecebida>> ListarPorTenantAsync(Guid tenantId, int limite, CancellationToken ct);
+    Task<IReadOnlyList<NotaRecebida>> ListarPorTenantAsync(Guid tenantId, int pagina, int tamanhoPagina, CancellationToken ct);
     Task AdicionarAsync(NotaRecebida nota, CancellationToken ct);
     Task AtualizarAsync(NotaRecebida nota, CancellationToken ct);
 }

@@ -23,6 +23,16 @@ public class VarrerWebhooksJob
     public async Task ExecutarAsync(CancellationToken ct)
     {
         var agora = DateTimeOffset.UtcNow;
+
+        // Órfãs: crash entre o claim (ENTREGANDO + lease) e o save final.
+        var orfas = await _db.WebhooksEntrega
+            .Where(w => w.Status == "ENTREGANDO" && w.ProximaTentativaEm <= agora)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(w => w.Status, "PENDENTE")
+                .SetProperty(w => w.ProximaTentativaEm, agora), ct);
+        if (orfas > 0)
+            _logger.LogWarning("VarrerWebhooksJob resgatou {Quantidade} entrega(s) órfã(s) em ENTREGANDO.", orfas);
+
         var ids = await _db.WebhooksEntrega
             .Where(w => w.Status == "PENDENTE" && w.ProximaTentativaEm != null && w.ProximaTentativaEm <= agora)
             .OrderBy(w => w.ProximaTentativaEm)

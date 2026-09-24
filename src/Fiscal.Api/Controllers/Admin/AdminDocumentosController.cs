@@ -3,6 +3,8 @@ using Fiscal.Core.Entities;
 using Fiscal.Core.Enums;
 using Fiscal.Core.Interfaces;
 using Fiscal.Persistence;
+using Fiscal.Worker.Jobs;
+using Hangfire;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
@@ -22,15 +24,18 @@ public class AdminDocumentosController : ControllerBase
     private readonly FiscalDbContext _db;
     private readonly IRepositorioEventoFiscal _eventoRepo;
     private readonly IRepositorioAuditoria _auditoria;
+    private readonly IBackgroundJobClient _jobs;
 
     public AdminDocumentosController(
         FiscalDbContext db,
         IRepositorioEventoFiscal eventoRepo,
-        IRepositorioAuditoria auditoria)
+        IRepositorioAuditoria auditoria,
+        IBackgroundJobClient jobs)
     {
         _db = db;
         _eventoRepo = eventoRepo;
         _auditoria = auditoria;
+        _jobs = jobs;
     }
 
     public record AdminDocListItem(
@@ -159,13 +164,28 @@ public class AdminDocumentosController : ControllerBase
         if (doc.Status != StatusDocumento.AUTORIZADA)
             return Problem(statusCode: 409, title: "Documento não está AUTORIZADA.",
                 detail: $"Status atual: {doc.Status}. Apenas documentos AUTORIZADA podem ser cancelados.");
+        // Cancelamento por evento 110111 só existe para NF-e/NFC-e — NFS-e usa substituição de DPS.
+        if (doc.Modelo is not (55 or 65))
+            return Problem(statusCode: 409, title: "Cancelamento por evento não se aplica a NFS-e.",
+                detail: "A NFS-e Nacional usa substituição de DPS (endpoint de substituição).");
 
         idempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey) ? Guid.NewGuid().ToString() : idempotencyKey;
         var evento = await RegistrarEventoAsync(doc, EventoCancelamento, idempotencyKey, req.Justificativa.Trim(), ct);
 
-        doc.Status = StatusDocumento.CANCELAMENTO_PENDENTE;
+        if (evento.Status == "PROCESSADO")
+        {
+            // Replay idempotente de evento já transmitido.
+            doc.Status = StatusDocumento.CANCELADA;
+        }
+        else
+        {
+            // Estado assíncrono: o ProcessarEventoJob transmite à SEFAZ e move
+            // para CANCELADA (sucesso) ou ERRO_CANCELAMENTO (rejeição).
+            doc.Status = StatusDocumento.CANCELAMENTO_PENDENTE;
+        }
         doc.AtualizadoEm = DateTimeOffset.UtcNow;
         await _db.SaveChangesAsync(ct);
+        EnfileirarSePendente(evento);
 
         return Ok(new
         {
@@ -199,6 +219,7 @@ public class AdminDocumentosController : ControllerBase
 
         idempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey) ? Guid.NewGuid().ToString() : idempotencyKey;
         var evento = await RegistrarEventoAsync(doc, EventoCartaCorrecao, idempotencyKey, req.Correcao.Trim(), ct);
+        EnfileirarSePendente(evento);
 
         return Ok(new
         {
@@ -208,6 +229,13 @@ public class AdminDocumentosController : ControllerBase
             status = evento.Status,
             criadoEm = evento.CriadoEm
         });
+    }
+
+    private void EnfileirarSePendente(EventoFiscal evento)
+    {
+        // Replays idempotentes de eventos já em fila/terminal não reenfileiram.
+        if (evento.Status == "PENDENTE")
+            _jobs.Enqueue<ProcessarEventoJob>(j => j.ExecutarAsync(evento.Id, CancellationToken.None));
     }
 
     private async Task<EventoFiscal> RegistrarEventoAsync(
@@ -229,7 +257,19 @@ public class AdminDocumentosController : ControllerBase
             CriadoEm = DateTimeOffset.UtcNow
         };
         await _eventoRepo.AdicionarAsync(evento, ct);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Corrida: outra request com a mesma Idempotency-Key gravou primeiro —
+            // devolve o evento vencedor (replay) em vez de 500.
+            var vencedor = await _eventoRepo.ObterPorIdempotencyAsync(
+                doc.TenantId, doc.Id, tipo, idempotencyKey, ct);
+            if (vencedor is null) throw;
+            return vencedor;
+        }
 
         await _auditoria.RegistrarAsync(new Auditoria
         {

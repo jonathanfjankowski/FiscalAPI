@@ -61,6 +61,10 @@ public class SincronizarDistribuicaoDFeJob
             {
                 await SincronizarTenantAsync(tenant, consulta, ct);
             }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw; // shutdown do host — não tratar como falha de tenant
+            }
             catch (Exception ex)
             {
                 // Falha de um tenant não trava os demais (SEFAZ fora, certificado
@@ -81,62 +85,89 @@ public class SincronizarDistribuicaoDFeJob
             var nsu = await _nsuRepo.ObterAsync(tenant.Id, (short)ambiente, ct);
             var ultimoNsu = nsu?.UltimoNsu ?? "000000000000000";
 
-            var resultado = await consulta.ConsultarAsync(tenant, x509, ambiente, ultimoNsu, ct);
+            // Cada página entrega até 50 DF-e: consulta em loop até consumir a
+            // fila do RFB. O cursor para a próxima página é o UltNSU da resposta
+            // (último NSU efetivamente entregue) — jamais o MaxNSU, que é o maior
+            // NSU da base RFB e pularia as notas não incluídas nesta página.
+            var cursor = ultimoNsu.PadLeft(15, '0');
             var novas = 0;
-
-            foreach (var documento in resultado.Documentos)
+            var iteracoes = 0;
+            while (iteracoes++ < 20)
             {
-                var chave = ExtratorDfe.ChaveDoXml(documento.Xml);
-                if (chave is null) continue;
-                if (await _notaRepo.ObterPorChaveAsync(tenant.Id, chave, ct) is not null) continue;
+                var resultado = await consulta.ConsultarAsync(tenant, x509, ambiente, cursor, ct);
 
-                var nota = new NotaRecebida
+                foreach (var documento in resultado.Documentos)
                 {
-                    TenantId = tenant.Id,
-                    Ambiente = (short)ambiente,
-                    Chave = chave,
-                    Nsu = documento.Nsu,
-                    TipoSchema = documento.Schema.Contains("procNFe", StringComparison.OrdinalIgnoreCase) ? "procNFe" : "resNFe",
-                    XmlResumo = documento.Xml,
-                    XmlCompleto = documento.Schema.Contains("procNFe", StringComparison.OrdinalIgnoreCase) ? documento.Xml : null,
-                    CnpjEmitente = ExtratorDfe.ValorDoElemento(documento.Xml, "CNPJ"),
-                    NomeEmitente = ExtratorDfe.ValorDoElemento(documento.Xml, "xNome"),
-                    Valor = decimal.TryParse(ExtratorDfe.ValorDoElemento(documento.Xml, "vNF"),
-                        System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null,
-                    EmitidaEm = DateTimeOffset.TryParse(ExtratorDfe.ValorDoElemento(documento.Xml, "dhEmi")
-                        ?? ExtratorDfe.ValorDoElemento(documento.Xml, "dEmi"), out var dh) ? dh : null,
-                };
-                await _notaRepo.AdicionarAsync(nota, ct);
-                novas++;
+                    var chave = ExtratorDfe.ChaveDoXml(documento.Xml);
+                    if (chave is null)
+                    {
+                        // Não é possível arquivar sem chave — mas a perda precisa ser
+                        // alta (LogError), nunca silenciosa: o cursor avança para não
+                        // travar a sincronização inteira num XML imprestável.
+                        _logger.LogError(
+                            "DFe tenant {Tenant}/{Ambiente}: NSU {Nsu} ({Schema}) sem chave de acesso extraível — documento não arquivado. XML: {Xml}",
+                            tenant.Id, ambiente, documento.Nsu, documento.Schema, documento.Xml);
+                        continue;
+                    }
+                    if (await _notaRepo.ObterPorChaveAsync(tenant.Id, chave, ct) is not null) continue;
 
-                if (tenant.WebhookUrl is not null)
-                {
-                    _db.WebhooksEntrega.Add(new WebhookEntrega
+                    var nota = new NotaRecebida
                     {
                         TenantId = tenant.Id,
-                        DocumentoId = null,
-                        TipoEvento = Webhooks.NotaRecebida,
-                        Payload = Webhooks.PayloadNotaRecebida(nota, DateTimeOffset.UtcNow),
-                        Status = "PENDENTE",
-                        ProximaTentativaEm = DateTimeOffset.UtcNow,
-                    });
+                        Ambiente = (short)ambiente,
+                        Chave = chave,
+                        Nsu = documento.Nsu,
+                        TipoSchema = documento.Schema.Contains("procNFe", StringComparison.OrdinalIgnoreCase) ? "procNFe" : "resNFe",
+                        XmlResumo = documento.Xml,
+                        XmlCompleto = documento.Schema.Contains("procNFe", StringComparison.OrdinalIgnoreCase) ? documento.Xml : null,
+                        CnpjEmitente = ExtratorDfe.ValorDoElemento(documento.Xml, "CNPJ"),
+                        NomeEmitente = ExtratorDfe.ValorDoElemento(documento.Xml, "xNome"),
+                        Valor = decimal.TryParse(ExtratorDfe.ValorDoElemento(documento.Xml, "vNF"),
+                            System.Globalization.CultureInfo.InvariantCulture, out var v) ? v : null,
+                        EmitidaEm = DateTimeOffset.TryParse(ExtratorDfe.ValorDoElemento(documento.Xml, "dhEmi")
+                            ?? ExtratorDfe.ValorDoElemento(documento.Xml, "dEmi"), out var dh) ? dh : null,
+                    };
+                    await _notaRepo.AdicionarAsync(nota, ct);
+                    novas++;
+
+                    if (tenant.WebhookUrl is not null)
+                    {
+                        _db.WebhooksEntrega.Add(new WebhookEntrega
+                        {
+                            TenantId = tenant.Id,
+                            DocumentoId = null,
+                            TipoEvento = Webhooks.NotaRecebida,
+                            Payload = Webhooks.PayloadNotaRecebida(nota, DateTimeOffset.UtcNow),
+                            Status = "PENDENTE",
+                            ProximaTentativaEm = DateTimeOffset.UtcNow,
+                        });
+                    }
                 }
+
+                // cStat 137 = nada localizado abaixo do maxNSU (pode saltar para ele);
+                // cStat 138 = há documentos — a próxima página começa no UltNSU entregue.
+                var proximoCursor = (resultado.CStat == 137 ? resultado.MaxNsu : resultado.UltNsu)
+                    .PadLeft(15, '0');
+                var consumiuFila = resultado.CStat != 138 || proximoCursor == cursor;
+                cursor = proximoCursor;
+                await _db.SaveChangesAsync(ct);
+
+                if (consumiuFila) break;
             }
 
-            var maxNsu = resultado.MaxNsu.PadLeft(15, '0');
-            if (maxNsu != ultimoNsu)
+            if (cursor != ultimoNsu.PadLeft(15, '0'))
                 await _nsuRepo.SalvarAsync(new NsuDistribuicao
                 {
                     TenantId = tenant.Id,
                     Ambiente = (short)ambiente,
-                    UltimoNsu = maxNsu,
+                    UltimoNsu = cursor,
                 }, ct);
 
             await _db.SaveChangesAsync(ct);
 
-            if (novas > 0 || resultado.CStat == 138)
-                _logger.LogInformation("Distribuição DFe tenant {Tenant}/{Ambiente}: {Novas} nova(s) nota(s) (cStat {CStat}).",
-                    tenant.Id, ambiente, novas, resultado.CStat);
+            if (novas > 0)
+                _logger.LogInformation("Distribuição DFe tenant {Tenant}/{Ambiente}: {Novas} nova(s) nota(s).",
+                    tenant.Id, ambiente, novas);
         }
     }
 }

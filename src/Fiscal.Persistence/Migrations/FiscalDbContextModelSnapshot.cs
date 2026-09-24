@@ -438,6 +438,10 @@ namespace Fiscal.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("nota_recebida_id");
 
+                    b.Property<DateTimeOffset?>("ProximaTentativaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("proxima_tentativa_em");
+
                     b.Property<string>("Protocolo")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")

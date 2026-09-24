@@ -253,6 +253,7 @@ public class FiscalDbContext : DbContext
             b.Property(x => x.Protocolo).HasColumnName("protocolo").HasMaxLength(20);
             b.Property(x => x.MotivoStatus).HasColumnName("motivo_status");
             b.Property(x => x.Tentativas).HasColumnName("tentativas");
+            b.Property(x => x.ProximaTentativaEm).HasColumnName("proxima_tentativa_em");
             b.Property(x => x.CriadoEm).HasColumnName("criado_em");
             b.HasOne(x => x.NotaRecebida).WithMany().HasForeignKey(x => x.NotaRecebidaId);
             b.HasIndex(x => new { x.TenantId, x.NotaRecebidaId, x.IdempotencyKey }).IsUnique();

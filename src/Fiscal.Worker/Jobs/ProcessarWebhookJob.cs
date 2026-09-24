@@ -46,17 +46,27 @@ public class ProcessarWebhookJob
     }
 
     [Hangfire.AutomaticRetry(Attempts = 1)]
+    [Hangfire.DisableConcurrentExecution(timeoutInSeconds: 300)]
     public async Task ExecutarAsync(Guid entregaId, CancellationToken ct)
     {
+        // Claim atômico: assume apenas se ainda PENDENTE — evita entrega dupla
+        // quando varredor e enqueue inicial disparam o mesmo id em paralelo.
+        // ProximaTentativaEm vira lease (+30 min): o VarrerWebhooksJob devolve
+        // órfãs em ENTREGANDO (crash no meio) para PENDENTE quando ela vence.
+        DateTimeOffset? leaseAte = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(30);
+        var claimado = await _db.WebhooksEntrega
+            .Where(w => w.Id == entregaId && w.Status == "PENDENTE")
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(w => w.Status, "ENTREGANDO")
+                .SetProperty(w => w.ProximaTentativaEm, leaseAte), ct);
+        if (claimado == 0) return;
+
         var entrega = await _db.WebhooksEntrega.FirstOrDefaultAsync(w => w.Id == entregaId, ct);
         if (entrega is null)
         {
             _logger.LogWarning("WebhookEntrega {Id} não encontrada — descartando job.", entregaId);
             return;
         }
-
-        if (entrega.Status is "ENTREGUE" or "FALHA")
-            return;
 
         var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Id == entrega.TenantId, ct);
         if (tenant?.WebhookUrl is null)

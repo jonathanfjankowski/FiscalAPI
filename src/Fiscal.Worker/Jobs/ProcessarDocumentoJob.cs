@@ -28,6 +28,14 @@ public class ProcessarDocumentoJob
         TimeSpan.FromMinutes(10),
     };
 
+    /// <summary>Teto de tentativas em CONTINGENCIA (~8h de backoff máx. 10 min):
+    /// esgotou → FALHA_EMISSAO (terminal) + webhook — nunca retry infinito.</summary>
+    private const int MaxTentativas = 48;
+
+    /// <summary>Janela de aceitação da SVC: DF-e emitido há mais de 168h (7 dias)
+    /// é rejeitado — não adianta retransmitir (evita loop etário de rejeições).</summary>
+    private static readonly TimeSpan JanelaSvc = TimeSpan.FromHours(168);
+
     private readonly FiscalDbContext _db;
     private readonly IRepositorioDocumentoFiscal _docRepo;
     private readonly IRepositorioCertificado _certRepo;
@@ -61,20 +69,44 @@ public class ProcessarDocumentoJob
     }
 
     [Hangfire.AutomaticRetry(Attempts = 1)]
+    [Hangfire.DisableConcurrentExecution(timeoutInSeconds: 600)]
     public async Task ExecutarAsync(Guid documentoId, CancellationToken ct)
     {
-        var doc = await _docRepo.ObterPorIdAsync(documentoId, await TenantIdDoDocumento(documentoId, ct), ct);
-        if (doc is null)
+        // Claim atômico: assume o documento apenas se ainda estiver enfileirável
+        // (PENDENTE/CONTINGENCIA). Se 0 linhas, outra execução já assumiu (corrida
+        // varredor × replay × retry do Hangfire) ou o doc chegou a status terminal
+        // — abortar sem retransmitir (evita duplicidade e sobrescrita de sucesso).
+        // ProximaTentativaEm vira lease (+15 min): se a execução morrer no meio,
+        // o VarrerContingenciaJob resgata o órfão em PROCESSANDO.
+        DateTimeOffset? leaseAte = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(15);
+        var claimado = await _db.DocumentosFiscais
+            .Where(d => d.Id == documentoId
+                && (d.Status == StatusDocumento.PENDENTE || d.Status == StatusDocumento.CONTINGENCIA))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(d => d.Status, StatusDocumento.PROCESSANDO)
+                .SetProperty(d => d.ProximaTentativaEm, leaseAte)
+                .SetProperty(d => d.AtualizadoEm, DateTimeOffset.UtcNow), ct);
+        if (claimado == 0)
         {
-            _logger.LogWarning("DocumentoFiscal {Id} não encontrado — descartando job.", documentoId);
+            _logger.LogInformation("DocumentoFiscal {Id} não está mais PENDENTE/CONTINGENCIA — nada a fazer.", documentoId);
             return;
         }
 
-        if (doc.Status is StatusDocumento.AUTORIZADA or StatusDocumento.REJEITADA
-            or StatusDocumento.CANCELADA or StatusDocumento.DENEGADA
-            or StatusDocumento.ERRO_INTERNO)
+        var doc = await _db.DocumentosFiscais.FirstOrDefaultAsync(d => d.Id == documentoId, ct);
+        if (doc is null)
         {
-            _logger.LogInformation("DocumentoFiscal {Id} já em status terminal {Status} — nada a fazer.", doc.Id, doc.Status);
+            _logger.LogWarning("DocumentoFiscal {Id} não encontrado após claim — descartando job.", documentoId);
+            return;
+        }
+
+        // Janela SVC: documento em SVC cuja dhEmi (CriadoEm determinístico) tem
+        // mais de 168h nunca será autorizado — falha alto em vez de rejeição em loop.
+        if (doc.ModoContingencia is not null && doc.CriadoEm < DateTimeOffset.UtcNow - JanelaSvc)
+        {
+            _logger.LogError("DocumentoFiscal {Id}: janela de 168h da SVC ({Modo}) expirada — marcando FALHA_EMISSAO.",
+                doc.Id, doc.ModoContingencia);
+            await MarcarErroTerminalAsync(doc,
+                $"Janela de 168h da contingência SVC ({doc.ModoContingencia}) expirada — reemita o documento com nova numeração.", ct);
             return;
         }
 
@@ -184,9 +216,20 @@ public class ProcessarDocumentoJob
                 break;
 
             case ResultadoEmissaoStatus.ErroTransmissao:
-                doc.Status = StatusDocumento.CONTINGENCIA;
-                doc.ProximaTentativaEm = DateTimeOffset.UtcNow + ProximoBackoff(doc.Tentativas);
-                _metricas.ContingenciaAcionada(doc.ModoContingencia ?? "fila");
+                if (doc.Tentativas >= MaxTentativas)
+                {
+                    // Esgotou — terminal + webhook; não volta mais à fila sozinho.
+                    doc.Status = StatusDocumento.FALHA_EMISSAO;
+                    doc.ProximaTentativaEm = null;
+                    _logger.LogError("DocumentoFiscal {Id} esgotou {Max} tentativas de transmissão — FALHA_EMISSAO.",
+                        doc.Id, MaxTentativas);
+                }
+                else
+                {
+                    doc.Status = StatusDocumento.CONTINGENCIA;
+                    doc.ProximaTentativaEm = DateTimeOffset.UtcNow + ProximoBackoff(doc.Tentativas);
+                    _metricas.ContingenciaAcionada(doc.ModoContingencia ?? "fila");
+                }
                 break;
 
             default:
@@ -222,6 +265,7 @@ public class ProcessarDocumentoJob
             StatusDocumento.AUTORIZADA => Webhooks.EventoAutorizado,
             StatusDocumento.REJEITADA => Webhooks.EventoRejeitado,
             StatusDocumento.DENEGADA => Webhooks.EventoDenegado,
+            StatusDocumento.FALHA_EMISSAO => Webhooks.EventoFalhaEmissao,
             _ => null,
         };
         if (tipo is null || tenant.WebhookUrl is null) return;
@@ -255,12 +299,6 @@ public class ProcessarDocumentoJob
         };
     }
 
-    private async Task<Guid> TenantIdDoDocumento(Guid documentoId, CancellationToken ct) =>
-        await _db.DocumentosFiscais
-            .Where(d => d.Id == documentoId)
-            .Select(d => d.TenantId)
-            .FirstAsync(ct);
-
     private static TimeSpan ProximoBackoff(int tentativa) =>
         tentativa <= 0 ? Backoff[0] : Backoff[Math.Min(tentativa - 1, Backoff.Length - 1)];
 
@@ -271,6 +309,22 @@ public class ProcessarDocumentoJob
         doc.Tentativas += 1;
         doc.AtualizadoEm = DateTimeOffset.UtcNow;
         doc.ProximaTentativaEm = null;
+        await _docRepo.AtualizarAsync(doc, ct);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Terminal por regra de negócio (ex.: janela SVC) — webhook de falha.</summary>
+    private async Task MarcarErroTerminalAsync(DocumentoFiscal doc, string motivo, CancellationToken ct)
+    {
+        doc.Status = StatusDocumento.FALHA_EMISSAO;
+        doc.MotivoStatus = motivo;
+        doc.Tentativas += 1;
+        doc.AtualizadoEm = DateTimeOffset.UtcNow;
+        doc.ProximaTentativaEm = null;
+
+        var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Id == doc.TenantId, ct);
+        if (tenant is not null) EnfileirarWebhook(doc, tenant);
+
         await _docRepo.AtualizarAsync(doc, ct);
         await _db.SaveChangesAsync(ct);
     }

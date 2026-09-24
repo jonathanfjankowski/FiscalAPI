@@ -82,11 +82,6 @@ public class RepositorioDocumentoFiscal : IRepositorioDocumentoFiscal
         _db.DocumentosFiscais.FirstOrDefaultAsync(
             d => d.TenantId == tenantId && d.Tipo == tipo && d.IdempotencyKey == key, ct);
 
-    public Task<DocumentoFiscal?> ObterParaLockAsync(Guid id, CancellationToken ct) =>
-        _db.DocumentosFiscais.FromSqlInterpolated($"SELECT * FROM documentos_fiscais WHERE id = {id} FOR UPDATE")
-            .AsNoTracking()
-            .FirstOrDefaultAsync(ct);
-
     public async Task AdicionarAsync(DocumentoFiscal doc, CancellationToken ct) =>
         await _db.DocumentosFiscais.AddAsync(doc, ct);
 
@@ -204,14 +199,18 @@ public class RepositorioNotaRecebida : IRepositorioNotaRecebida
     public Task<NotaRecebida?> ObterPorChaveAsync(Guid tenantId, string chave, CancellationToken ct) =>
         _db.NotasRecebidas.FirstOrDefaultAsync(n => n.TenantId == tenantId && n.Chave == chave, ct);
 
-    public async Task<IReadOnlyList<NotaRecebida>> ListarPorTenantAsync(Guid tenantId, int limite, CancellationToken ct)
+    public async Task<IReadOnlyList<NotaRecebida>> ListarPorTenantAsync(Guid tenantId, int pagina, int tamanhoPagina, CancellationToken ct)
     {
-        // ORDER BY DateTimeOffset não é suportado no SQLite (testes) — ordena em memória.
-        var recentes = await _db.NotasRecebidas
-            .Where(n => n.TenantId == tenantId)
-            .Take(1000)
+        // Ordenação e paginação no SQL. SQLite (suíte de testes) não traduz
+        // ORDER BY sobre DateTimeOffset — Postgres (produção) sim.
+        var query = _db.NotasRecebidas.AsNoTracking().Where(n => n.TenantId == tenantId);
+        var ordenada = _db.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite"
+            ? query.OrderBy(n => n.Id)
+            : query.OrderByDescending(n => n.RecebidaEm);
+        return await ordenada
+            .Skip((pagina - 1) * tamanhoPagina)
+            .Take(tamanhoPagina)
             .ToListAsync(ct);
-        return recentes.OrderByDescending(n => n.RecebidaEm).Take(limite).ToList();
     }
 
     public async Task AdicionarAsync(NotaRecebida nota, CancellationToken ct) =>
