@@ -186,6 +186,7 @@ public class GeradorPdfQuestPdf : IGeradorPdf
                             {
                                 ("BASE DE CÁLC. DO ICMS", SomaBaseIcms(req).ToString("N2")),
                                 ("VALOR DO ICMS", SomaIcms(req).ToString("N2")),
+                                ("V. ICMS DESONERADO", SomaDesonerado(req).ToString("N2")),
                                 ("BASE CÁLC. ICMS ST", SomaBcSt(req).ToString("N2")),
                                 ("VALOR ICMS ST", SomaSt(req).ToString("N2")),
                                 ("V. TOTAL PRODUTOS", t2.ValorProdutos.ToString("N2")),
@@ -745,6 +746,9 @@ public class GeradorPdfQuestPdf : IGeradorPdf
     private static decimal SomaIcms(EmissaoRequest? req) =>
         req?.Itens.SelectMany(i => i.Impostos ?? [])
             .Where(im => im.Valor is not null).Sum(im => im.Valor!.Value) ?? 0;
+
+    private static decimal SomaDesonerado(EmissaoRequest? req) =>
+        req?.Itens.Sum(i => i.ImpostosV2?.Icms?.ValorDesonerado ?? 0) ?? 0;
 
     private static EmissaoRequest? TryDeserialize(string payload)
     {

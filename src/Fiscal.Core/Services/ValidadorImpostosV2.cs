@@ -40,7 +40,8 @@ public class ValidadorImpostosV2
     public static bool FormulaV2Ativa(TotaisDto totais, IReadOnlyList<ItemDto> itens) =>
         totais.ValorDesconto is not null || totais.ValorFrete is not null ||
         totais.ValorSeguro is not null || totais.OutrasDespesas is not null ||
-        itens.Any(i => i.ValorDesconto is not null || i.ImpostosV2?.Ipi is not null);
+        itens.Any(i => i.ValorDesconto is not null || i.ImpostosV2?.Ipi is not null ||
+                       i.ImpostosV2?.Icms?.ValorDesonerado is not null);
 
     public IReadOnlyList<InconsistenciaFiscal> ValidarTotais(TotaisDto totais, IReadOnlyList<ItemDto> itens)
     {
@@ -54,14 +55,15 @@ public class ValidadorImpostosV2
         var st = itens.Sum(i => i.ImpostosV2?.Icms?.St?.ValorSt ?? 0);
         var fcpSt = itens.Sum(i => i.ImpostosV2?.Icms?.St?.ValorFcpSt ?? 0);
         var ipi = itens.Sum(i => i.ImpostosV2?.Ipi?.Valor ?? 0);
+        var desonerado = itens.Sum(i => i.ImpostosV2?.Icms?.ValorDesonerado ?? 0);
 
         var esperado = brutos - descontos + (totais.ValorFrete ?? 0) + (totais.ValorSeguro ?? 0) +
-                       (totais.OutrasDespesas ?? 0) + st + fcpSt + ipi;
+                       (totais.OutrasDespesas ?? 0) + st + fcpSt + ipi - desonerado;
 
         if (Math.Abs(esperado - totais.ValorNota) > Tolerancia)
         {
             erros.Add(new InconsistenciaFiscal("valorNota",
-                $"Fórmula v2: {brutos:N2} − {descontos:N2} (descontos) + frete/seguro/outras + ST {st:N2} + FCP-ST {fcpSt:N2} + IPI {ipi:N2} = {esperado:N2}, recebido {totais.ValorNota:N2}."));
+                $"Fórmula v2: {brutos:N2} − {descontos:N2} (descontos) + frete/seguro/outras + ST {st:N2} + FCP-ST {fcpSt:N2} + IPI {ipi:N2} − desonerado {desonerado:N2} = {esperado:N2}, recebido {totais.ValorNota:N2}."));
         }
 
         return erros;
@@ -195,6 +197,7 @@ public class ValidadorImpostosV2
         }
 
         ValidarAritmetica(icms, P, erros);
+        ValidarDesoneracao(icms, P, erros);
         ValidarDifal(icms.Difal, P, erros);
     }
 
@@ -321,6 +324,50 @@ public class ValidadorImpostosV2
 
         if (icms.Cst == "51")
             Conferir(P("valorIcmsOperacao"), icms.BaseCalculo, icms.Aliquota, icms.ValorIcmsOperacao, erros);
+    }
+
+    /// <summary>
+    /// Desoneração (vICMSDeson/motDesICMS, NT 2019.001): CST 20/40/41/70/90,
+    /// motivo 3/9/12, nunca CSOSN. Aritmética conferível nos CSTs 40/41
+    /// (base cheia × alíquota, sem vICMS destacado); nos demais a coerência
+    /// global fica no total da nota (ValidarTotais subtrai o desonerado).
+    /// </summary>
+    private static void ValidarDesoneracao(IcmsDto icms, Func<string, string> P, List<InconsistenciaFiscal> erros)
+    {
+        if (icms.CodigoBeneficioFiscal is { } cBenef && cBenef.Length is 0 or > 10)
+            erros.Add(new(P("codigoBeneficioFiscal"), "codigoBeneficioFiscal deve ter entre 1 e 10 posições."));
+
+        if (icms.ValorDesonerado is null && icms.MotivoDesoneracao is null)
+            return;
+
+        if (icms.ValorDesonerado is { } deson)
+        {
+            if (icms.MotivoDesoneracao is not ("3" or "9" or "12"))
+                erros.Add(new(P("motivoDesoneracao"),
+                    $"valorDesonerado exige motivoDesoneracao = 3, 9 ou 12 (recebido '{icms.MotivoDesoneracao ?? "null"}')."));
+
+            if (deson < -Tolerancia)
+                erros.Add(new(P("valorDesonerado"), $"vICMSDeson negativo ({deson:N2})."));
+
+            if (icms.Csosn is not null)
+                erros.Add(new(P("valorDesonerado"),
+                    "Desoneração (motDesICMS) não se aplica ao Simples Nacional (CSOSN)."));
+
+            if (icms.Cst is not ("20" or "40" or "41" or "70" or "90"))
+                erros.Add(new(P("valorDesonerado"),
+                    $"Desoneração não se aplica ao CST '{icms.Cst ?? "null"}' — use 20/40/41/70/90."));
+
+            if (icms.Cst is "40" or "41" && icms.BaseCalculo is { } b && icms.Aliquota is { } a &&
+                Math.Abs(b * a / 100m - deson) > Tolerancia)
+            {
+                erros.Add(new(P("valorDesonerado"),
+                    $"Base cheia {b:N2} × alíquota {a:N4}% = {b * a / 100m:N2}, recebido valorDesonerado {deson:N2}."));
+            }
+        }
+        else if (icms.MotivoDesoneracao is not null)
+        {
+            erros.Add(new(P("valorDesonerado"), "motivoDesoneracao informado sem valorDesonerado."));
+        }
     }
 
     private static void ValidarDifal(DifalDto? difal, Func<string, string> P, List<InconsistenciaFiscal> erros)

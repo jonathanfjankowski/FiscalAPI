@@ -110,6 +110,9 @@ public record IcmsDto(
     decimal? ValorIcmsOperacao = null,        // vICMSOp — CST 51
     decimal? PercentualDiferimento = null,    // pDif — CST 51
     decimal? ValorIcmsDiferido = null,        // vICMSDif — CST 51
+    decimal? ValorDesonerado = null,          // vICMSDeson — CST 20/40/41/70/90 com motivo (NT 2019.001)
+    [MaxLength(2)] string? MotivoDesoneracao = null, // motDesICMS — 3, 9 ou 12
+    [MaxLength(10)] string? CodigoBeneficioFiscal = null, // cBenefRBC — código de benefício fiscal na UF (item)
     IcmsStDto? St = null,
     DifalDto? Difal = null,                   // interestadual consumidor final (ICMSUFDest)
     decimal? PercentualBcOperacao = null,     // v2 §7 — pBCOp (CST 10, ICMSPart)
@@ -144,6 +147,7 @@ public record TotaisDto(
     [Range(0, double.MaxValue)] decimal? ValorFrete = null,      // v2 F2 — compõe o total da nota
     [Range(0, double.MaxValue)] decimal? ValorSeguro = null,     // v2 F2
     [Range(0, double.MaxValue)] decimal? OutrasDespesas = null,  // v2 F2
+    [Range(0, double.MaxValue)] decimal? ValorDesonerado = null, // Σ vICMSDeson — SUBTRAI do total (vNF −= vICMSDeson)
     [Range(0, double.MaxValue)] decimal? ValorIbs = null,        // v2 F5 — conferência
     [Range(0, double.MaxValue)] decimal? ValorCbs = null,        // v2 F5 — conferência
     [Range(0, double.MaxValue)] decimal? ValorIs = null);        // v2 F5 — conferência

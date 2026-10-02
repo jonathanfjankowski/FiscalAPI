@@ -387,6 +387,8 @@ public static class MapperEnviNFe
             });
             if (item.ValorDesconto is { } desconto)
                 dets[^1].Prod.VDesc = (double)desconto;
+            if (v2?.Icms?.CodigoBeneficioFiscal is { Length: > 0 } cBenef)
+                dets[^1].Prod.CBenef = cBenef;
             if (item.Dis is { Count: > 0 })
                 dets[^1].Prod.DI = MapearDis(item.Dis, i + 1, item.Codigo);
         }
@@ -746,10 +748,13 @@ public static class MapperEnviNFe
                         VICMS = (double)icms.Valor!.Value,
                     };
                     PreencherFcp(icms20, icms);
+                    PreencherDesoneracao(icms20, icms);
                     return new ICMS { ICMS20 = icms20 };
 
                 case "40" or "41" or "50":
-                    return new ICMS { ICMS40 = new ICMS40 { Orig = origem, CST = cst } };
+                    var icms40 = new ICMS40 { Orig = origem, CST = cst };
+                    PreencherDesoneracao(icms40, icms);
+                    return new ICMS { ICMS40 = icms40 };
 
                 case "51":
                     Exigir(icms.ValorIcmsOperacao is not null, "CST 51 exige valorIcmsOperacao (vICMSOp).", numeroItem, codigoItem);
@@ -789,6 +794,7 @@ public static class MapperEnviNFe
                     };
                     PreencherFcp(icms70, icms);
                     PreencherSt(icms70, st70);
+                    PreencherDesoneracao(icms70, icms);
                     return new ICMS { ICMS70 = icms70 };
 
                 case "90":
@@ -802,6 +808,7 @@ public static class MapperEnviNFe
                     if (icms.Aliquota is not null) icms90.PICMS = (double)icms.Aliquota.Value;
                     if (icms.Valor is not null) icms90.VICMS = (double)icms.Valor.Value;
                     PreencherFcp(icms90, icms);
+                    PreencherDesoneracao(icms90, icms);
                     if (st is not null) PreencherSt(icms90, st);
                     return new ICMS { ICMS90 = icms90 };
 
@@ -1065,6 +1072,48 @@ public static class MapperEnviNFe
         if (icms.ValorFcp is not null) grupo.VFCP = (double)icms.ValorFcp.Value;
     }
 
+    // ---- desoneração (vICMSDeson/motDesICMS — NT 2019.001) ----------------
+
+    /// <summary>motDesICMS 3/9/12 (único domínio do layout atual) → enum Unimake.</summary>
+    private static MotivoDesoneracaoICMS? ParseMotivoDesoneracao(string? motivo) =>
+        motivo is { } m ? (MotivoDesoneracaoICMS)int.Parse(m) : null;
+
+    private static void PreencherDesoneracao(ICMS20 grupo, IcmsDto icms)
+    {
+        if (icms.ValorDesonerado is { } deson)
+        {
+            grupo.VICMSDeson = (double)deson;
+            grupo.MotDesICMS = ParseMotivoDesoneracao(icms.MotivoDesoneracao)!.Value;
+        }
+    }
+
+    private static void PreencherDesoneracao(ICMS40 grupo, IcmsDto icms)
+    {
+        if (icms.ValorDesonerado is { } deson)
+        {
+            grupo.VICMSDeson = (double)deson;
+            grupo.MotDesICMS = ParseMotivoDesoneracao(icms.MotivoDesoneracao)!.Value;
+        }
+    }
+
+    private static void PreencherDesoneracao(ICMS70 grupo, IcmsDto icms)
+    {
+        if (icms.ValorDesonerado is { } deson)
+        {
+            grupo.VICMSDeson = (double)deson;
+            grupo.MotDesICMS = ParseMotivoDesoneracao(icms.MotivoDesoneracao)!.Value;
+        }
+    }
+
+    private static void PreencherDesoneracao(ICMS90 grupo, IcmsDto icms)
+    {
+        if (icms.ValorDesonerado is { } deson)
+        {
+            grupo.VICMSDeson = (double)deson;
+            grupo.MotDesICMS = ParseMotivoDesoneracao(icms.MotivoDesoneracao)!.Value;
+        }
+    }
+
     private static ICMSUFDest? MapearDifal(DifalDto? difal, int numeroItem, string codigoItem)
     {
         if (difal is null)
@@ -1097,7 +1146,7 @@ public static class MapperEnviNFe
     private static Total MapearTotal(EmissaoRequest req)
     {
         decimal vBc = 0, vIcms = 0, vBcSt = 0, vSt = 0, vFcp = 0, vFcpSt = 0, vFcpStRet = 0,
-                vFcpUfDest = 0, vIcmsUfDest = 0, vIcmsUfRemet = 0;
+                vFcpUfDest = 0, vIcmsUfDest = 0, vIcmsUfRemet = 0, vIcmsDeson = 0;
         var vDesc = req.Totais.ValorDesconto ?? 0;
         var vFrete = req.Totais.ValorFrete ?? 0;
         var vSeg = req.Totais.ValorSeguro ?? 0;
@@ -1132,6 +1181,7 @@ public static class MapperEnviNFe
                 vBc += icms.BaseCalculo ?? 0;
                 vIcms += icms.Valor ?? 0;
                 vFcp += icms.ValorFcp ?? 0;
+                vIcmsDeson += icms.ValorDesonerado ?? 0;
                 if (icms.St is { } st)
                 {
                     vBcSt += st.BaseCalculoSt ?? 0;
@@ -1163,6 +1213,7 @@ public static class MapperEnviNFe
             VProd = (double)req.Totais.ValorProdutos,
             VNF = (double)req.Totais.ValorNota,
         };
+        if (vIcmsDeson != 0) tot.VICMSDeson = (double)vIcmsDeson;
         if (vBcSt != 0) tot.VBCST = (double)vBcSt;
         if (vSt != 0) tot.VST = (double)vSt;
         if (vFcp != 0) tot.VFCP = (double)vFcp;

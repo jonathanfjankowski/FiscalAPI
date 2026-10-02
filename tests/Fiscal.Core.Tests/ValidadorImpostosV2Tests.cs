@@ -442,4 +442,86 @@ public class ValidadorImpostosV2Tests
 
         erros.Should().BeEmpty();
     }
+
+    [Fact]
+    public void Desoneracao_cst_40_correta_passa()
+    {
+        var erros = Validar(Item(new IcmsDto(Origem: 0, Cst: "40",
+            BaseCalculo: 100, Aliquota: 18, ValorDesonerado: 18, MotivoDesoneracao: "9")));
+
+        erros.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void Desoneracao_cst_40_aritmetica_errada_falha()
+    {
+        var erros = Validar(Item(new IcmsDto(Origem: 0, Cst: "40",
+            BaseCalculo: 100, Aliquota: 18, ValorDesonerado: 20, MotivoDesoneracao: "9")));
+
+        erros.Should().Contain(e => e.Contains("valorDesonerado") && e.Contains("Base cheia"));
+    }
+
+    [Fact]
+    public void Desoneracao_motivo_invalido_falha()
+    {
+        var erros = Validar(Item(new IcmsDto(Origem: 0, Cst: "40",
+            BaseCalculo: 100, Aliquota: 18, ValorDesonerado: 18, MotivoDesoneracao: "5")));
+
+        erros.Should().Contain(e => e.Contains("motivoDesoneracao = 3, 9 ou 12"));
+    }
+
+    [Fact]
+    public void Desoneracao_motivo_sem_valor_falha()
+    {
+        var erros = Validar(Item(new IcmsDto(Origem: 0, Cst: "40",
+            BaseCalculo: 100, Aliquota: 18, MotivoDesoneracao: "9")));
+
+        erros.Should().Contain(e => e.Contains("motivoDesoneracao informado sem valorDesonerado"));
+    }
+
+    [Fact]
+    public void Desoneracao_csosn_falha()
+    {
+        var erros = Validar(Item(new IcmsDto(Origem: 0, Csosn: "102", ValorDesonerado: 18, MotivoDesoneracao: "9")));
+
+        erros.Should().Contain(e => e.Contains("não se aplica ao Simples Nacional"));
+    }
+
+    [Fact]
+    public void Desoneracao_cst_nao_admissivel_falha()
+    {
+        var erros = Validar(Item(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 18, Valor: 18, ValorDesonerado: 18, MotivoDesoneracao: "9")));
+
+        erros.Should().Contain(e => e.Contains("não se aplica ao CST '00'"));
+    }
+
+    [Fact]
+    public void Codigo_beneficio_fiscal_muito_longo_falha()
+    {
+        var erros = Validar(Item(new IcmsDto(Origem: 0, Cst: "00",
+            BaseCalculo: 100, Aliquota: 18, Valor: 18, CodigoBeneficioFiscal: "RBC123456789")));
+
+        erros.Should().Contain(e => e.Contains("codigoBeneficioFiscal"));
+    }
+
+    [Fact]
+    public void Total_subtrai_desonerado()
+    {
+        var itens = new List<ItemDto>
+        {
+            new("SKU1", "Produto", "12345678", "5102", 1, 100, 100, Impostos: null,
+                ImpostosV2: new ItemImpostosDtoV2(
+                    Icms: new IcmsDto(Origem: 0, Cst: "40",
+                        BaseCalculo: 100, Aliquota: 18, ValorDesonerado: 18, MotivoDesoneracao: "9"))),
+        };
+
+        // 100 bruto − 18 desonerado = 82
+        var totaisOk = new TotaisDto(ValorProdutos: 100, ValorNota: 82, ValorDesonerado: 18);
+        new ValidadorImpostosV2().ValidarTotais(totaisOk, itens).Should().BeEmpty();
+
+        var totaisErrado = totaisOk with { ValorNota = 100 };
+        var erros = new ValidadorImpostosV2().ValidarTotais(totaisErrado, itens);
+        erros.Should().Contain(e => e.Mensagem.Contains("desonerado"));
+    }
 }
