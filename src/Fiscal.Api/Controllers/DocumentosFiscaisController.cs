@@ -202,6 +202,65 @@ public class DocumentosFiscaisController : ControllerBase
         return Ok(ParaResponse(doc));
     }
 
+    private static readonly JsonSerializerOptions OpcoesEmissaoJson = new() { PropertyNameCaseInsensitive = true };
+
+    public record PreviewPdfRequest(string? Tipo, JsonElement Payload);
+
+    /// <summary>
+    /// Pré-visualização do DANFE/DANFCe a partir do payload de emissão — SEM
+    /// transmitir, reservar número ou persistir nada. O ERP chama antes do
+    /// POST de emissão (documento ainda em 'enviando' ou na tela de emissão)
+    /// para o contribuinte conferir o PDF. Mesma renderização do endpoint
+    /// {id}/pdf (QuestPDF), com chave/protocolo como rascunho.
+    /// </summary>
+    [HttpPost("preview-pdf")]
+    public async Task<IActionResult> PreviewPdf([FromBody] PreviewPdfRequest req, CancellationToken ct)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        var tipo = (req.Tipo ?? "").Trim().ToUpperInvariant() == "NFCE"
+            ? TipoDocumento.NFCE
+            : TipoDocumento.NFE;
+        var modelo = (short)(tipo == TipoDocumento.NFCE ? 65 : 55);
+
+        // O ERP/LIB serializa o contrato em camelCase — STJ é case-sensitive
+        // por padrão, então lê com case-insensitive.
+        EmissaoRequest? pedido;
+        try
+        {
+            pedido = req.Payload.Deserialize<EmissaoRequest>(OpcoesEmissaoJson);
+        }
+        catch (JsonException)
+        {
+            return Problem(statusCode: 422, title: "Payload inválido",
+                detail: "Não foi possível interpretar o payload de emissão.");
+        }
+        if (pedido is null || pedido.Itens is not { Count: > 0 })
+            return Problem(statusCode: 422, title: "Payload incompleto",
+                detail: "Informe o payload de emissão (ambiente, itens e totais).");
+
+        var tenant = await _tenantRepo.ObterPorIdAsync(tenantId, ct);
+        if (tenant is null) return NotFound();
+
+        // Documento efêmero: só alimenta o renderizador — nada vai ao banco.
+        var doc = new DocumentoFiscal
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Tipo = tipo,
+            Modelo = modelo,
+            Ambiente = (pedido.Ambiente == "producao" ? (short)Ambiente.Producao : (short)Ambiente.Homologacao),
+            Serie = Math.Max((short)1, pedido.Serie),
+            Numero = 0, // rascunho: número só existe após transmissão
+            PayloadEntrada = JsonSerializer.Serialize(pedido),
+        };
+
+        var bytes = tipo == TipoDocumento.NFCE
+            ? await _geradorPdf.GerarDanfceAsync(doc, tenant, ct)
+            : await _geradorPdf.GerarDanfeAsync(doc, tenant, ct);
+
+        return File(bytes, "application/pdf", $"danfe-preview-{doc.Id:N}.pdf");
+    }
+
     /// <summary>
     /// DANFE/DANFCe do documento (após AUTORIZADA/CANCELADA). Por padrão devolve
     /// o PDF binário; use ?formato=base64 para JSON { pdfBase64 }.
