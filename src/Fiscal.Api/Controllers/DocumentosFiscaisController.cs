@@ -64,6 +64,120 @@ public class DocumentosFiscaisController : ControllerBase
     public Task<IActionResult> EmitirNFCe([FromBody] EmissaoRequest req, CancellationToken ct)
         => EmitirAsync(req, TipoDocumento.NFCE, modelo: 65, ct);
 
+    /// <summary>
+    /// Reenvio de documento REJEITADO/DENEGADO/ERRO_INTERNO com payload
+    /// corrigido: MESMO documento, MESMO número (rejeição não consome
+    /// numeração na SEFAZ). Substitui o PayloadEntrada, reseta motivo/código,
+    /// volta a PENDENTE e reenfileira. Autorizada/cancelada nunca reenviam.
+    /// </summary>
+    [HttpPost("{id:guid}/reenviar")]
+    public async Task<IActionResult> Reenviar(Guid id, [FromBody] EmissaoRequest req, CancellationToken ct)
+    {
+        var tenantId = HttpContext.GetTenantId();
+
+        var doc = await _docRepo.ObterPorIdAsync(id, tenantId, ct);
+        if (doc is null) return NotFound();
+
+        if (doc.Status is not (StatusDocumento.REJEITADA or StatusDocumento.DENEGADA or StatusDocumento.ERRO_INTERNO))
+            return Problem(statusCode: 409, title: "Documento não aceita reenvio",
+                detail: $"Status atual: {doc.Status}. Só documentos REJEITADA, DENEGADA ou ERRO_INTERNO podem ser corrigidos e reenviados — autorizada é cancelada, nunca reenviada.");
+
+        // Mesma validação da emissão (PayloadEntrada só entra corrigido e válido).
+        if (string.IsNullOrWhiteSpace(req.Ambiente) ||
+            (req.Ambiente != "producao" && req.Ambiente != "homologacao"))
+            return Problem(statusCode: 422, title: "Ambiente inválido", detail: "Use 'producao' ou 'homologacao'.");
+
+        if (req.Finalidade?.Trim().ToLowerInvariant() == "devolucao" &&
+            req.NfesReferenciadas is not { Count: > 0 })
+            return Problem(statusCode: 422, title: "Devolução exige NF-e referenciada",
+                detail: "Informe 'nfesReferenciadas' com a(s) chave(s) de 44 dígitos da(s) NF-e devolvida(s).");
+        for (var i = 0; i < (req.NfesReferenciadas?.Count ?? 0); i++)
+        {
+            var chave = new string((req.NfesReferenciadas![i].ChaveAcesso ?? "").Where(char.IsDigit).ToArray());
+            if (chave.Length != 44)
+                return Problem(statusCode: 422, title: "Chave de NF-e referenciada inválida",
+                    detail: $"nfesReferenciadas[{i}]: esperado 44 dígitos, recebido {chave.Length}.");
+        }
+
+        for (var i = 0; i < req.Itens.Count; i++)
+        {
+            if (req.Itens[i].Impostos is not null && req.Itens[i].ImpostosV2 is not null)
+                return Problem(statusCode: 400,
+                    title: $"Item {i + 1}: informe apenas 'impostos' (legado) OU 'impostosV2' — nunca os dois.");
+        }
+
+        var docValidar = new DocumentoParaValidar(
+            ValorTotal: ValidadorImpostosV2.FormulaV2Ativa(req.Totais, req.Itens)
+                ? req.Itens.Sum(i => i.ValorTotal)
+                : req.Totais.ValorNota,
+            Itens: req.Itens.Select(i => new ItemFiscal(
+                i.Codigo, i.Quantidade, i.ValorUnitario, i.ValorTotal)).ToList(),
+            Impostos: req.Itens
+                .SelectMany(i => i.Impostos ?? new List<ImpostoDto>())
+                .Select(im => new ImpostoFiscal(im.Cst, im.BaseCalculo, im.Aliquota, im.Valor))
+                .ToList());
+        var inconsistencias = _validador.Validar(docValidar);
+        if (inconsistencias.Count > 0)
+            return Problem(statusCode: 422, title: "Inconsistência nos valores do documento",
+                detail: inconsistencias[0].Mensagem,
+                extensions: new Dictionary<string, object?> { ["campo"] = inconsistencias[0].Campo });
+
+        var inconsistenciasTotais = _validadorImpostosV2.ValidarTotais(req.Totais, req.Itens);
+        if (inconsistenciasTotais.Count > 0)
+            return Problem(statusCode: 422, title: "Inconsistência no total da nota",
+                detail: inconsistenciasTotais[0].Mensagem,
+                extensions: new Dictionary<string, object?> { ["campo"] = "valorNota" });
+
+        var inconsistenciasV2 = _validadorImpostosV2.Validar(req.Itens, nfce: doc.Modelo == 65);
+        if (inconsistenciasV2.Count > 0)
+            return Problem(statusCode: 422, title: "Inconsistência nos grupos de imposto v2",
+                detail: inconsistenciasV2[0].Mensagem,
+                extensions: new Dictionary<string, object?> { ["campo"] = inconsistenciasV2[0].Campo });
+
+        // Ambiente da request tem que bater com o do documento (a API key
+        // também é por ambiente — a checagem da key já rodou na autenticação).
+        var ambienteReq = req.Ambiente == "producao" ? Ambiente.Producao : Ambiente.Homologacao;
+        if ((short)ambienteReq != doc.Ambiente)
+            return Problem(statusCode: 422, title: "Ambiente divergente",
+                detail: $"O documento foi criado no ambiente {(doc.Ambiente == (short)Ambiente.Producao ? "producao" : "homologacao")} — o reenvio precisa usar o mesmo.");
+
+        doc.PayloadEntrada = JsonSerializer.Serialize(req);
+        doc.Status = StatusDocumento.PENDENTE;
+        doc.MotivoStatus = null;
+        doc.XmlAssinado = null;
+        doc.XmlRetornoSefaz = null;
+        doc.Tentativas = 0;
+        doc.AtualizadoEm = DateTimeOffset.UtcNow;
+
+        await _docRepo.AtualizarAsync(doc, ct);
+        await _db.SaveChangesAsync(ct);
+        await _auditoria.RegistrarAsync(new Auditoria
+        {
+            TenantId = tenantId,
+            RecursoId = doc.Id,
+            Acao = "DOCUMENTO_REENVIADO",
+            IpOrigem = HttpContext.Connection.RemoteIpAddress,
+            Detalhe = $"{{\"numero\":{doc.Numero},\"serie\":{doc.Serie}}}"
+        }, ct);
+
+        await _fila.EnfileirarAsync(doc.Id, ct);
+
+        _logger.LogInformation("DocumentoFiscal {Id} reenviado (número {Numero} mantido) e reenfileirado.", doc.Id, doc.Numero);
+
+        return Accepted($"/v1/documentos-fiscais/{doc.Id}", new
+        {
+            id = doc.Id,
+            status = doc.Status.ToString(),
+            numero = doc.Numero,
+            serie = doc.Serie,
+            atualizadoEm = doc.AtualizadoEm,
+            links = new
+            {
+                consulta = $"/v1/documentos-fiscais/{doc.Id}"
+            }
+        });
+    }
+
     /// <summary>NFS-e padrão Nacional (DPS). Rota legada (EmissaoRequest) — funciona só em sandbox; transmissão real via POST nfse/dps.</summary>
     [HttpPost("nfse")]
     public Task<IActionResult> EmitirNFSe([FromBody] EmissaoRequest req, CancellationToken ct)

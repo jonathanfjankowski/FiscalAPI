@@ -98,6 +98,150 @@ public class EmissaoIntegracaoTests : IClassFixture<EmissaoIntegracaoTests.Facto
     }
 
     [Fact]
+    public async Task Reenvio_de_rejeitada_mantem_numero_e_processa()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("ApiKey", _factory.BootstrapKey);
+
+        // 1) Emissão aceita (número reservado)
+        var idem = $"reenv-{Guid.NewGuid()}";
+        var resp = await client.SendAsync(BuildEmissaoRequest(idem));
+        resp.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var emit = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        var id = emit.GetProperty("id").GetGuid();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
+            var tenantId = db.DocumentosFiscais.AsNoTracking().First(d => d.Id == id).TenantId;
+            // 2) Simula REJEIÇÃO da SEFAZ (mesmo número permanece)
+            var doc = await db.DocumentosFiscais.FirstAsync(d => d.Id == id);
+            doc.Status = StatusDocumento.REJEITADA;
+            doc.MotivoStatus = "Rejeição 598: ambiente errado";
+            await db.SaveChangesAsync();
+        }
+
+        // 3) Reenvio com payload corrigido
+        var reenvio = new HttpRequestMessage(HttpMethod.Post, $"/v1/documentos-fiscais/{id}/reenviar")
+        {
+            Content = JsonContent.Create(new
+            {
+                ambiente = "homologacao",
+                serie = 1,
+                destinatario = new { cnpjCpf = "12345678000199", nome = "Dest Corrigido" },
+                itens = new[]
+                {
+                    new
+                    {
+                        codigo = "SKU1", descricao = "Produto Teste", ncm = "12345678", cfop = "5102",
+                        quantidade = 2, valorUnitario = 60, valorTotal = 120,
+                        impostos = new[]
+                        {
+                            new { cst = "01", baseCalculo = 120, aliquota = 1.65, valor = 1.98 }
+                        }
+                    }
+                },
+                totais = new { valorProdutos = 120, valorNota = 120 },
+                pagamento = new[] { new { forma = "01", valor = 120 } }
+            })
+        };
+        reenvio.Headers.Authorization = new AuthenticationHeaderValue("ApiKey", _factory.BootstrapKey);
+
+        var respReenvio = await client.SendAsync(reenvio);
+        respReenvio.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var bodyReenvio = await respReenvio.Content.ReadFromJsonAsync<JsonElement>();
+        bodyReenvio.GetProperty("id").GetGuid().Should().Be(id, "reenvio é o MESMO documento");
+
+        // 4) Job processa → AUTORIZADA com o MESMO número da rejeitada
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var job = scope.ServiceProvider.GetRequiredService<ProcessarDocumentoJob>();
+            await job.ExecutarAsync(id, CancellationToken.None);
+
+            var db2 = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
+            var doc = await db2.DocumentosFiscais.FirstAsync(d => d.Id == id);
+            doc.Status.Should().Be(StatusDocumento.AUTORIZADA, "motivo: {0}", doc.MotivoStatus);
+            doc.Numero.Should().BeGreaterThan(0);
+            doc.MotivoStatus.Should().NotContain("598");
+            var payload = doc.PayloadEntrada;
+            payload.Should().Contain("Dest Corrigido", "payload foi substituído");
+        }
+    }
+
+    [Fact]
+    public async Task Reenvio_de_autorizada_retorna_409()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("ApiKey", _factory.BootstrapKey);
+
+        var resp = await client.SendAsync(BuildEmissaoRequest($"reenv-ok-{Guid.NewGuid()}"));
+        resp.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var emit = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        var id = emit.GetProperty("id").GetGuid();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
+            var doc = await db.DocumentosFiscais.FirstAsync(d => d.Id == id);
+            doc.Status = StatusDocumento.AUTORIZADA;
+            await db.SaveChangesAsync();
+        }
+
+        var reenvio = new HttpRequestMessage(HttpMethod.Post, $"/v1/documentos-fiscais/{id}/reenviar")
+        {
+            Content = JsonContent.Create(new
+            {
+                ambiente = "homologacao",
+                serie = 1,
+                itens = new[] { new { codigo = "X", descricao = "x", quantidade = 1, valorUnitario = 10, valorTotal = 10 } },
+                totais = new { valorProdutos = 10, valorNota = 10 }
+            })
+        };
+        reenvio.Headers.Authorization = new AuthenticationHeaderValue("ApiKey", _factory.BootstrapKey);
+
+        var respReenvio = await client.SendAsync(reenvio);
+        respReenvio.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task Reenvio_com_payload_invalido_retorna_422()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("ApiKey", _factory.BootstrapKey);
+
+        var resp = await client.SendAsync(BuildEmissaoRequest($"reenv-inv-{Guid.NewGuid()}"));
+        resp.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var emit = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        var id = emit.GetProperty("id").GetGuid();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
+            var doc = await db.DocumentosFiscais.FirstAsync(d => d.Id == id);
+            doc.Status = StatusDocumento.REJEITADA;
+            await db.SaveChangesAsync();
+        }
+
+        var reenvio = new HttpRequestMessage(HttpMethod.Post, $"/v1/documentos-fiscais/{id}/reenviar")
+        {
+            Content = JsonContent.Create(new
+            {
+                ambiente = "homologacao",
+                serie = 1,
+                itens = new[] { new { codigo = "X", descricao = "x", quantidade = 1, valorUnitario = 10, valorTotal = 10 } },
+                totais = new { valorProdutos = 999, valorNota = 999 }
+            })
+        };
+        reenvio.Headers.Authorization = new AuthenticationHeaderValue("ApiKey", _factory.BootstrapKey);
+
+        var respReenvio = await client.SendAsync(reenvio);
+        respReenvio.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
     public async Task Idempotencia_retorna_mesmo_documento_em_segunda_chamada_com_200()
     {
         var client = _factory.CreateClient();
