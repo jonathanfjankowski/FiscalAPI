@@ -176,6 +176,7 @@ public record EmissaoRequest(
     int? IndicadorIntermediador = null,      // NT 2020.006 (indIntermed): 0=sem intermediador (default na NF-e), 1=site/plataforma de terceiros; só NF-e (mod 55)
     string? CnpjIntermediador = null,        // CNPJ do intermediador — obrigatório quando indicadorIntermediador=1 (grupo infIntermed)
     TransporteDto? Transporte = null,        // v2 §7 — grupo transp (modalidade, transportadora, volumes/lacres)
+    [MaxLength(5000)] string? InformacoesComplementares = null, // infCpl
     bool? ContingenciaOffline = null);       // v2 §7 — NFC-e offline (tpEmis 9): emite sem contato com a SEFAZ, transmite depois
 
 public record NfRefDto(
