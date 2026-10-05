@@ -1,0 +1,45 @@
+name: Deploy Homologação (Cloudflare)
+
+# Homologação = branch dev: build do painel admin (frontend/) e deploy no
+# Cloudflare Workers (worker: fiscalapi-front).
+
+on:
+  push:
+    branches: [dev]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-homolog-front
+  cancel-in-progress: false
+
+defaults:
+  run:
+    working-directory: frontend
+
+jobs:
+  deploy:
+    name: Build + wrangler deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependências
+        run: npm ci
+
+      - name: Build (tsc -b + vite)
+        run: npm run build
+        env:
+          # URL pública da FiscalAPI (Caddy na EC2 — ver okto_api/deploy/aws)
+          VITE_API_URL: https://fiscal.homologacao.oktosistemas.com.br
+
+      - name: Deploy Cloudflare Workers
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
