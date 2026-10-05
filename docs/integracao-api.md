@@ -3,6 +3,10 @@
 Documentação para integradores que desejam emitir **NF-e** (modelo 55) e **NFC-e** (modelo 65) e operar **eventos fiscais** (cancelamento, carta de correção, inutilização) através da FiscalAPI.
 
 > **Compatibilidade:** API `0.3.0-alpha`. Os exemplos usam a base `http://localhost:8080` (docker) — substitua pela URL do ambiente que for usar.
+>
+> **Novo por aqui?** Este documento é a referência completa. Para um roteiro
+> prático do zero à primeira nota autorizada (com PDF) em modo sandbox, veja
+> o [Guia da primeira emissão](guia-primeira-emissao.md).
 
 ---
 
@@ -51,7 +55,7 @@ Você envia os dados do documento, recebe imediatamente um `id` com status `PEND
 ## Conceitos básicos
 
 ### Tenant
-Sua empresa emitente, isolada dentro da API. Todo documento, chave, certificado e evento pertence a um tenant — um tenant nunca enxerga dados de outro. Os dados cadastrais do tenant (CNPJ, razão social, UF, regime tributário, endereço do emitente) são configurados administrativamente junto ao provedor da API, não via endpoint.
+Sua empresa emitente, isolada dentro da API. Todo documento, chave, certificado e evento pertence a um tenant — um tenant nunca enxerga dados de outro. Os dados cadastrais do tenant (CNPJ, razão social, UF, regime tributário, endereço do emitente) são criados via `POST /v1/admin/tenants` (operação administrativa; o campo opcional `criarApiKey` já cria a primeira API key junto com o tenant, na mesma transação) e atualizados pelo próprio tenant via `PUT /v1/tenants/perfil`.
 
 ### API Key por ambiente
 Cada chave de API está **atrelada a um ambiente** e só opera nele:
@@ -263,7 +267,11 @@ Cancelamento só é aceito para documentos `AUTORIZADA` (senão `409`). Ver [Est
    - `AUTORIZADA`, `REJEITADA`, `DENEGADA`, `CANCELADA`, `ERRO_INTERNO`.
 4. Se `CONTINGENCIA`/`CANCELAMENTO_PENDENTE`, continue no loop — são transitórios.
 
-Não há (ainda) webhook: **polling é o mecanismo oficial** de acompanhamento. Ver [Limitações conhecidas](#limitações-conhecidas).
+Não há webhook para mudanças de status de documento: **polling é o mecanismo
+oficial de acompanhamento da nota** — o webhook (capítulo próprio) cobre
+eventos de negócio (`documento.autorizado`, `documento.cancelado`,
+`certificado.vencendo`, etc.), não substitui a consulta pontual. Ver
+[Limitações conhecidas](#limitações-conhecidas).
 
 ---
 
@@ -375,6 +383,22 @@ curl -X POST "$BASE/v1/certificados" \
 
 Erros: `400` arquivo ou senha ausentes; `422` `.pfx` não abre com a senha informada. O PFX e a senha são guardados criptografados (envelope AES-GCM com chave mestra do provedor); só metadados são retornáveis.
 
+**Rotação**: só há **1 certificado ativo por tenant**. O upload desativa
+automaticamente o certificado ativo anterior (auditoria
+`CERTIFICADO_SUBSTITUIDO`) — para renovar, basta subir o novo `.pfx`.
+
+#### `DELETE /v1/certificados/{id}`
+
+Desativa o certificado (soft-delete — o histórico permanece listado com
+`ativo: false`). Idempotente: desativar um certificado já inativo devolve
+`204` de novo. `404` se não existir para o tenant.
+
+#### `POST /v1/certificados/{id}/ativar`
+
+Reativa um certificado anterior, desativando os demais ativos (volta atrás
+numa rotação). Idempotente: ativar um certificado já ativo só devolve o
+estado atual. `200 OK` com o mesmo corpo do upload; `404` se não existir.
+
 #### `GET /v1/certificados`
 
 Lista os certificados do tenant.
@@ -431,7 +455,69 @@ Exemplo de `202`:
 
 Idêntico ao anterior, para **NFC-e** (modelo 65). Mesmo corpo (`EmissaoRequest`), mesmas respostas.
 
-> NFC-e exige o CSC (código de segurança do consumidor) fornecido pela SEFAZ do estado — a configuração dele ainda não está exposta via API (ver [Limitações](#limitações-conhecidas)).
+> NFC-e exige o CSC (código de segurança do consumidor) fornecido pela SEFAZ do estado — configure-o junto com o perfil fiscal do emitente via `PUT /v1/tenants/perfil` (o CSC fica cifrado com a KEK).
+
+#### `POST /v1/documentos-fiscais/nfse/dps` 🔒
+
+NFS-e padrão Nacional com **transmissão DPS real** (layout 1.01, autorização
+síncrona). Header `Idempotency-Key` obrigatório. Corpo próprio:
+
+```json
+{
+  "ambiente": "homologacao",
+  "serie": 1,
+  "dataCompetencia": "2026-09-05",
+  "tomador": {
+    "cnpjCpf": "11122233000144",
+    "nome": "Cliente Serviço Ltda",
+    "endereco": {
+      "codigoMunicipioIbge": "3550308", "cep": "01001000",
+      "logradouro": "Praça da Sé", "numero": "1", "bairro": "Sé"
+    }
+  },
+  "servico": {
+    "codigoTributarioNacional": "010701",
+    "descricaoServico": "Desenvolvimento de software",
+    "codigoNbs": "112011000"
+  },
+  "valores": {
+    "valorServicos": 1000,
+    "tributacaoIssqn": 1,
+    "retencaoIssqn": 1,
+    "aliquotaIssqn": 5
+  },
+  "ibscbs": {
+    "finalidade": 0,
+    "indicadorFinal": 1,
+    "codigoIndicadorOperacao": "000001",
+    "indicadorDestinatario": 0,
+    "gibbsCbs": { "cst": "101", "cClassTrib": "000001" }
+  },
+  "informacoesComplementares": "texto livre"
+}
+```
+
+Regras: `valorServicos` ≥ 0; `cTribNac` e `xDescServ` obrigatórios; cNBS 9
+dígitos; bloco `ibscbs` (RTC) validado quando informado. O prestador é o
+perfil fiscal do tenant (`PUT /v1/tenants/perfil` — inscrição municipal
+obrigatória na prática). Autorização síncrona: `chaveAcesso` de 50 dígitos
+(prefixo `NFS`). Fora de sandbox exige certificado A1 e credenciamento na
+SEFAZ Nacional.
+
+#### `POST /v1/documentos-fiscais/{id}/substituicao` 🔒
+
+Substituição de NFS-e autorizada: emite o DPS **substituto** (corpo:
+`{ "dps": { ...mesmo formato de /nfse/dps... }, "cMotivo": 5,
+"xMotivo": "Rejeitada pelo tomador" }`). A SEFAZ desativa a original quando
+autoriza a substituta; o novo documento segue o fluxo normal (consulta por
+`GET /{id}` do novo id). `cMotivo` aceita 1–5 e 99 (99 exige `xMotivo`).
+
+| Código | Quando |
+|---|---|
+| `202 Accepted` | Substituta aceita e enfileirada (`substituidaId` + novo `id`). |
+| `400` | `Idempotency-Key` ausente. |
+| `409` | Documento do path não está AUTORIZADA. |
+| `422` | Documento não é NFS-e; `cMotivo` inválido; DPS inconsistente. |
 
 #### `GET /v1/documentos-fiscais/{id}`
 
@@ -463,9 +549,57 @@ O campo `xmlRetornoSefaz` traz a resposta literal da SEFAZ — em rejeições é
 
 ---
 
+### Tenants — perfil fiscal e webhooks
+
+#### `GET /v1/tenants/perfil` 🔒 / `PUT /v1/tenants/perfil` 🔒
+
+Perfil fiscal do emitente (exigido para emissão real). Campos nulos no PUT
+não são alterados. O `csc`/`cscId` (NFC-e) é opcional e o CSC é armazenado
+cifrado — a resposta só indica `cscCadastrado`.
+
+#### `GET /v1/tenants/webhooks` 🔒
+
+Configuração de webhook do tenant:
+
+```json
+{
+  "webhookUrl": "https://integrador.example.com/hook",
+  "webhookSecretCadastrado": true
+}
+```
+
+O segredo nunca é devolvido — só o booleano indica que existe.
+
+#### `PUT /v1/tenants/webhooks` 🔒
+
+Define a URL de entrega e o segredo HMAC (self-service — dispensa o painel
+admin). Campos nulos não são alterados:
+
+```json
+{
+  "webhookUrl": "https://integrador.example.com/hook",
+  "webhookSecret": "um-segredo-de-ao-menos-16-chars"
+}
+```
+
+| Código | Quando |
+|---|---|
+| `200 OK` | Configuração atualizada (`webhookUrl` + `webhookSecretCadastrado`). |
+| `400` | Corpo sem nenhum campo. |
+| `422` | `webhookUrl` não é URL absoluta http(s); `webhookSecret` < 16 ou > 200 caracteres. |
+
+O segredo é armazenado **cifrado em repouso** (mesmo envelope AES-GCM do CSC
+e dos certificados) e assina as entregas com HMAC-SHA256
+(`X-Fiscal-Signature`, janela anti-replay de 5 min).
+
+---
+
 ### Eventos fiscais
 
-Os POSTs de evento exigem `Idempotency-Key`. Um evento é persistido e associado ao documento; a transmissão do evento à SEFAZ ainda não está implementada (ver [Limitações](#limitações-conhecidas)).
+Os POSTs de evento exigem `Idempotency-Key`. Um evento é persistido, associado
+ao documento e **transmitido à SEFAZ** pelo Worker (`TransmissorEventoUnimake` —
+cancelamento 110111, CC-e 110110, inutilização). O status do evento acompanha
+no `GET /v1/documentos-fiscais/{id}` (`eventos[].status`).
 
 #### `POST /v1/documentos-fiscais/{id}/cancelamento` 🔒
 
@@ -605,6 +739,13 @@ Corpo do POST de emissão (`/nfe` e `/nfce`):
 | `totais` | objeto | sim | [`Totais`](#totais) |
 | `pagamento` | array | não | [`Pagamento`](#pagamento) |
 | `naturezaOperacao` | string | não | Ex.: `"Venda de mercadoria"` |
+| `finalidade` | string | não | `normal` (default) \| `complementar` \| `ajuste` \| `devolucao` (finNFe) |
+| `tipoOperacao` | string | não | `saida` (default) \| `entrada` (tpNF) |
+| `indicadorPresenca` | string | não | `presencial` \| `internet` \| `teleatendimento` \| `entrega_domicilio` \| `fora_estabelecimento` \| `outros` (indPres) |
+| `indicadorConsumidorFinal` | string | não | `sim` (default) \| `nao` (indFinal) |
+| `nfesReferenciadas` | array | devolução | Chaves de 44 dígitos (`[{ "chaveAcesso": "..." }]`) → grupo `NFref`. **Obrigatória quando `finalidade = "devolucao"`** |
+| `indicadorIntermediador` | int | não | NT 2020.006 (indIntermed, **só NF-e 55**): `0` = operação sem intermediador (default) \| `1` = operação em site/plataforma de terceiros. SEFAZ-PR rejeita com **434** quando ausente na NF-e |
+| `cnpjIntermediador` | string | quando `indicadorIntermediador = 1` | CNPJ do intermediador da transação → grupo `infIntermed` |
 
 ```json
 {
@@ -653,25 +794,147 @@ Todos os campos são opcionais, mas um endereço consistente é necessário para
 | `quantidade` | número | sim | > 0 |
 | `valorUnitario` | número | sim | ≥ 0 |
 | `valorTotal` | número | sim | ≥ 0 — deve bater com `quantidade × valorUnitario` (tolerância 0,01) |
-| `impostos` | array | não | [`Imposto`](#imposto) |
+| `impostos` | array | não | [`Imposto`](#imposto) — **legado** |
+| `impostosV2` | objeto | não | [`ImpostosV2`](#impostosv2) — grupos tipados (v2) |
+| `cest` | string | não | 7 dígitos (v2 F2) |
+| `gtin` | string | não | EAN 8/12/13/14 (v2 F2) — default `"SEM GTIN"` |
+| `unidade` | string | não | Até 6 (uCom/uTrib) — default `"UN"` (v2 F2) |
+| `valorDesconto` | número | não | ≥ 0 — vDesc do item (v2 F2) |
 
-### `Imposto`
+> **`impostos` OU `impostosV2`, nunca os dois no mesmo item** — enviar os dois → `400`.
+
+### `Imposto` (legado)
 
 | Campo | Tipo | Obrigatório | Regras |
 |---|---|---|---|
-| `cst` | string | sim | Até 3 dígitos (ex.: `"00"`, `"60"`, `"102"` p/ Simples) |
+| `cst` | string | sim | Até 3 dígitos — suporta `00`, `40`, `41`, `50` |
 | `baseCalculo` | número | não | |
 | `aliquota` | número | não | Em %, ex.: `18` para 18% |
 | `valor` | número | não | Deve bater com `baseCalculo × aliquota / 100` (tolerância 0,01) |
 
-Regra especial: CSTs de isenção (`00`, `06`, `20`, `40`, `41`, `50`, `60`, `90`) não podem ter `valor > 0`.
+Regra especial: CSTs de isenção (`40`, `41`, `50`, `60`) não podem ter `valor > 0`.
+
+### `impostosV2` — ICMS completo + CSOSN (contrato v2)
+
+Grupo tipado que cobre **todo o ICMS do layout 4.00**: CST `00/10/20/40/41/51/60/70/90`
+e CSOSN do **Simples Nacional** `101/102/103/201/202/203/300/400/500/900`, com ST,
+FCP e DIFAL. Referência: [docs/plano-evolucao-contrato-v2.md](plano-evolucao-contrato-v2.md).
+
+```json
+{
+  "impostosV2": {
+    "icms": {
+      "origem": 0,
+      "csosn": "102"
+    }
+  }
+}
+```
+
+**`impostosV2.icms`** — informe `cst` (regime normal) **ou** `csosn` (Simples Nacional), nunca os dois:
+
+| Campo | Tipo | Regras |
+|---|---|---|
+| `origem` | int | 0–8 (tabela A) — default `0` (nacional) |
+| `cst` | string | `00`, `10`, `20`, `40`, `41`, `51`, `60`, `70`, `90` |
+| `csosn` | string | `101`, `102`, `103`, `201`, `202`, `203`, `300`, `400`, `500`, `900` |
+| `modBc` | string | 0–3 — default `3` (valor da operação) |
+| `percentualReducaoBc` | número | CST 20/51/70 |
+| `baseCalculo` / `aliquota` / `valor` | número | Trio da tributação própria (obrigatório em 00/10/20/70) |
+| `percentualCreditoSimples` / `valorCreditoSimples` | número | pCredSN/vCredICMSSN — CSOSN 101/201/900 |
+| `fcpPercentual` / `valorFcp` | número | FCP próprio (base = `baseCalculo`) |
+| `valorIcmsOperacao` / `percentualDiferimento` / `valorIcmsDiferido` | número | CST 51 (diferimento) |
+| `st` | objeto | [`IcmsSt`](#icmsst) — ST própria (10/70/90, CSOSN 201/202/203/900) ou retida (60/500) |
+| `difal` | objeto | [`Difal`](#difal) — interestadual consumidor final |
+
+**`impostosV2.icms.st`** (`IcmsSt`):
+
+| Campo | Tipo | Regras |
+|---|---|---|
+| `modBcSt` | string | 0–6 — obrigatório na ST própria |
+| `percentualMva` / `percentualReducaoBcSt` | número | Opcionais da ST própria |
+| `baseCalculoSt` / `aliquotaSt` / `valorSt` | número | Trio da ST própria (obrigatório em 10/70, CSOSN 201/202/203) |
+| `fcpPercentualSt` / `valorFcpSt` | número | FCP da ST própria |
+| `baseCalculoStRetido` / `aliquotaStRetida` / `valorStRetido` | número | vBCSTRet/pST/vICMSSTRet — CST 60, CSOSN 500 |
+| `valorIcmsSubstituto` | número | vICMSSubstituto |
+| `fcpPercentualStRetido` / `valorFcpStRetido` | número | FCP-ST retido |
+
+**`impostosV2.icms.difal`** (`Difal`) — CST interestadual + consumidor final
+(partilha 100% destino, Convênio 190/2017):
+
+| Campo | Tipo | Regras |
+|---|---|---|
+| `aliquotaInterestadual` | int | 4, 7 ou 12 (pICMSInter) — obrigatória |
+| `baseDestino` / `aliquotaDestino` / `valorIcmsDestino` / `valorIcmsOrigem` | número | vBCUFDest/pICMSUFDest/vICMSUFDest/vICMSUFRemet. Fórmula do MOC (rejeições SEFAZ **815/816**): `valorIcmsDestino = baseDestino × (aliquotaDestino − aliquotaInterestadual)`; `valorIcmsOrigem = 0` na partilha vigente |
+| `fcpPercentualDestino` / `valorFcpDestino` | número | pFCPUFDest/vFCPUFDest |
+
+**`impostosV2.ipi`** (`Ipi`) — só NF-e (NFC-e rejeita):
+
+| Campo | Tipo | Regras |
+|---|---|---|
+| `cst` | string | `00/49/50/99` tributado (exige trio); `01–05/51` não tributado |
+| `cEnq` | string | 3 dígitos — default `999` |
+| `baseCalculo` / `aliquota` / `valor` | número | trio do IPI |
+
+**`impostosV2.pis`** e **`impostosV2.cofins`** — só NF-e:
+
+| Campo | Tipo | Regras |
+|---|---|---|
+| `cst` | string | `01/02` tributado (exige trio); `04–09` isento (sem valor); `99` outras. `03` (por quantidade) não suportado |
+| `baseCalculo` / `aliquota` / `valor` | número | trio |
+
+**`impostosV2.ibsCbs`** (v2 F5 — reforma, LC 214/2025 / NT 2025.x):
+
+| Campo | Tipo | Regras |
+|---|---|---|
+| `cstIbsCbs` | string | 3 dígitos (tabela SEPEC) |
+| `cClassTrib` | string | 6 dígitos (tabela SEPEC) — obrigatório |
+| `baseCalculo` | número | vBC do bloco |
+| `aliquotaIbsEstadual` / `valorIbsEstadual` | número | gIBSUF |
+| `aliquotaIbsMunicipal` / `valorIbsMunicipal` | número | gIBSMun |
+| `aliquotaCbs` / `valorCbs` | número | gCBS |
+
+**`impostosV2.is`** (v2 F5 — Imposto Seletivo):
+
+| Campo | Tipo | Regras |
+|---|---|---|
+| `cstIs` | string | 2 dígitos (SEPEC) |
+| `cClassTribIs` | string | 6 dígitos — obrigatório |
+| `baseCalculo` / `aliquota` / `valor` | número | trio do IS |
+| `unidadeTributavel` / `quantidadeTributavel` | string/número | IS por quantidade — sempre juntos |
+
+Exemplo completo — CST 10 (tributada + ST):
+
+```json
+{
+  "impostosV2": {
+    "icms": {
+      "origem": 0,
+      "cst": "10",
+      "baseCalculo": 100, "aliquota": 18, "valor": 18,
+      "st": { "modBcSt": "4", "baseCalculoSt": 130, "aliquotaSt": 18, "valorSt": 23.4 }
+    }
+  }
+}
+```
 
 ### `Totais`
 
 | Campo | Tipo | Obrigatório | Regras |
 |---|---|---|---|
 | `valorProdutos` | número | sim | ≥ 0 |
-| `valorNota` | número | sim | ≥ 0 — deve bater com a soma dos `valorTotal` dos itens (tolerância 0,01) |
+| `valorNota` | número | sim | ≥ 0 — regra abaixo (tolerância 0,01) |
+| `valorDesconto` | número | não | ≥ 0 (v2 F2) |
+| `valorFrete` | número | não | ≥ 0 — compõe o total da nota; `modFrete` vira CIF (v2 F2) |
+| `valorSeguro` | número | não | ≥ 0 (v2 F2) |
+| `outrasDespesas` | número | não | ≥ 0 (v2 F2) |
+
+**Fórmula do `valorNota`** (determinística):
+
+- Payload atual (sem campos novos): `valorNota = Σ valorTotal` dos itens.
+- **Fórmula v2** (qualquer campo novo preenchido, incluindo desconto por
+  item): `valorNota = Σ brutos − descontos + frete + seguro + outras + ST +
+  FCP-ST + IPI` (FCP próprio e DIFAL não compõem o total, como na SEFAZ).
 
 ### `Pagamento`
 
@@ -687,7 +950,7 @@ Resposta do `GET /v1/documentos-fiscais/{id}` (e do replay de idempotência):
 | Campo | Tipo | Descrição |
 |---|---|---|
 | `id` | string (GUID) | Identificador do documento na API |
-| `tipo` | string | `"NFE"` ou `"NFCE"` |
+| `tipo` | string | `"NFE"`, `"NFCE"` ou `"NFSE"` |
 | `status` | string | Ver [tabela de status](#statusdocumento) |
 | `ambiente` | string | `"producao"` ou `"homologacao"` |
 | `serie` | número | Série informada na emissão |
@@ -713,6 +976,7 @@ Aplicada antes de qualquer efeito, em forma de `ValidationProblemDetails` (ver [
 - Campos obrigatórios ausentes (`ambiente`, `itens`, `totais`, `cnpjCpf`/`nome` do destinatário quando enviado, `codigo`/`descricao` do item, `cst`, `forma`…).
 - Limites de tamanho excedidos (ex.: `descricao` > 200, `ncm` > 8).
 - Ranges violados (`serie` fora de 1–999, `quantidade` ≤ 0, valores negativos).
+- Item com `impostos` **e** `impostosV2` simultâneos (ambíguo).
 - `justificativa`/`correcao` de eventos fora de 15–1000 caracteres.
 - `Idempotency-Key` ausente nos POSTs que a exigem.
 
@@ -722,8 +986,14 @@ Aplicada antes de qualquer efeito, em forma de `ValidationProblemDetails` (ver [
 - **Inconsistência aritmética** (tolerância de R$ 0,01):
   1. Soma dos `valorTotal` dos itens ≠ `totais.valorNota` → `campo: "valorTotal"`.
   2. `quantidade × valorUnitario` ≠ `valorTotal` do item → `campo: "itens[i].valorTotal"`.
-  3. `baseCalculo × aliquota / 100` ≠ `valor` do imposto → `campo: "impostos[i].valor"` (só quando os três campos são informados).
-  4. CST de isenção com `valor > 0` → `campo: "impostos[i].valor"`.
+  3. `baseCalculo × aliquota / 100` ≠ `valor` do imposto → `campo: "impostos[i].valor"` (só quando os três campos são informados). No `impostosV2` a aritmética se estende a ST, FCP, FCP-ST e DIFAL.
+  4. CST/CSOSN de isenção (`40`, `41`, `50`, `60`; CSOSN `300`, `400`) com `valor > 0` → `campo: "impostos[i].valor"`.
+- **Fórmula v2 do `valorNota`** com campo novo presente e total incoerente (título `"Inconsistência no total da nota"`).
+- **Regras declarativas do `impostosV2`** (título `"Inconsistência nos grupos de imposto v2"`):
+  1. `cst` e `csosn` no mesmo grupo (ou nenhum dos dois).
+  2. `cst`/`csosn` fora das listas suportadas (ex.: CST `30`, `ICMSPart` — fail-loud).
+  3. Campos obrigatórios por código: CST 00 sem trio, CST 10/70 sem `st` completa, CST 20/70 sem `percentualReducaoBc`, CST 51 sem `valorIcmsOperacao`, CSOSN 201/202/203 sem `st`…
+  4. `difal.aliquotaInterestadual` fora de 4/7/12 ou partilha incompleta, ou `valorIcmsDestino` ≠ `baseDestino × (aliquotaDestino − aliquotaInterestadual)`.
 - `numeroFinal < numeroInicial` na inutilização.
 - `.pfx` que não abre com a senha informada (upload de certificado).
 
@@ -771,11 +1041,39 @@ O `422` por aritmética vem com a extensão `campo` apontando o local exato:
 | Enum | Valores |
 |---|---|
 | `ambiente` (payload) | `"producao"`, `"homologacao"` |
-| `tipo` (response) | `"NFE"`, `"NFCE"` (NFS-e não disponível) |
+| `tipo` (response) | `"NFE"`, `"NFCE"`, `"NFSE"` |
 | `tipo` (eventos) | `"CANCELAMENTO"`, `"CCE"`, `"INUTILIZACAO"` |
-| status de evento | `"PENDENTE"`, `"PROCESSADO"` |
+| status de evento | `"PENDENTE"`, `"PROCESSANDO"`, `"PROCESSADO"`, `"REJEITADO"`, `"ERRO"` |
+| status de documento | `"PENDENTE"`, `"PROCESSANDO"`, `"AUTORIZADA"`, `"REJEITADA"`, `"CONTINGENCIA"`, `"CANCELAMENTO_PENDENTE"`, `"CANCELADA"`, `"ERRO_CANCELAMENTO"`, `"DENEGADA"`, `"ERRO_INTERNO"`, `"FALHA_EMISSAO"` |
+| tipos de webhook | `documento.autorizado`, `documento.rejeitado`, `documento.denegado`, `documento.falha_emissao`, `documento.cancelado`, `documento.carta_correcao`, `nota.recebida`, `manifestacao.processada` |
 
 ---
+
+### Webhooks (outbox do tenant)
+
+| Método | Rota | Auth | Descrição |
+|---|---|---|---|
+| `GET` | `/v1/webhooks?page=1&pageSize=50&status=FALHA` | ApiKey | Lista entregas de webhook do tenant (mais recentes primeiro; filtro `status`: PENDENTE, ENTREGANDO, ENTREGUE, FALHA) |
+| `POST` | `/v1/webhooks/{id}/reenviar` | ApiKey | Reenvio manual: FALHA volta a PENDENTE com ciclo novo (8 tentativas); PENDENTE tem a tentativa adiantada para agora; ENTREGUE/ENTREGANDO → 409. Retorna 202 com o estado da entrega |
+
+### NFC-e offline (tpEmis 9)
+
+`POST /v1/documentos-fiscais/nfce` aceita `contingenciaOffline: true` — o XML é
+gerado com tpEmis 9 e a transmissão segue pelo fluxo de contingência (janela de
+**24h**; fora dela o documento vai para `FALHA_EMISSAO`). Indicado quando o ERP
+precisa registrar a venda antes da autorização.
+
+### Campos do backlog v2 (§7 do plano-evolucao-contrato-v2)
+
+- `transporte`: `modalidadeFrete` (0–9), `transportadora` (cnpjCpf, nome, IE,
+  endereço) e `volumes[]` (quantidade, espécie, marca, numeração, pesos, lacres[]).
+- `pagamento[]`: `tipoIntegracao` ("1"/"2"), `bandeira` (código tBand),
+  `autorizacao` (cAut), `cnpjCredenciadora` — informados juntos formam o grupo card.
+- `impostosV2.icms` CST 10 partilha: `percentualBcOperacao` (pBCOp) e/ou `ufSt`
+  (UFST) presentes → grupo ICMSPart (ST própria passa a ser opcional).
+- `itens[].dis[]`: grupo DI por item importado (número, datas, local/UF de
+  desembaraço, via transporte 1–12, forma intermediação 1–3, exportador,
+  adicoes[]) + `impostosV2.ii` (vBC, vDespAdu, vII, vIOF — vII soma nos totais).
 
 ## Modelo de erros
 
@@ -844,13 +1142,22 @@ Problemas que acontecem **depois** do `202` não viram erro HTTP — aparecem co
 
 ## Limitações conhecidas
 
-Versão atual (`0.3.0-alpha`) — considere no desenho da sua integração:
+Versão atual (`1.12.2-alpha`) — considere no desenho da sua integração:
 
-- **Webhooks ainda não implementados.** O acompanhamento de resultado é exclusivamente por polling do `GET /v1/documentos-fiscais/{id}`.
-- **Eventos fiscais não são transmitidos à SEFAZ ainda.** Cancelamento, CC-e e inutilização são persistidos e refletem estado (`CANCELAMENTO_PENDENTE` etc.), mas o envio real do evento e a confirmação da SEFAZ serão entregues em fase posterior — um cancelamento não passa de `CANCELAMENTO_PENDENTE` por enquanto.
-- **NFS-e** (modelo de serviço) não tem endpoint de emissão.
-- **CSC da NFC-e** não tem endpoint de configuração ainda — em produção a NFC-e precisa dele.
-- **Emissão real à SEFAZ** depende do adapter em desenvolvimento; em sandbox (`ModoSandbox=true`) um emissor mock autoriza os documentos localmente.
+- **Homologação real em andamento** (SEFAZ-PR, A1 real, 2026-09-17):
+  status-serviço e transmissão validados; autorização ponta a ponta pendente
+  de IE real do emitente (roteiro e rejeições vistas na seção 9 do
+  guia-primeira-emissao.md).
+- **NFS-e** (modelo de serviço, padrão Nacional/DPS): transmissão DPS real
+  implementada (Unimake, layout 1.01 síncrono); ainda sem bateria de
+  homologação dedicada.
+- **Mapper NF-e cobre ICMS completo** (CST 00–90, CSOSN 101–900, ST, FCP,
+  DIFAL via `impostosV2`); **IPI/PIS/COFINS, desconto/frete/seguro, GTIN/
+  unidade configuráveis, NF-ref e transporte** entram nas fases seguintes do
+  contrato v2 (docs/plano-evolucao-contrato-v2.md). Unidade fixa `UN` e
+  GTIN `SEM GTIN` por enquanto.
+- **DANFE simplificado** (sem código de barras/QR do leiaute oficial).
+- **EPEC e NFC-e offline (tpEmis 9)** ficam para sprint futura.
 - **Certificado**: apenas A1 (`.pfx`). A3/HSM não são suportados.
 
 Dúvidas sobre o roadmap: consulte o `CHANGELOG.md` e o `README.md` na raiz do repositório.

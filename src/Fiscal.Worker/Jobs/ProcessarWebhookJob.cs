@@ -27,30 +27,46 @@ public class ProcessarWebhookJob
 
     private readonly FiscalDbContext _db;
     private readonly IDespachanteWebhook _despachante;
+    private readonly ICertificadoStore _certStore;
+    private readonly MetricasFiscais _metricas;
     private readonly ILogger<ProcessarWebhookJob> _logger;
 
     public ProcessarWebhookJob(
         FiscalDbContext db,
         IDespachanteWebhook despachante,
+        ICertificadoStore certStore,
+        MetricasFiscais metricas,
         ILogger<ProcessarWebhookJob> logger)
     {
         _db = db;
         _despachante = despachante;
+        _certStore = certStore;
+        _metricas = metricas;
         _logger = logger;
     }
 
     [Hangfire.AutomaticRetry(Attempts = 1)]
+    [Hangfire.DisableConcurrentExecution(timeoutInSeconds: 300)]
     public async Task ExecutarAsync(Guid entregaId, CancellationToken ct)
     {
+        // Claim atômico: assume apenas se ainda PENDENTE — evita entrega dupla
+        // quando varredor e enqueue inicial disparam o mesmo id em paralelo.
+        // ProximaTentativaEm vira lease (+30 min): o VarrerWebhooksJob devolve
+        // órfãs em ENTREGANDO (crash no meio) para PENDENTE quando ela vence.
+        DateTimeOffset? leaseAte = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(30);
+        var claimado = await _db.WebhooksEntrega
+            .Where(w => w.Id == entregaId && w.Status == "PENDENTE")
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(w => w.Status, "ENTREGANDO")
+                .SetProperty(w => w.ProximaTentativaEm, leaseAte), ct);
+        if (claimado == 0) return;
+
         var entrega = await _db.WebhooksEntrega.FirstOrDefaultAsync(w => w.Id == entregaId, ct);
         if (entrega is null)
         {
             _logger.LogWarning("WebhookEntrega {Id} não encontrada — descartando job.", entregaId);
             return;
         }
-
-        if (entrega.Status is "ENTREGUE" or "FALHA")
-            return;
 
         var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Id == entrega.TenantId, ct);
         if (tenant?.WebhookUrl is null)
@@ -62,8 +78,9 @@ public class ProcessarWebhookJob
             return;
         }
 
+        var segredo = await ResolverSegredoAsync(tenant, ct);
         var resultado = await _despachante.EntregarAsync(
-            tenant.WebhookUrl, tenant.WebhookSecret ?? string.Empty, entrega.Payload, ct);
+            tenant.WebhookUrl, segredo, entrega.Payload, ct);
 
         entrega.Tentativas += 1;
         entrega.UltimoStatusCode = resultado.StatusCode;
@@ -89,10 +106,28 @@ public class ProcessarWebhookJob
         }
 
         await _db.SaveChangesAsync(ct);
+        _metricas.WebhookEntregue(entrega.TipoEvento, entrega.Status == "ENTREGUE");
         _logger.LogInformation("WebhookEntrega {Id} ({Tipo}) → {Status} (tentativa {Tentativa})",
             entrega.Id, entrega.TipoEvento, entrega.Status, entrega.Tentativas);
     }
 
     private static TimeSpan ProximoBackoff(int tentativa) =>
         tentativa <= 0 ? Backoff[0] : Backoff[Math.Min(tentativa - 1, Backoff.Length - 1)];
+
+    /// <summary>
+    /// Segredo do tenant para assinar a entrega: decifra o envelope da KEK ou
+    /// usa o legado em texto plano — e, neste caso, migra em voo para a coluna
+    /// cifrada limpando o texto plano.
+    /// </summary>
+    private async Task<string> ResolverSegredoAsync(Tenant tenant, CancellationToken ct)
+    {
+        if (tenant.WebhookSecretCriptografado is not null)
+            return await _certStore.DecifrarTextoAsync(tenant.WebhookSecretCriptografado, ct);
+
+        var legado = tenant.WebhookSecret ?? string.Empty;
+        tenant.WebhookSecretCriptografado = await _certStore.CifrarTextoAsync(legado, ct);
+        tenant.WebhookSecret = null;
+        await _db.SaveChangesAsync(ct);
+        return legado;
+    }
 }

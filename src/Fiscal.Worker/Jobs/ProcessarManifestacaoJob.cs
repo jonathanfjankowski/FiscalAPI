@@ -48,11 +48,23 @@ public class ProcessarManifestacaoJob
     }
 
     [Hangfire.AutomaticRetry(Attempts = 1)]
+    [Hangfire.DisableConcurrentExecution(timeoutInSeconds: 600)]
     public async Task ExecutarAsync(Guid manifestacaoId, CancellationToken ct)
     {
+        // Claim atômico (mesmo padrão do ProcessarDocumentoJob): assume apenas
+        // se ainda PENDENTE — evita retransmissão concorrente da manifestação.
+        // ProximaTentativaEm vira lease (+15 min): o VarrerManifestacoesJob
+        // resgata órfãos em PROCESSANDO quando ela vence.
+        DateTimeOffset? leaseAte = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(15);
+        var claimado = await _db.Manifestacoes
+            .Where(m => m.Id == manifestacaoId && m.Status == "PENDENTE")
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(m => m.Status, "PROCESSANDO")
+                .SetProperty(m => m.ProximaTentativaEm, leaseAte), ct);
+        if (claimado == 0) return;
+
         var manif = await _db.Manifestacoes.FirstOrDefaultAsync(m => m.Id == manifestacaoId, ct);
-        if (manif is null || manif.Status is "PROCESSADO" or "REJEITADO")
-            return;
+        if (manif is null) return;
 
         var nota = await _db.NotasRecebidas.FirstOrDefaultAsync(n => n.Id == manif.NotaRecebidaId, ct);
         if (nota is null)
@@ -105,6 +117,7 @@ public class ProcessarManifestacaoJob
         {
             case ResultadoEventoStatus.Processado:
                 manif.Status = "PROCESSADO";
+                manif.ProximaTentativaEm = null;
                 nota.ManifestacaoAtual = NomeAmigavel(manif.Tipo);
                 if (tenant.WebhookUrl is not null)
                 {
@@ -122,13 +135,21 @@ public class ProcessarManifestacaoJob
 
             case ResultadoEventoStatus.Rejeitado:
                 manif.Status = "REJEITADO";
+                manif.ProximaTentativaEm = null;
                 break;
 
             default:
                 if (manif.Tentativas >= MaxTentativas)
+                {
                     manif.Status = "REJEITADO"; // esgotou — sem status terminal FALHA separado
+                    manif.ProximaTentativaEm = null;
+                }
                 else
+                {
+                    // Backoff real: o varredor só reenfileira quando vencer.
                     manif.Status = "PENDENTE";
+                    manif.ProximaTentativaEm = DateTimeOffset.UtcNow + ProximoBackoff(manif.Tentativas);
+                }
                 break;
         }
 
@@ -141,6 +162,9 @@ public class ProcessarManifestacaoJob
         _transmissores.OfType<TransmissorManifestacaoMock>().FirstOrDefault()
         ?? (ITransmissorManifestacao?)_transmissores.OfType<TransmissorManifestacaoUnimake>().FirstOrDefault()
         ?? _transmissores.First();
+
+    private static TimeSpan ProximoBackoff(int tentativa) =>
+        tentativa <= 0 ? Backoff[0] : Backoff[Math.Min(tentativa - 1, Backoff.Length - 1)];
 
     private static string NomeAmigavel(string codigo) => codigo switch
     {

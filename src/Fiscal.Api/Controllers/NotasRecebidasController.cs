@@ -40,10 +40,17 @@ public class NotasRecebidasController : ControllerBase
     }
 
     [HttpGet]
-    public async Task<IActionResult> Listar(CancellationToken ct)
+    public async Task<IActionResult> Listar(
+        [FromQuery] int page = 1,
+        [FromQuery] int pageSize = 100,
+        CancellationToken ct = default)
     {
+        if (page < 1) page = 1;
+        if (pageSize < 1) pageSize = 100;
+        if (pageSize > 200) pageSize = 200;
+
         var tenantId = HttpContext.GetTenantId();
-        var notas = await _notaRepo.ListarPorTenantAsync(tenantId, 200, ct);
+        var notas = await _notaRepo.ListarPorTenantAsync(tenantId, page, pageSize, ct);
         return Ok(notas.Select(n => new
         {
             n.Id,
@@ -144,7 +151,18 @@ public class NotasRecebidasController : ControllerBase
             Status = "PENDENTE",
         };
         await _manifestacaoRepo.AdicionarAsync(manif, ct);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Corrida: outra request com a mesma Idempotency-Key gravou primeiro —
+            // devolve a manifestação vencedora (replay) em vez de 500.
+            var vencedora = await _manifestacaoRepo.ObterPorIdempotencyAsync(tenantId, id, idempotencyKey!, ct);
+            if (vencedora is null) throw;
+            return Ok(new { manifestacaoId = vencedora.Id, status = vencedora.Status, criadoEm = vencedora.CriadoEm });
+        }
         _jobs.Enqueue<ProcessarManifestacaoJob>(j => j.ExecutarAsync(manif.Id, CancellationToken.None));
 
         return Accepted($"/v1/notas-recebidas/{id}", new

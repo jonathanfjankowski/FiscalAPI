@@ -11,6 +11,7 @@ public static class Webhooks
     public const string EventoAutorizado = "documento.autorizado";
     public const string EventoRejeitado = "documento.rejeitado";
     public const string EventoDenegado = "documento.denegado";
+    public const string EventoFalhaEmissao = "documento.falha_emissao";
     public const string EventoCancelado = "documento.cancelado";
     public const string EventoCartaCorrecao = "documento.carta_correcao";
     public const string NotaRecebida = "nota.recebida";
@@ -32,21 +33,44 @@ public static class Webhooks
         {
             tipo = tipoEvento,
             timestamp = agora.ToUnixTimeSeconds(),
-            documento = new
+            documento = DocumentoPayload(doc),
+        }, JsonOpts);
+
+    /// <summary>
+    /// Webhook de evento (cancelamento/CC-e) — além do documento, identifica o
+    /// evento para o consumidor casar com o registro local (ex.: baixar o XML
+    /// protocolado via GET .../eventos/{id}/xml).
+    /// </summary>
+    public static string PayloadEventoPara(
+        DocumentoFiscal doc, EventoFiscal evento, string tipoEvento, DateTimeOffset agora) =>
+        JsonSerializer.Serialize(new
+        {
+            tipo = tipoEvento,
+            timestamp = agora.ToUnixTimeSeconds(),
+            documento = DocumentoPayload(doc),
+            evento = new
             {
-                doc.Id,
-                tipo = doc.Tipo.ToString(),
-                status = doc.Status.ToString(),
-                ambiente = doc.Ambiente == (short)Enums.Ambiente.Producao ? "producao" : "homologacao",
-                doc.Serie,
-                doc.Numero,
-                doc.ChaveAcesso,
-                doc.ProtocoloAutorizacao,
-                doc.MotivoStatus,
-                doc.CriadoEm,
-                doc.AtualizadoEm,
+                evento.Id,
+                evento.Protocolo,
+                evento.Status,
+                evento.CriadoEm,
             },
         }, JsonOpts);
+
+    private static object DocumentoPayload(DocumentoFiscal doc) => new
+    {
+        doc.Id,
+        tipo = doc.Tipo.ToString(),
+        status = doc.Status.ToString(),
+        ambiente = doc.Ambiente == (short)Enums.Ambiente.Producao ? "producao" : "homologacao",
+        doc.Serie,
+        doc.Numero,
+        doc.ChaveAcesso,
+        doc.ProtocoloAutorizacao,
+        doc.MotivoStatus,
+        doc.CriadoEm,
+        doc.AtualizadoEm,
+    };
 
     public static string PayloadNotaRecebida(Entities.NotaRecebida nota, DateTimeOffset agora) =>
         JsonSerializer.Serialize(new

@@ -11,5 +11,9 @@ public enum StatusDocumento
     CANCELADA = 6,
     ERRO_CANCELAMENTO = 7,
     DENEGADA = 8,
-    ERRO_INTERNO = 9
+    ERRO_INTERNO = 9,
+
+    /// <summary>Terminal: esgotou MaxTentativas em CONTINGENCIA (SEFAZ inacessível).
+    /// Não reprocessa sozinho — exige reemissão ou replay manual.</summary>
+    FALHA_EMISSAO = 10
 }

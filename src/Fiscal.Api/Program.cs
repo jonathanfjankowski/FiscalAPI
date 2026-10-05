@@ -2,7 +2,6 @@ using System.Threading.RateLimiting;
 using Fiscal.Adapters.Unimake;
 using Fiscal.Api.Authentication;
 using Fiscal.Api.Infrastructure;
-using Fiscal.Api.Validators;
 using Fiscal.Core.Entities;
 using Fiscal.Core.Interfaces;
 using Fiscal.Core.Services;
@@ -20,10 +19,19 @@ using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Distributed;
+using Microsoft.Extensions.Options;
 using Microsoft.IdentityModel.Tokens;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
 using Serilog;
+using StackExchange.Redis;
 
 var builder = WebApplication.CreateBuilder(args);
+
+// --- Secret manager plugável (Docker secrets / K8s mounted files) ---
+// CHAVE_FILE=/caminho/secreto -> CHAVE recebe o conteúdo do arquivo.
+builder.Configuration.AddFileSecrets();
 
 // --- Serilog (JSON no stdout) ---
 builder.Host.UseSerilog((ctx, lc) => lc
@@ -71,8 +79,34 @@ builder.Services.AddScoped<IRepositorioNotaRecebida, RepositorioNotaRecebida>();
 builder.Services.AddScoped<IRepositorioManifestacao, RepositorioManifestacao>();
 builder.Services.AddScoped<IRepositorioNsu, RepositorioNsu>();
 
+var limitePorMinuto = builder.Configuration.GetValue("Fiscal:RateLimit:PorMinuto", 100);
+
+// --- Métricas de negócio (OTel/Prometheus) ---
+builder.Services.AddSingleton<MetricasFiscais>();
+
+// --- Redis (opcional): rate limit distribuído + cache compartilhado ---
+// Sem Fiscal:Redis:ConnectionString, tudo cai para in-memory (alpha single-node).
+var redisConn = builder.Configuration.GetValue<string?>("Fiscal:Redis:ConnectionString");
+if (!string.IsNullOrWhiteSpace(redisConn))
+{
+    builder.Services.AddSingleton<IConnectionMultiplexer>(_ => ConnectionMultiplexer.Connect(redisConn));
+    builder.Services.AddStackExchangeRedisCache(o => o.Configuration = redisConn);
+    // Sobrescreve o GlobalLimiter in-memory pelo particionado em Redis
+    // (partição = API key, caindo para IP — pendência 3 de revisao-seguranca.md).
+    var limiteRedis = limitePorMinuto;
+    builder.Services.AddSingleton<IPostConfigureOptions<RateLimiterOptions>>(sp =>
+        new ConfiguradorLimitadorRedis(
+            sp.GetRequiredService<IConnectionMultiplexer>(), limiteRedis));
+}
+else
+{
+    builder.Services.AddDistributedMemoryCache();
+}
+
 // --- Validador de consistência (puro, sem deps externas) ---
 builder.Services.AddSingleton<ValidadorConsistenciaFiscal>();
+builder.Services.AddSingleton<ValidadorImpostosV2>();
+builder.Services.AddSingleton<ValidadorNfseDps>();
 
 // --- PDF (DANFE/DANFCe via QuestPDF) ---
 builder.Services.AddSingleton<IGeradorPdf, GeradorPdfQuestPdf>();
@@ -98,6 +132,7 @@ if (modoSandbox)
     builder.Services.AddSingleton<ITransmissorEventoFiscal, TransmissorEventoMock>();
 }
 builder.Services.AddSingleton<ITransmissorEventoFiscal, TransmissorEventoUnimake>();
+builder.Services.AddSingleton<ITransmissorEpec, TransmissorEpecUnimake>();
 
 // Distribuição DFe + manifestação: mesma regra do emissor (sandbox → mock).
 if (modoSandbox)
@@ -197,16 +232,17 @@ builder.Services.AddAuthentication(ApiKeyAuthenticationOptions.SchemeName)
 builder.Services.AddSingleton<IAdminTokenService, AdminTokenService>();
 builder.Services.AddAuthorization(o => o.AddPolicy("Admin", p => p.RequireRole("admin")));
 
-// --- CORS (painel admin em dev via Vite; em prod o SPA é servido pela própria API) ---
+// --- CORS (painel admin em dev via Vite; em prod o SPA é servido pela própria API).
+// Origens configuráveis — ex.: Fiscal__Cors__Origens__0=https://admin.exemplo.com
+var corsOrigens = builder.Configuration.GetSection("Fiscal:Cors:Origens").Get<string[]>()
+    ?? ["http://localhost:5173", "http://localhost:4173"];
 builder.Services.AddCors(o => o.AddPolicy("frontend", p => p
-    .WithOrigins("http://localhost:5173", "http://localhost:4173")
+    .WithOrigins(corsOrigens)
     .AllowAnyHeader()
     .AllowAnyMethod()));
 
 // --- Controllers + Rate Limiting (in-memory por enquanto; Redis entra na F3.1) ---
 builder.Services.AddControllers();
-builder.Services.AddValidatorsFromAssemblyContaining<EmissaoRequestValidator>();
-var limitePorMinuto = builder.Configuration.GetValue("Fiscal:RateLimit:PorMinuto", 100);
 builder.Services.AddRateLimiter(opt =>
 {
     opt.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
@@ -216,7 +252,9 @@ builder.Services.AddRateLimiter(opt =>
             httpContext.Connection.RemoteIpAddress?.ToString() ?? "anon",
             _ => new System.Threading.RateLimiting.FixedWindowRateLimiterOptions
             {
-                PermitLimit = limitePorMinuto,
+                // Lido por requisição — assim overrides de config (WAF/ambiente)
+                // valem mesmo lidos antes de builder.Build().
+                PermitLimit = builder.Configuration.GetValue("Fiscal:RateLimit:PorMinuto", 100),
                 Window = TimeSpan.FromMinutes(1),
                 QueueLimit = 0,
             }));
@@ -228,6 +266,16 @@ builder.Services.AddRateLimiter(opt =>
     });
 });
 
+// --- OpenTelemetry (métricas + exportador Prometheus em /metrics) ---
+builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r.AddService("FiscalAPI", serviceVersion: MetricasFiscais.VersaoServico))
+    .WithMetrics(m => m
+        .AddAspNetCoreInstrumentation()
+        .AddHttpClientInstrumentation()
+        .AddRuntimeInstrumentation()
+        .AddMeter(MetricasFiscais.NomeMedidor)
+        .AddPrometheusExporter());
+
 // --- Health checks ---
 var healthConn = builder.Configuration.GetConnectionString("Postgres")!;
 builder.Services.AddHealthChecks()
@@ -236,7 +284,27 @@ builder.Services.AddHealthChecks()
 builder.Services.AddEndpointsApiExplorer();
 builder.Services.AddOpenApi();
 
+// Problemas RFC 7807 para exceções não tratadas (sem stack/erro interno no corpo).
+builder.Services.AddProblemDetails();
+
 var app = builder.Build();
+
+// Exceções não tratadas → application/problem+json (500 genérico; detalhe fica no log).
+app.UseExceptionHandler();
+
+// Atrás de proxy TLS (nginx/compose), RemoteIpAddress é o do proxy — sem
+// ForwardedHeaders o rate limit por IP colapsa todos os clientes num único
+// balde. Configure Fiscal__Proxies__KnownProxies__0=<ip do proxy> (por padrão,
+// só o loopback é confiável).
+var forwardedOptions = new Microsoft.AspNetCore.Builder.ForwardedHeadersOptions
+{
+    ForwardedHeaders = Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedFor
+        | Microsoft.AspNetCore.HttpOverrides.ForwardedHeaders.XForwardedProto,
+};
+foreach (var proxy in builder.Configuration.GetSection("Fiscal:Proxies:KnownProxies").Get<string[]>() ?? [])
+    if (System.Net.IPAddress.TryParse(proxy, out var ip))
+        forwardedOptions.KnownProxies.Add(ip);
+app.UseForwardedHeaders(forwardedOptions);
 
 if (app.Environment.IsDevelopment())
 {
@@ -271,13 +339,25 @@ if (!app.Environment.IsEnvironment("Testing"))
     });
 }
 
+// /metrics exige autenticação (API key/JWT) por padrão — expõe métricas de
+// negócio. Opt-in anônimo para clusters que raspam Prometheus na rede interna
+// sem credencial (Fiscal:Observabilidade:MetricsAnonimos=true).
+if (builder.Configuration.GetValue("Fiscal:Observabilidade:MetricsAnonimos", false))
+    app.MapPrometheusScrapingEndpoint("/metrics");
+else
+    app.MapPrometheusScrapingEndpoint("/metrics").RequireAuthorization();
 app.MapHealthChecks("/health/live");
 app.MapHealthChecks("/health/ready", new Microsoft.AspNetCore.Diagnostics.HealthChecks.HealthCheckOptions
 {
     Predicate = check => check.Tags.Contains("ready")
 });
 
-if (app.Environment.IsDevelopment())
+// Migrations rodam sempre em Development; fora dele, só com
+// Fiscal:RodarMigrations=true (compose: só a API roda — o Worker espera a API
+// ficar healthy, evitando corrida de schema/Hangfire entre instâncias).
+var rodarMigrations = app.Environment.IsDevelopment()
+    || builder.Configuration.GetValue("Fiscal:RodarMigrations", false);
+if (rodarMigrations)
 {
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
@@ -307,13 +387,16 @@ if (app.Environment.IsDevelopment() || app.Environment.IsEnvironment("Testing"))
 }
 
 // --- Fallback do SPA: rotas do painel que não são arquivo (history API) ---
+// /metrics precisa estar na exclusão — senão o SPA sombreia o endpoint do
+// Prometheus quando o painel está publicado (wwwroot/index.html existe).
 if (File.Exists(spaIndex))
 {
     app.MapWhen(
         ctx => !(ctx.Request.Path.StartsWithSegments("/v1")
                  || ctx.Request.Path.StartsWithSegments("/health")
                  || ctx.Request.Path.StartsWithSegments("/hangfire")
-                 || ctx.Request.Path.StartsWithSegments("/openapi")),
+                 || ctx.Request.Path.StartsWithSegments("/openapi")
+                 || ctx.Request.Path.StartsWithSegments("/metrics")),
         spa => spa.Run(ctx => ctx.Response.SendFileAsync(spaIndex)));
 }
 

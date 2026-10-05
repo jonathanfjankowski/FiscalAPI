@@ -33,12 +33,28 @@ public class EmissorNFe : IEmissorFiscal
     private readonly IConsultaProtocolo _consultaProtocolo;
     private readonly bool _contingenciaHabilitada;
     private readonly string _modoContingencia;
+    private readonly MapperEnviNFe.RespTecDados? _respTec;
 
     public EmissorNFe(IConsultaProtocolo consultaProtocolo, IConfiguration configuration)
     {
         _consultaProtocolo = consultaProtocolo;
         _contingenciaHabilitada = configuration.GetValue("Fiscal:Contingencia:Habilitada", false);
         _modoContingencia = configuration.GetValue("Fiscal:Contingencia:Modo", "SVCAN")!;
+        _respTec = LerRespTec(configuration);
+    }
+
+    /// <summary>Grupo infRespTec a partir de Fiscal:RespTec:Cnpj/Contato/Email/Fone
+    /// (algumas SEFAZ rejeitam sem o grupo com 972; ausente → grupo não emitido).</summary>
+    internal static MapperEnviNFe.RespTecDados? LerRespTec(IConfiguration configuration)
+    {
+        var cnpj = configuration["Fiscal:RespTec:Cnpj"];
+        if (string.IsNullOrWhiteSpace(cnpj))
+            return null;
+        return new MapperEnviNFe.RespTecDados(
+            new string(cnpj.Where(char.IsDigit).ToArray()),
+            configuration["Fiscal:RespTec:Contato"] ?? "",
+            configuration["Fiscal:RespTec:Email"] ?? "",
+            new string((configuration["Fiscal:RespTec:Fone"] ?? "").Where(char.IsDigit).ToArray()));
     }
 
     public Task<ResultadoEmissao> EmitirAsync(
@@ -65,7 +81,7 @@ public class EmissorNFe : IEmissorFiscal
         X509Certificate2 certificado, Ambiente ambiente,
         Configuracao config, CancellationToken ct)
     {
-        var envi = MapperEnviNFe.Criar(doc, tenant, request, ambiente);
+        var envi = MapperEnviNFe.Criar(doc, tenant, request, ambiente, _respTec);
         var xmlGerado = envi.GerarXML().OuterXml;
         // Chave determinística (dhEmi = CriadoEm, cNF = id): consulta de
         // protocolo e retransmissão em SVC usam a MESMA chave.
@@ -141,10 +157,15 @@ public class EmissorNFe : IEmissorFiscal
                     tenant, 55, chaveOriginal, ambiente, certificado, ct);
                 if (consultado is not null)
                 {
+                    // Autorizada sem retorno do lote: reconstrói o nfeProc de
+                    // distribuição a partir do XML assinado (tentativa anterior,
+                    // cStat 103) + protNFe recuperado na consulta.
+                    var nfeProc = MontadorNfeProc.Montar(doc.XmlAssinado, consultado.XmlProtNFe);
                     return new ResultadoEmissao(
                         ResultadoEmissaoStatus.Autorizada,
                         consultado.ChNFe, consultado.NProt,
-                        XmlAssinado: null, XmlRetornoSefaz: null,
+                        XmlAssinado: doc.XmlAssinado,
+                        XmlRetornoSefaz: nfeProc ?? consultado.XmlProtNFe,
                         Motivo: null,
                         XmlGerado: xmlGerado,
                         ReciboLote: null);

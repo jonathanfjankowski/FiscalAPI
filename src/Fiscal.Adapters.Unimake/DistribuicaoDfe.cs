@@ -54,6 +54,36 @@ public static class ExtratorDfe
             .Select(e => (string?)e.Attribute(nomeLocal))
             .FirstOrDefault(v => !string.IsNullOrEmpty(v));
     }
+
+    /// <summary>XML bruto (OuterXml) do primeiro elemento com o nome local dado;
+    /// null se ausente ou XML inválido. Usado p.ex. para extrair o protNFe da
+    /// resposta da consulta de protocolo.</summary>
+    public static string? ExtrairElemento(string? xml, string nomeLocal)
+    {
+        if (string.IsNullOrEmpty(xml)) return null;
+        XDocument doc;
+        try { doc = XDocument.Parse(xml); }
+        catch (System.Xml.XmlException) { return null; }
+
+        return doc.Descendants()
+            .FirstOrDefault(e => e.Name.LocalName == nomeLocal)?
+            .ToString(System.Xml.Linq.SaveOptions.DisableFormatting);
+    }
+}
+
+/// <summary>
+/// Monta o nfeProc (NFe assinada + protNFe protocolado) — o XML de distribuição
+/// ao consumidor/contador. Sem o XML assinado, devolve apenas o protNFe.
+/// </summary>
+public static class MontadorNfeProc
+{
+    public static string? Montar(string? xmlNfeAssinada, string? xmlProtNFe)
+    {
+        if (string.IsNullOrEmpty(xmlProtNFe)) return null;
+        if (string.IsNullOrEmpty(xmlNfeAssinada)) return xmlProtNFe;
+        return "<nfeProc versao=\"4.00\" xmlns=\"http://www.portalfiscal.inf.br/nfe\">"
+            + xmlNfeAssinada + xmlProtNFe + "</nfeProc>";
+    }
 }
 
 /// <summary>
@@ -171,7 +201,7 @@ public class TransmissorManifestacaoUnimake : ITransmissorManifestacao
         var env = new EnvEvento
         {
             Versao = "1.00",
-            IdLote = Math.Abs(manifestacao.Id.GetHashCode()).ToString(),
+            IdLote = (manifestacao.Id.GetHashCode() & 0x7fffffff).ToString(),
             Evento = new List<Evento> { new() { Versao = "1.00", InfEvento = inf } },
         };
 
@@ -206,7 +236,7 @@ public class TransmissorManifestacaoMock : ITransmissorManifestacao
         ManifestacaoDestinatario manifestacao, NotaRecebida nota, Tenant tenant,
         X509Certificate2? certificado, Ambiente ambiente, CancellationToken cancellationToken)
     {
-        var protocolo = "MOCK" + Math.Abs(manifestacao.Id.GetHashCode()).ToString("D13")[..13];
+        var protocolo = "MOCK" + (manifestacao.Id.GetHashCode() & 0x7fffffff).ToString("D13")[..13];
         return Task.FromResult(new ResultadoEvento(
             ResultadoEventoStatus.Processado, protocolo,
             $"<retEnvEvento><cStat>135</cStat><nProt>{protocolo}</nProt></retEnvEvento>",

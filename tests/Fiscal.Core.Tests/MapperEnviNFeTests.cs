@@ -73,7 +73,7 @@ public class MapperEnviNFeTests
             Documento(TipoDocumento.NFE), TenantCompleto(), RequestValida(), Ambiente.Homologacao);
 
         envi.Versao.Should().Be("4.00");
-        envi.IndSinc.Should().Be(SimNao.Nao); // NFe é assíncrona
+        envi.IndSinc.Should().Be(SimNao.Sim); // lote unitário → síncrono (SEFAZ-PR rejeita 452 no assíncrono)
         envi.NFe.Should().HaveCount(1);
 
         var nfe = envi.NFe[0].InfNFeField;

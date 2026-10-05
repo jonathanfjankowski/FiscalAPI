@@ -9,6 +9,7 @@ using Fiscal.Core.Services;
 using Fiscal.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Fiscal.Api.Controllers;
 
@@ -23,6 +24,8 @@ public class DocumentosFiscaisController : ControllerBase
     private readonly IRepositorioAuditoria _auditoria;
     private readonly IFilaEmissao _fila;
     private readonly ValidadorConsistenciaFiscal _validador;
+    private readonly ValidadorImpostosV2 _validadorImpostosV2;
+    private readonly ValidadorNfseDps _validadorNfseDps;
     private readonly FiscalDbContext _db;
     private readonly IGeradorPdf _geradorPdf;
     private readonly ILogger<DocumentosFiscaisController> _logger;
@@ -34,6 +37,8 @@ public class DocumentosFiscaisController : ControllerBase
         IRepositorioAuditoria auditoria,
         IFilaEmissao fila,
         ValidadorConsistenciaFiscal validador,
+        ValidadorImpostosV2 validadorImpostosV2,
+        ValidadorNfseDps validadorNfseDps,
         FiscalDbContext db,
         IGeradorPdf geradorPdf,
         ILogger<DocumentosFiscaisController> logger)
@@ -44,6 +49,8 @@ public class DocumentosFiscaisController : ControllerBase
         _auditoria = auditoria;
         _fila = fila;
         _validador = validador;
+        _validadorImpostosV2 = validadorImpostosV2;
+        _validadorNfseDps = validadorNfseDps;
         _db = db;
         _geradorPdf = geradorPdf;
         _logger = logger;
@@ -57,10 +64,248 @@ public class DocumentosFiscaisController : ControllerBase
     public Task<IActionResult> EmitirNFCe([FromBody] EmissaoRequest req, CancellationToken ct)
         => EmitirAsync(req, TipoDocumento.NFCE, modelo: 65, ct);
 
-    /// <summary>NFS-e padrão Nacional (DPS). Emissão real entra na próxima sprint do roadmap NFS-e; sandbox via EmissorMock.</summary>
+    /// <summary>
+    /// Reenvio de documento REJEITADO/DENEGADO/ERRO_INTERNO com payload
+    /// corrigido: MESMO documento, MESMO número (rejeição não consome
+    /// numeração na SEFAZ). Substitui o PayloadEntrada, reseta motivo/código,
+    /// volta a PENDENTE e reenfileira. Autorizada/cancelada nunca reenviam.
+    /// </summary>
+    [HttpPost("{id:guid}/reenviar")]
+    public async Task<IActionResult> Reenviar(Guid id, [FromBody] EmissaoRequest req, CancellationToken ct)
+    {
+        var tenantId = HttpContext.GetTenantId();
+
+        var doc = await _docRepo.ObterPorIdAsync(id, tenantId, ct);
+        if (doc is null) return NotFound();
+
+        if (doc.Status is not (StatusDocumento.REJEITADA or StatusDocumento.DENEGADA or StatusDocumento.ERRO_INTERNO))
+            return Problem(statusCode: 409, title: "Documento não aceita reenvio",
+                detail: $"Status atual: {doc.Status}. Só documentos REJEITADA, DENEGADA ou ERRO_INTERNO podem ser corrigidos e reenviados — autorizada é cancelada, nunca reenviada.");
+
+        // Mesma validação da emissão (PayloadEntrada só entra corrigido e válido).
+        if (string.IsNullOrWhiteSpace(req.Ambiente) ||
+            (req.Ambiente != "producao" && req.Ambiente != "homologacao"))
+            return Problem(statusCode: 422, title: "Ambiente inválido", detail: "Use 'producao' ou 'homologacao'.");
+
+        if (req.Finalidade?.Trim().ToLowerInvariant() == "devolucao" &&
+            req.NfesReferenciadas is not { Count: > 0 })
+            return Problem(statusCode: 422, title: "Devolução exige NF-e referenciada",
+                detail: "Informe 'nfesReferenciadas' com a(s) chave(s) de 44 dígitos da(s) NF-e devolvida(s).");
+        for (var i = 0; i < (req.NfesReferenciadas?.Count ?? 0); i++)
+        {
+            var chave = new string((req.NfesReferenciadas![i].ChaveAcesso ?? "").Where(char.IsDigit).ToArray());
+            if (chave.Length != 44)
+                return Problem(statusCode: 422, title: "Chave de NF-e referenciada inválida",
+                    detail: $"nfesReferenciadas[{i}]: esperado 44 dígitos, recebido {chave.Length}.");
+        }
+
+        for (var i = 0; i < req.Itens.Count; i++)
+        {
+            if (req.Itens[i].Impostos is not null && req.Itens[i].ImpostosV2 is not null)
+                return Problem(statusCode: 400,
+                    title: $"Item {i + 1}: informe apenas 'impostos' (legado) OU 'impostosV2' — nunca os dois.");
+        }
+
+        var docValidar = new DocumentoParaValidar(
+            ValorTotal: ValidadorImpostosV2.FormulaV2Ativa(req.Totais, req.Itens)
+                ? req.Itens.Sum(i => i.ValorTotal)
+                : req.Totais.ValorNota,
+            Itens: req.Itens.Select(i => new ItemFiscal(
+                i.Codigo, i.Quantidade, i.ValorUnitario, i.ValorTotal)).ToList(),
+            Impostos: req.Itens
+                .SelectMany(i => i.Impostos ?? new List<ImpostoDto>())
+                .Select(im => new ImpostoFiscal(im.Cst, im.BaseCalculo, im.Aliquota, im.Valor))
+                .ToList());
+        var inconsistencias = _validador.Validar(docValidar);
+        if (inconsistencias.Count > 0)
+            return Problem(statusCode: 422, title: "Inconsistência nos valores do documento",
+                detail: inconsistencias[0].Mensagem,
+                extensions: new Dictionary<string, object?> { ["campo"] = inconsistencias[0].Campo });
+
+        var inconsistenciasTotais = _validadorImpostosV2.ValidarTotais(req.Totais, req.Itens);
+        if (inconsistenciasTotais.Count > 0)
+            return Problem(statusCode: 422, title: "Inconsistência no total da nota",
+                detail: inconsistenciasTotais[0].Mensagem,
+                extensions: new Dictionary<string, object?> { ["campo"] = "valorNota" });
+
+        var inconsistenciasV2 = _validadorImpostosV2.Validar(req.Itens, nfce: doc.Modelo == 65);
+        if (inconsistenciasV2.Count > 0)
+            return Problem(statusCode: 422, title: "Inconsistência nos grupos de imposto v2",
+                detail: inconsistenciasV2[0].Mensagem,
+                extensions: new Dictionary<string, object?> { ["campo"] = inconsistenciasV2[0].Campo });
+
+        // Ambiente da request tem que bater com o do documento (a API key
+        // também é por ambiente — a checagem da key já rodou na autenticação).
+        var ambienteReq = req.Ambiente == "producao" ? Ambiente.Producao : Ambiente.Homologacao;
+        if ((short)ambienteReq != doc.Ambiente)
+            return Problem(statusCode: 422, title: "Ambiente divergente",
+                detail: $"O documento foi criado no ambiente {(doc.Ambiente == (short)Ambiente.Producao ? "producao" : "homologacao")} — o reenvio precisa usar o mesmo.");
+
+        doc.PayloadEntrada = JsonSerializer.Serialize(req);
+        doc.Status = StatusDocumento.PENDENTE;
+        doc.MotivoStatus = null;
+        doc.XmlAssinado = null;
+        doc.XmlRetornoSefaz = null;
+        doc.Tentativas = 0;
+        doc.AtualizadoEm = DateTimeOffset.UtcNow;
+
+        await _docRepo.AtualizarAsync(doc, ct);
+        await _db.SaveChangesAsync(ct);
+        await _auditoria.RegistrarAsync(new Auditoria
+        {
+            TenantId = tenantId,
+            RecursoId = doc.Id,
+            Acao = "DOCUMENTO_REENVIADO",
+            IpOrigem = HttpContext.Connection.RemoteIpAddress,
+            Detalhe = $"{{\"numero\":{doc.Numero},\"serie\":{doc.Serie}}}"
+        }, ct);
+
+        await _fila.EnfileirarAsync(doc.Id, ct);
+
+        _logger.LogInformation("DocumentoFiscal {Id} reenviado (número {Numero} mantido) e reenfileirado.", doc.Id, doc.Numero);
+
+        return Accepted($"/v1/documentos-fiscais/{doc.Id}", new
+        {
+            id = doc.Id,
+            status = doc.Status.ToString(),
+            numero = doc.Numero,
+            serie = doc.Serie,
+            atualizadoEm = doc.AtualizadoEm,
+            links = new
+            {
+                consulta = $"/v1/documentos-fiscais/{doc.Id}"
+            }
+        });
+    }
+
+    /// <summary>NFS-e padrão Nacional (DPS). Rota legada (EmissaoRequest) — funciona só em sandbox; transmissão real via POST nfse/dps.</summary>
     [HttpPost("nfse")]
     public Task<IActionResult> EmitirNFSe([FromBody] EmissaoRequest req, CancellationToken ct)
         => EmitirAsync(req, TipoDocumento.NFSE, ModelosDocumento.NFSeNacional, ct);
+
+    /// <summary>
+    /// NFS-e padrão Nacional com transmissão DPS real (layout 1.01, síncrona).
+    /// Corpo: NfseDpsRequest (docs/integracao-api.md). Fora de sandbox exige certificado A1.
+    /// </summary>
+    [HttpPost("nfse/dps")]
+    public async Task<IActionResult> EmitirNFSeDps([FromBody] NfseDpsRequest req, CancellationToken ct)
+    {
+        if (!Request.Headers.TryGetValue("Idempotency-Key", out var idemKey) || string.IsNullOrWhiteSpace(idemKey))
+            return Problem(statusCode: 400, title: "Header 'Idempotency-Key' é obrigatório.");
+        if (idemKey!.ToString().Length > 100)
+            return Problem(statusCode: 400, title: "Header 'Idempotency-Key' excede 100 caracteres.");
+
+        var inconsistencias = _validadorNfseDps.Validar(req);
+        if (inconsistencias.Count > 0)
+        {
+            return Problem(statusCode: 422,
+                title: "Inconsistência no DPS",
+                detail: inconsistencias[0].Mensagem,
+                extensions: new Dictionary<string, object?> { ["campo"] = inconsistencias[0].Campo });
+        }
+
+        var ambienteReq = req.Ambiente == "producao" ? Ambiente.Producao : Ambiente.Homologacao;
+        var ambienteKey = HttpContext.GetAmbiente();
+        if (ambienteKey != ambienteReq)
+            return Problem(statusCode: 403, title: "API Key não autorizada para o ambiente solicitado.");
+
+        return await AceitarAsync(
+            idemKey!, TipoDocumento.NFSE, ModelosDocumento.NFSeNacional, ambienteReq,
+            req.Serie, JsonSerializer.Serialize(req), ct);
+    }
+
+    /// <summary>
+    /// Substituição de NFS-e (roadmap item 3): emite um novo DPS apontando a
+    /// NFS-e autorizada do path (grupo &lt;subst&gt;). A SEFAZ desativa a original
+    /// quando autoriza a substituta — o novo documento segue o fluxo normal.
+    /// </summary>
+    [HttpPost("{id:guid}/substituicao")]
+    public async Task<IActionResult> SubstituirNFSe(
+        Guid id, [FromBody] NfseDpsSubstituicaoRequest req, CancellationToken ct)
+    {
+        var tenantId = HttpContext.GetTenantId();
+
+        if (!Request.Headers.TryGetValue("Idempotency-Key", out var idemKey) || string.IsNullOrWhiteSpace(idemKey))
+            return Problem(statusCode: 400, title: "Header 'Idempotency-Key' é obrigatório.");
+        if (idemKey!.ToString().Length > 100)
+            return Problem(statusCode: 400, title: "Header 'Idempotency-Key' excede 100 caracteres.");
+
+        if (req.CMotivo is not (1 or 2 or 3 or 4 or 5 or 99))
+            return Problem(statusCode: 422, title: "cMotivo inválido",
+                detail: "Use 1, 2, 3, 4, 5 ou 99 (outros — exige xMotivo).");
+        if (req.CMotivo == 99 && string.IsNullOrWhiteSpace(req.XMotivo))
+            return Problem(statusCode: 422, title: "xMotivo obrigatório", detail: "Substituição com cMotivo 99 exige xMotivo.");
+
+        var original = await _docRepo.ObterPorIdAsync(id, tenantId, ct);
+        if (original is null) return NotFound();
+        if (original.Tipo != TipoDocumento.NFSE)
+            return Problem(statusCode: 422, title: "Substituição disponível apenas para NFS-e",
+                detail: $"Documento {id} é do tipo {original.Tipo}.");
+        if (original.Status != StatusDocumento.AUTORIZADA || string.IsNullOrWhiteSpace(original.ChaveAcesso))
+            return Problem(statusCode: 409, title: "Documento não elegível para substituição",
+                detail: $"Status atual: {original.Status}. Substituição exige NFS-e AUTORIZADA.");
+
+        var dps = req.Dps;
+        var inconsistencias = _validadorNfseDps.Validar(dps);
+        if (inconsistencias.Count > 0)
+        {
+            return Problem(statusCode: 422,
+                title: "Inconsistência no DPS substituto",
+                detail: inconsistencias[0].Mensagem,
+                extensions: new Dictionary<string, object?> { ["campo"] = inconsistencias[0].Campo });
+        }
+
+        // Ambiente da substituta = ambiente da original (chave de 50 carrega tpAmb).
+        var ambienteOriginal = (Ambiente)original.Ambiente;
+
+        var existente = await _docRepo.ObterPorIdempotencyKeyAsync(tenantId, TipoDocumento.NFSE, idemKey!, ct);
+        if (existente is not null)
+            return Ok(ParaResponse(existente));
+
+        var numero = await _docRepo.ReservarProximoNumeroAsync(
+            tenantId, ModelosDocumento.NFSeNacional, dps.Serie, original.Ambiente, ct);
+
+        var payload = JsonSerializer.Serialize(new
+        {
+            dps,
+            cMotivo = req.CMotivo,
+            xMotivo = req.XMotivo,
+            chaveSubstituida = original.ChaveAcesso,
+        });
+
+        var doc = new DocumentoFiscal
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            IdempotencyKey = idemKey!,
+            Tipo = TipoDocumento.NFSE,
+            Ambiente = original.Ambiente,
+            Modelo = ModelosDocumento.NFSeNacional,
+            Serie = dps.Serie,
+            Numero = numero,
+            PayloadEntrada = payload,
+            Status = StatusDocumento.PENDENTE,
+            CriadoEm = DateTimeOffset.UtcNow,
+            AtualizadoEm = DateTimeOffset.UtcNow
+        };
+        await _docRepo.AdicionarAsync(doc, ct);
+        await _db.SaveChangesAsync(ct);
+
+        await _fila.EnfileirarAsync(doc.Id, ct);
+
+        _logger.LogInformation("Substituição de NFS-e {Original} aceita → novo documento {Novo} (PENDENTE).",
+            original.Id, doc.Id);
+
+        return Accepted($"/v1/documentos-fiscais/{doc.Id}", new
+        {
+            id = doc.Id,
+            substituidaId = original.Id,
+            status = doc.Status.ToString(),
+            ambiente = ambienteOriginal == Ambiente.Producao ? "producao" : "homologacao",
+            criadoEm = doc.CriadoEm,
+            links = new { consulta = $"/v1/documentos-fiscais/{doc.Id}" }
+        });
+    }
 
     [HttpGet("{id:guid}")]
     public async Task<IActionResult> Obter(Guid id, CancellationToken ct)
@@ -69,6 +314,65 @@ public class DocumentosFiscaisController : ControllerBase
         var doc = await _docRepo.ObterPorIdAsync(id, tenantId, ct);
         if (doc is null) return NotFound();
         return Ok(ParaResponse(doc));
+    }
+
+    private static readonly JsonSerializerOptions OpcoesEmissaoJson = new() { PropertyNameCaseInsensitive = true };
+
+    public record PreviewPdfRequest(string? Tipo, JsonElement Payload);
+
+    /// <summary>
+    /// Pré-visualização do DANFE/DANFCe a partir do payload de emissão — SEM
+    /// transmitir, reservar número ou persistir nada. O ERP chama antes do
+    /// POST de emissão (documento ainda em 'enviando' ou na tela de emissão)
+    /// para o contribuinte conferir o PDF. Mesma renderização do endpoint
+    /// {id}/pdf (QuestPDF), com chave/protocolo como rascunho.
+    /// </summary>
+    [HttpPost("preview-pdf")]
+    public async Task<IActionResult> PreviewPdf([FromBody] PreviewPdfRequest req, CancellationToken ct)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        var tipo = (req.Tipo ?? "").Trim().ToUpperInvariant() == "NFCE"
+            ? TipoDocumento.NFCE
+            : TipoDocumento.NFE;
+        var modelo = (short)(tipo == TipoDocumento.NFCE ? 65 : 55);
+
+        // O ERP/LIB serializa o contrato em camelCase — STJ é case-sensitive
+        // por padrão, então lê com case-insensitive.
+        EmissaoRequest? pedido;
+        try
+        {
+            pedido = req.Payload.Deserialize<EmissaoRequest>(OpcoesEmissaoJson);
+        }
+        catch (JsonException)
+        {
+            return Problem(statusCode: 422, title: "Payload inválido",
+                detail: "Não foi possível interpretar o payload de emissão.");
+        }
+        if (pedido is null || pedido.Itens is not { Count: > 0 })
+            return Problem(statusCode: 422, title: "Payload incompleto",
+                detail: "Informe o payload de emissão (ambiente, itens e totais).");
+
+        var tenant = await _tenantRepo.ObterPorIdAsync(tenantId, ct);
+        if (tenant is null) return NotFound();
+
+        // Documento efêmero: só alimenta o renderizador — nada vai ao banco.
+        var doc = new DocumentoFiscal
+        {
+            Id = Guid.NewGuid(),
+            TenantId = tenantId,
+            Tipo = tipo,
+            Modelo = modelo,
+            Ambiente = (pedido.Ambiente == "producao" ? (short)Ambiente.Producao : (short)Ambiente.Homologacao),
+            Serie = Math.Max((short)1, pedido.Serie),
+            Numero = 0, // rascunho: número só existe após transmissão
+            PayloadEntrada = JsonSerializer.Serialize(pedido),
+        };
+
+        var bytes = tipo == TipoDocumento.NFCE
+            ? await _geradorPdf.GerarDanfceAsync(doc, tenant, ct)
+            : await _geradorPdf.GerarDanfeAsync(doc, tenant, ct);
+
+        return File(bytes, "application/pdf", $"danfe-preview-{doc.Id:N}.pdf");
     }
 
     /// <summary>
@@ -121,14 +425,42 @@ public class DocumentosFiscaisController : ControllerBase
         if (ambienteKey != ambienteReq)
             return Problem(statusCode: 403, title: "API Key não autorizada para o ambiente solicitado.");
 
+        // v2 F4: devolução exige NF-e referenciada; chaves com 44 dígitos.
+        if (req.Finalidade?.Trim().ToLowerInvariant() == "devolucao" &&
+            req.NfesReferenciadas is not { Count: > 0 })
+        {
+            return Problem(statusCode: 422, title: "Devolução exige NF-e referenciada",
+                detail: "Informe 'nfesReferenciadas' com a(s) chave(s) de 44 dígitos da(s) NF-e devolvida(s).");
+        }
+        for (var i = 0; i < (req.NfesReferenciadas?.Count ?? 0); i++)
+        {
+            var chave = new string((req.NfesReferenciadas![i].ChaveAcesso ?? "").Where(char.IsDigit).ToArray());
+            if (chave.Length != 44)
+                return Problem(statusCode: 422, title: "Chave de NF-e referenciada inválida",
+                    detail: $"nfesReferenciadas[{i}]: esperado 44 dígitos, recebido {chave.Length}.");
+        }
+
+        // Grupos de imposto ambíguos: item declara a lista plana legada OU o
+        // grupo tipado v2 — nunca os dois (docs/plano-evolucao-contrato-v2.md §8).
+        for (var i = 0; i < req.Itens.Count; i++)
+        {
+            if (req.Itens[i].Impostos is not null && req.Itens[i].ImpostosV2 is not null)
+                return Problem(statusCode: 400,
+                    title: $"Item {i + 1}: informe apenas 'impostos' (legado) OU 'impostosV2' — nunca os dois.");
+        }
+
         // 1) Idempotência — 2ª chamada com mesma key devolve estado atual.
         var existente = await _docRepo.ObterPorIdempotencyKeyAsync(tenantId, tipo, idemKey!, ct);
         if (existente is not null)
             return Ok(ParaResponse(existente));
 
-        // 2) Validação aritmética.
+        // 2) Validação aritmética. Com a fórmula v2 do total (docs/plano-
+        // evolucao-contrato-v2.md §5.2), a soma legada (itens = valorNota)
+        // não se aplica — confere-se contra os brutos para validar o resto.
         var docValidar = new DocumentoParaValidar(
-            ValorTotal: req.Totais.ValorNota,
+            ValorTotal: ValidadorImpostosV2.FormulaV2Ativa(req.Totais, req.Itens)
+                ? req.Itens.Sum(i => i.ValorTotal)
+                : req.Totais.ValorNota,
             Itens: req.Itens.Select(i => new ItemFiscal(
                 i.Codigo, i.Quantidade, i.ValorUnitario, i.ValorTotal)).ToList(),
             Impostos: req.Itens
@@ -146,29 +478,96 @@ public class DocumentosFiscaisController : ControllerBase
                 extensions: new Dictionary<string, object?> { ["campo"] = primeira.Campo });
         }
 
-        // 3) Reserva número + cria documento PENDENTE.
+        // 2b) Validação declarativa dos grupos v2 (CST/CSOSN, ST, FCP, DIFAL, IPI/PIS/COFINS).
+        var inconsistenciasV2 = _validadorImpostosV2.Validar(req.Itens, nfce: modelo == 65);
+        if (inconsistenciasV2.Count > 0)
+        {
+            var primeiraV2 = inconsistenciasV2[0];
+            return Problem(
+                statusCode: 422,
+                title: "Inconsistência nos grupos de imposto v2",
+                detail: primeiraV2.Mensagem,
+                extensions: new Dictionary<string, object?> { ["campo"] = primeiraV2.Campo });
+        }
+
+        // 2c) Fórmula do total da nota — v2 quando qualquer campo novo está presente.
+        var inconsistenciasTotais = _validadorImpostosV2.ValidarTotais(req.Totais, req.Itens);
+        if (inconsistenciasTotais.Count > 0)
+        {
+            return Problem(
+                statusCode: 422,
+                title: "Inconsistência no total da nota",
+                detail: inconsistenciasTotais[0].Mensagem,
+                extensions: new Dictionary<string, object?> { ["campo"] = "valorNota" });
+        }
+
+        // NFC-e offline (tpEmis 9, v2 §7): marca o documento para o mapper
+        // gerar o XML com contingência offline — a transmissão (e a janela de
+        // 24h) seguem pelo fluxo de contingência do Worker.
+        string? modoContingencia = null;
+        if (modelo == 65 && req.ContingenciaOffline == true)
+        {
+            modoContingencia = "OFFLINE";
+        }
+        else if (modelo != 65 && req.ContingenciaOffline == true)
+        {
+            return Problem(statusCode: 422, title: "contingenciaOffline só se aplica a NFC-e.",
+                detail: "NF-e usa contingência SVC/EPEC automática do servidor, não emissão offline.");
+        }
+
+        return await AceitarAsync(
+            idemKey!, tipo, modelo, ambienteReq, req.Serie, JsonSerializer.Serialize(req), ct, modoContingencia);
+    }
+
+    /// <summary>
+    /// Fim comum do fluxo de aceitação: idempotência, reserva de número, doc
+    /// PENDENTE e enfileiramento. PayloadEntrada já validado pelo chamador.
+    /// </summary>
+    private async Task<IActionResult> AceitarAsync(
+        string idemKey, TipoDocumento tipo, short modelo, Ambiente ambienteReq,
+        short serie, string payloadJson, CancellationToken ct, string? modoContingencia = null)
+    {
+        var tenantId = HttpContext.GetTenantId();
+
+        // 1) Idempotência — 2ª chamada com mesma key devolve estado atual.
+        var existente = await _docRepo.ObterPorIdempotencyKeyAsync(tenantId, tipo, idemKey, ct);
+        if (existente is not null)
+            return Ok(ParaResponse(existente));
+
         var numero = await _docRepo.ReservarProximoNumeroAsync(
-            tenantId, modelo, req.Serie, (short)ambienteReq, ct);
+            tenantId, modelo, serie, (short)ambienteReq, ct);
 
         var doc = new DocumentoFiscal
         {
             Id = Guid.NewGuid(),
             TenantId = tenantId,
-            IdempotencyKey = idemKey!,
+            IdempotencyKey = idemKey,
             Tipo = tipo,
             Ambiente = (short)ambienteReq,
             Modelo = modelo,
-            Serie = req.Serie,
+            Serie = serie,
             Numero = numero,
-            PayloadEntrada = JsonSerializer.Serialize(req),
+            PayloadEntrada = payloadJson,
             Status = StatusDocumento.PENDENTE,
+            ModoContingencia = modoContingencia,
             CriadoEm = DateTimeOffset.UtcNow,
             AtualizadoEm = DateTimeOffset.UtcNow
         };
         await _docRepo.AdicionarAsync(doc, ct);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Corrida: outra request com a mesma Idempotency-Key gravou primeiro —
+            // devolve o documento vencedor (replay) em vez de 500. O número
+            // reservado nesta corrida fica com gap — aceitável.
+            var vencedor = await _docRepo.ObterPorIdempotencyKeyAsync(tenantId, tipo, idemKey, ct);
+            if (vencedor is null) throw;
+            return Ok(ParaResponse(vencedor));
+        }
 
-        // 4) Enfileira para processamento assíncrono.
         await _fila.EnfileirarAsync(doc.Id, ct);
 
         _logger.LogInformation("DocumentoFiscal {Id} aceito e enfileirado (status PENDENTE).", doc.Id);
@@ -177,7 +576,7 @@ public class DocumentosFiscaisController : ControllerBase
         {
             id = doc.Id,
             status = doc.Status.ToString(),
-            ambiente = req.Ambiente,
+            ambiente = ambienteReq == Ambiente.Producao ? "producao" : "homologacao",
             criadoEm = doc.CriadoEm,
             links = new
             {

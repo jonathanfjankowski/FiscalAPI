@@ -34,6 +34,56 @@ public class SegurancaTests(EmissaoIntegracaoTests.Factory factory)
         return req.CreateSelfSigned(DateTimeOffset.UtcNow.AddDays(-1), DateTimeOffset.UtcNow.AddYears(1));
     }
 
+    /// <summary>Client sobre uma factory com o EnvelopeEncryptionService REAL (KEK em memória).</summary>
+    private HttpClient CriarClientComStoreReal()
+    {
+        var factory2 = factory.WithWebHostBuilder(b =>
+        {
+            b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Certificados:ChaveMestraKEK"] = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32)),
+            }));
+            b.ConfigureServices(services =>
+            {
+                var stub = services.Single(d => d.ServiceType == typeof(Fiscal.Core.Interfaces.ICertificadoStore));
+                services.Remove(stub);
+                services.AddSingleton<Fiscal.Core.Interfaces.ICertificadoStore, EnvelopeEncryptionService>();
+            });
+        });
+        var client = factory2.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new System.Net.Http.Headers.AuthenticationHeaderValue("ApiKey", factory.BootstrapKey);
+        return client;
+    }
+
+    private static async Task<(Guid Id, string Thumbprint)> UploadCertificadoAsync(HttpClient client, string senha)
+    {
+        using var cert = CriarCertificadoTesteComChave(out _);
+        var pfx = cert.Export(X509ContentType.Pfx, senha);
+
+        using var form = new MultipartFormDataContent();
+        var conteudo = new ByteArrayContent(pfx);
+        conteudo.Headers.ContentType = new("application/x-pkcs12");
+        form.Add(conteudo, "pfx", "teste.pfx");
+        form.Add(new StringContent(senha), "senha");
+
+        var resp = await client.PostAsync("/v1/certificados", form);
+        resp.StatusCode.Should().Be(HttpStatusCode.Created);
+        var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        return (body.GetProperty("id").GetGuid(), body.GetProperty("thumbprint").GetString()!);
+    }
+
+    private static async Task<List<Guid>> CertificadosAtivosAsync(HttpClient client)
+    {
+        var resp = await client.GetAsync("/v1/certificados");
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var lista = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        return lista.EnumerateArray()
+            .Where(c => c.GetProperty("ativo").GetBoolean())
+            .Select(c => c.GetProperty("id").GetGuid())
+            .ToList();
+    }
+
     // ---------- PBKDF2 (handler de API key) ----------
 
     [Fact]
@@ -219,6 +269,37 @@ public class SegurancaTests(EmissaoIntegracaoTests.Factory factory)
         form.Add(new StringContent("senha-ERRADA"), "senha");
 
         (await client.PostAsync("/v1/certificados", form)).StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
+    public async Task Certificado_ciclo_de_vida_rotacao_desativacao_e_reativacao()
+    {
+        var client = CriarClientComStoreReal();
+
+        // Rotação: o segundo upload desativa o primeiro (sempre 1 ativo/tenant).
+        var (id1, thumb1) = await UploadCertificadoAsync(client, "senha-a");
+        var (id2, thumb2) = await UploadCertificadoAsync(client, "senha-b");
+        thumb2.Should().NotBe(thumb1);
+        (await CertificadosAtivosAsync(client)).Should().ContainSingle().Which.Should().Be(id2);
+
+        // DELETE é soft-delete e idempotente; sem ativo restante.
+        (await client.DeleteAsync($"/v1/certificados/{id2}")).StatusCode.Should().Be(HttpStatusCode.NoContent);
+        (await client.DeleteAsync($"/v1/certificados/{id2}")).StatusCode.Should().Be(HttpStatusCode.NoContent);
+        (await CertificadosAtivosAsync(client)).Should().BeEmpty();
+
+        // Reativação volta atrás na rotação.
+        var reativado = await client.PostAsync($"/v1/certificados/{id1}/ativar", null);
+        reativado.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await reativado.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("ativo").GetBoolean().Should().BeTrue();
+        (await CertificadosAtivosAsync(client)).Should().ContainSingle().Which.Should().Be(id1);
+
+        // Reativar o que já está ativo é idempotente.
+        (await client.PostAsync($"/v1/certificados/{id1}/ativar", null)).StatusCode.Should().Be(HttpStatusCode.OK);
+        (await CertificadosAtivosAsync(client)).Should().ContainSingle().Which.Should().Be(id1);
+
+        // Recurso inexistente → 404.
+        (await client.DeleteAsync($"/v1/certificados/{Guid.NewGuid()}")).StatusCode.Should().Be(HttpStatusCode.NotFound);
+        (await client.PostAsync($"/v1/certificados/{Guid.NewGuid()}/ativar", null)).StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]

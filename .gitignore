@@ -43,11 +43,15 @@ TestResult*.xml
 *.nuget.props
 *.nuget.targets
 
-# Secrets / local config
-.env
-.env.local
+# Secrets / local config — qualquer .env* (backup, .local etc.), exceto o exemplo
+.env*
+!.env.example
 appsettings.Development.json
 appsettings.*.local.json
+
+# Certificados digitais (chave privada ICP-Brasil — jamais versionar)
+*.pfx
+*.p12
 
 # OS
 .DS_Store

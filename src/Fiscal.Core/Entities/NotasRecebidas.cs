@@ -44,6 +44,13 @@ public class ManifestacaoDestinatario
     public string? Protocolo { get; set; }
     public string? MotivoStatus { get; set; }
     public int Tentativas { get; set; }
+
+    /// <summary>
+    /// Agenda da próxima tentativa (backoff pós-erro de transmissão). Durante
+    /// PROCESSANDO funciona como lease — o VarrerManifestacoesJob resgata
+    /// órfãos cujo lease venceu.
+    /// </summary>
+    public DateTimeOffset? ProximaTentativaEm { get; set; }
     public DateTimeOffset CriadoEm { get; set; } = DateTimeOffset.UtcNow;
 }
 

@@ -98,6 +98,150 @@ public class EmissaoIntegracaoTests : IClassFixture<EmissaoIntegracaoTests.Facto
     }
 
     [Fact]
+    public async Task Reenvio_de_rejeitada_mantem_numero_e_processa()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("ApiKey", _factory.BootstrapKey);
+
+        // 1) Emissão aceita (número reservado)
+        var idem = $"reenv-{Guid.NewGuid()}";
+        var resp = await client.SendAsync(BuildEmissaoRequest(idem));
+        resp.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var emit = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        var id = emit.GetProperty("id").GetGuid();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
+            var tenantId = db.DocumentosFiscais.AsNoTracking().First(d => d.Id == id).TenantId;
+            // 2) Simula REJEIÇÃO da SEFAZ (mesmo número permanece)
+            var doc = await db.DocumentosFiscais.FirstAsync(d => d.Id == id);
+            doc.Status = StatusDocumento.REJEITADA;
+            doc.MotivoStatus = "Rejeição 598: ambiente errado";
+            await db.SaveChangesAsync();
+        }
+
+        // 3) Reenvio com payload corrigido
+        var reenvio = new HttpRequestMessage(HttpMethod.Post, $"/v1/documentos-fiscais/{id}/reenviar")
+        {
+            Content = JsonContent.Create(new
+            {
+                ambiente = "homologacao",
+                serie = 1,
+                destinatario = new { cnpjCpf = "12345678000199", nome = "Dest Corrigido" },
+                itens = new[]
+                {
+                    new
+                    {
+                        codigo = "SKU1", descricao = "Produto Teste", ncm = "12345678", cfop = "5102",
+                        quantidade = 2, valorUnitario = 60, valorTotal = 120,
+                        impostos = new[]
+                        {
+                            new { cst = "01", baseCalculo = 120, aliquota = 1.65, valor = 1.98 }
+                        }
+                    }
+                },
+                totais = new { valorProdutos = 120, valorNota = 120 },
+                pagamento = new[] { new { forma = "01", valor = 120 } }
+            })
+        };
+        reenvio.Headers.Authorization = new AuthenticationHeaderValue("ApiKey", _factory.BootstrapKey);
+
+        var respReenvio = await client.SendAsync(reenvio);
+        respReenvio.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var bodyReenvio = await respReenvio.Content.ReadFromJsonAsync<JsonElement>();
+        bodyReenvio.GetProperty("id").GetGuid().Should().Be(id, "reenvio é o MESMO documento");
+
+        // 4) Job processa → AUTORIZADA com o MESMO número da rejeitada
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var job = scope.ServiceProvider.GetRequiredService<ProcessarDocumentoJob>();
+            await job.ExecutarAsync(id, CancellationToken.None);
+
+            var db2 = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
+            var doc = await db2.DocumentosFiscais.FirstAsync(d => d.Id == id);
+            doc.Status.Should().Be(StatusDocumento.AUTORIZADA, "motivo: {0}", doc.MotivoStatus);
+            doc.Numero.Should().BeGreaterThan(0);
+            doc.MotivoStatus.Should().NotContain("598");
+            var payload = doc.PayloadEntrada;
+            payload.Should().Contain("Dest Corrigido", "payload foi substituído");
+        }
+    }
+
+    [Fact]
+    public async Task Reenvio_de_autorizada_retorna_409()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("ApiKey", _factory.BootstrapKey);
+
+        var resp = await client.SendAsync(BuildEmissaoRequest($"reenv-ok-{Guid.NewGuid()}"));
+        resp.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var emit = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        var id = emit.GetProperty("id").GetGuid();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
+            var doc = await db.DocumentosFiscais.FirstAsync(d => d.Id == id);
+            doc.Status = StatusDocumento.AUTORIZADA;
+            await db.SaveChangesAsync();
+        }
+
+        var reenvio = new HttpRequestMessage(HttpMethod.Post, $"/v1/documentos-fiscais/{id}/reenviar")
+        {
+            Content = JsonContent.Create(new
+            {
+                ambiente = "homologacao",
+                serie = 1,
+                itens = new[] { new { codigo = "X", descricao = "x", quantidade = 1, valorUnitario = 10, valorTotal = 10 } },
+                totais = new { valorProdutos = 10, valorNota = 10 }
+            })
+        };
+        reenvio.Headers.Authorization = new AuthenticationHeaderValue("ApiKey", _factory.BootstrapKey);
+
+        var respReenvio = await client.SendAsync(reenvio);
+        respReenvio.StatusCode.Should().Be(HttpStatusCode.Conflict);
+    }
+
+    [Fact]
+    public async Task Reenvio_com_payload_invalido_retorna_422()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("ApiKey", _factory.BootstrapKey);
+
+        var resp = await client.SendAsync(BuildEmissaoRequest($"reenv-inv-{Guid.NewGuid()}"));
+        resp.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var emit = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        var id = emit.GetProperty("id").GetGuid();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
+            var doc = await db.DocumentosFiscais.FirstAsync(d => d.Id == id);
+            doc.Status = StatusDocumento.REJEITADA;
+            await db.SaveChangesAsync();
+        }
+
+        var reenvio = new HttpRequestMessage(HttpMethod.Post, $"/v1/documentos-fiscais/{id}/reenviar")
+        {
+            Content = JsonContent.Create(new
+            {
+                ambiente = "homologacao",
+                serie = 1,
+                itens = new[] { new { codigo = "X", descricao = "x", quantidade = 1, valorUnitario = 10, valorTotal = 10 } },
+                totais = new { valorProdutos = 999, valorNota = 999 }
+            })
+        };
+        reenvio.Headers.Authorization = new AuthenticationHeaderValue("ApiKey", _factory.BootstrapKey);
+
+        var respReenvio = await client.SendAsync(reenvio);
+        respReenvio.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    [Fact]
     public async Task Idempotencia_retorna_mesmo_documento_em_segunda_chamada_com_200()
     {
         var client = _factory.CreateClient();
@@ -246,6 +390,84 @@ public class EmissaoIntegracaoTests : IClassFixture<EmissaoIntegracaoTests.Facto
             evento.Protocolo.Should().NotBeNullOrEmpty();
             doc!.Status.Should().Be(StatusDocumento.CANCELADA);
         }
+    }
+
+    [Fact]
+    public async Task Xml_do_evento_disponivel_apos_processamento_e_no_replay()
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Authorization =
+            new AuthenticationHeaderValue("ApiKey", _factory.BootstrapKey);
+
+        // Cria documento e força AUTORIZADA (requisito da CC-e).
+        var idem = $"xmlev-{Guid.NewGuid()}";
+        var resp = await client.SendAsync(BuildEmissaoRequest(idem));
+        resp.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        var docId = body.GetProperty("id").GetGuid();
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
+            var doc = await db.DocumentosFiscais.FindAsync(docId);
+            doc!.Status = StatusDocumento.AUTORIZADA;
+            doc.ChaveAcesso = new string('3', 44);
+            doc.ProtocoloAutorizacao = "135000000000002";
+            await db.SaveChangesAsync();
+        }
+
+        // CC-e: aceite imediato (PENDENTE) — xml ainda não existe.
+        var cceKey = $"xmlev-cce-{Guid.NewGuid()}";
+        var cceReq = new HttpRequestMessage(HttpMethod.Post, $"/v1/documentos-fiscais/{docId}/carta-correcao")
+        {
+            Content = JsonContent.Create(new { correcao = "Correcao via teste de integracao do XML do evento" })
+        };
+        cceReq.Headers.Add("Idempotency-Key", cceKey);
+        var cceResp = await client.SendAsync(cceReq);
+        cceResp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var cceBody = await cceResp.Content.ReadFromJsonAsync<JsonElement>();
+        var eventoId = cceBody.GetProperty("eventoId").GetGuid();
+        cceBody.GetProperty("status").GetString().Should().Be("PENDENTE");
+        cceBody.GetProperty("xml").ValueKind.Should().Be(JsonValueKind.Null);
+
+        // Antes do processamento: XML protocolado não existe → 409.
+        var antes = await client.GetAsync($"/v1/documentos-fiscais/{docId}/eventos/{eventoId}/xml");
+        antes.StatusCode.Should().Be(HttpStatusCode.Conflict);
+
+        // Processa o evento in-process (mock responde PROCESSADO com XmlRetorno).
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
+            var job = scope.ServiceProvider.GetRequiredService<Fiscal.Worker.Jobs.ProcessarEventoJob>();
+            await job.ExecutarAsync(eventoId, CancellationToken.None);
+
+            var evento = await db.EventosFiscais.SingleAsync(e => e.Id == eventoId);
+            evento.Status.Should().Be("PROCESSADO", because: "motivoStatus={0}", evento.MotivoStatus);
+            evento.XmlRetorno.Should().NotBeNullOrEmpty();
+        }
+
+        // Após o processamento: XML binário com o retorno protocolado.
+        var depois = await client.GetAsync($"/v1/documentos-fiscais/{docId}/eventos/{eventoId}/xml");
+        depois.StatusCode.Should().Be(HttpStatusCode.OK);
+        depois.Content.Headers.ContentType!.MediaType.Should().Be("application/xml");
+        var xml = await depois.Content.ReadAsStringAsync();
+        xml.Should().Contain("retEnvEvento").And.Contain("135");
+
+        // Replay idempotente da CC-e (doc segue AUTORIZADA) traz o xml no corpo.
+        var replayReq = new HttpRequestMessage(HttpMethod.Post, $"/v1/documentos-fiscais/{docId}/carta-correcao")
+        {
+            Content = JsonContent.Create(new { correcao = "Correcao via teste de integracao do XML do evento" })
+        };
+        replayReq.Headers.Add("Idempotency-Key", cceKey);
+        var replay = await client.SendAsync(replayReq);
+        replay.StatusCode.Should().Be(HttpStatusCode.OK);
+        var replayBody = await replay.Content.ReadFromJsonAsync<JsonElement>();
+        replayBody.GetProperty("status").GetString().Should().Be("PROCESSADO");
+        replayBody.GetProperty("xml").GetString().Should().Contain("retEnvEvento");
+
+        // Evento de outro documento → 404 (não vaza por id).
+        var roubado = await client.GetAsync($"/v1/documentos-fiscais/{Guid.NewGuid()}/eventos/{eventoId}/xml");
+        roubado.StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
 
     [Fact]

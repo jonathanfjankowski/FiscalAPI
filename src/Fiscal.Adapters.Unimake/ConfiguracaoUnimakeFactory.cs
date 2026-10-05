@@ -39,6 +39,8 @@ internal static class ConfiguracaoUnimakeFactory
             {
                 "SVCAN" => TipoEmissao.ContingenciaSVCAN,
                 "SVCRS" => TipoEmissao.ContingenciaSVCRS,
+                "EPEC" => TipoEmissao.ContingenciaEPEC,
+                "OFFLINE" => TipoEmissao.ContingenciaOffLine,
                 _ => TipoEmissao.Normal,
             },
             TipoAmbiente = ambiente == Ambiente.Producao ? TipoAmbiente.Producao : TipoAmbiente.Homologacao,

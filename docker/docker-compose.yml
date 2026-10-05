@@ -12,11 +12,27 @@ services:
       - ConnectionStrings__Postgres=Host=postgres;Database=fiscal;Username=fiscal;Password=${DB_PASSWORD:-fiscal}
       - Certificados__ChaveMestraKEK=${KEK_MASTER_KEY}
       - Fiscal__ModoSandbox=${MODO_SANDBOX:-true}
+      # Só a API roda migrations (Worker espera ficar healthy — sem corrida de schema).
+      - Fiscal__RodarMigrations=true
       # Painel admin (seed do primeiro operador + assinatura de JWT).
       # ADMIN_JWT_SECRET sem valor = login do painel fica desabilitado até configurar.
       - ADMIN_EMAIL=${ADMIN_EMAIL:-}
       - ADMIN_PASSWORD=${ADMIN_PASSWORD:-}
       - ADMIN_JWT_SECRET=${ADMIN_JWT_SECRET:-}
+      # Redis (opcional) — rate limit distribuído + cache compartilhado.
+      - Fiscal__Redis__ConnectionString=${REDIS_CONNECTION_STRING:-}
+      # Responsável técnico (infRespTec) — SEFAZ-PR rejeita com 972 sem o grupo.
+      - Fiscal__RespTec__Cnpj=${RESPTEC_CNPJ:-}
+      - Fiscal__RespTec__Contato=${RESPTEC_CONTATO:-}
+      - Fiscal__RespTec__Email=${RESPTEC_EMAIL:-}
+      - Fiscal__RespTec__Fone=${RESPTEC_FONE:-}
+    healthcheck:
+      # wget busybox (imagem alpine) no /health/ready — valida Postgres também.
+      test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health/ready || exit 1"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+      start_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
@@ -30,18 +46,60 @@ services:
       - DOTNET_ENVIRONMENT=Development
       - ConnectionStrings__Postgres=Host=postgres;Database=fiscal;Username=fiscal;Password=${DB_PASSWORD:-fiscal}
       - Certificados__ChaveMestraKEK=${KEK_MASTER_KEY}
+      # Mesma flag da API — sem isso o worker usaria os emissores reais
+      # (Unimake/SEFAZ) mesmo com MODO_SANDBOX=true.
+      - Fiscal__ModoSandbox=${MODO_SANDBOX:-true}
+      # Migrations são da API (que sobe antes, via healthcheck).
+      - Fiscal__RodarMigrations=false
+      # Responsável técnico (infRespTec) — SEFAZ-PR rejeita com 972 sem o grupo.
+      - Fiscal__RespTec__Cnpj=${RESPTEC_CNPJ:-}
+      - Fiscal__RespTec__Contato=${RESPTEC_CONTATO:-}
+      - Fiscal__RespTec__Email=${RESPTEC_EMAIL:-}
+      - Fiscal__RespTec__Fone=${RESPTEC_FONE:-}
+    # O Worker não serve HTTP — liveness por processo (busybox pgrep).
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f Fiscal.Worker.dll || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
     depends_on:
       postgres:
         condition: service_healthy
+      api:
+        condition: service_healthy
+
+  redis:
+    image: redis:7-alpine
+    command: ["redis-server", "--appendonly", "yes"]
+    volumes:
+      - redisdata:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
 
   postgres:
     image: postgres:16-alpine
+    command:
+      - postgres
+      - -c
+      - wal_level=replica
+      - -c
+      - archive_mode=on
+      - -c
+      - archive_command=test ! -f /wal_archive/%f && cp %p /wal_archive/%f
+      - -c
+      - archive_timeout=300
     environment:
       - POSTGRES_DB=fiscal
       - POSTGRES_USER=fiscal
       - POSTGRES_PASSWORD=${DB_PASSWORD:-fiscal}
     volumes:
       - pgdata:/var/lib/postgresql/data
+      - wal_archive:/wal_archive
+      - ./postgres-init:/docker-entrypoint-initdb.d:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U fiscal -d fiscal"]
       interval: 5s
@@ -52,3 +110,5 @@ services:
 
 volumes:
   pgdata:
+  redisdata:
+  wal_archive:

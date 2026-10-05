@@ -78,9 +78,9 @@ E o mesmo padrão vale pro evento de substituição da NFS-e.
 | Item | Ajuste |
 |---|---|
 | CC-e | Só NF-e; `409` para NFC-e/NFS-e |
-| Substituição | Novo endpoint específico pra NFS-e (`POST /v1/documentos-fiscais/{id}/substituicao`) |
+| Substituição | **Feito (1.5.0-alpha)** — `POST /v1/documentos-fiscais/{id}/substituicao` (DPS substituto com `<subst>`) |
 | Inutilização | Só NF-e/NFC-e |
-| Manifestação do Destinatário / Distribuição DFe | Fora de escopo, documentar explicitamente |
+| Manifestação do Destinatário / Distribuição DFe | Fora de escopo, documentar explicitamente (revertido depois — implementado na 0.8.0-alpha) |
 | Consulta de status do serviço | Novo endpoint público `GET /v1/status-servico/{uf}` |
 | Status de documento | Adicionar `CANCELAMENTO_PENDENTE` / `ERRO_CANCELAMENTO` |
 

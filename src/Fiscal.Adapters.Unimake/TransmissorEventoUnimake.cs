@@ -111,7 +111,7 @@ public class TransmissorEventoUnimake : ITransmissorEventoFiscal
         var env = new EnvEvento
         {
             Versao = "1.00",
-            IdLote = Math.Abs(evento.Id.GetHashCode()).ToString(),
+            IdLote = (evento.Id.GetHashCode() & 0x7fffffff).ToString(),
             Evento = new List<Evento>
             {
                 new() { Versao = "1.00", InfEvento = inf },

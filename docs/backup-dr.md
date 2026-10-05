@@ -19,10 +19,10 @@ versionamento e acesso restrito). Sem ela, os PFX cifrados são irrecuperáveis.
 | Item | Meta | Como |
 |---|---|---|
 | Backup lógico diário | RPO ≤ 24 h | `docker/backup.sh` (`pg_dump` custom format) em cron do host |
-| Retenção | 7 diários + 4 semanais | o script roda `find -mtime` e apaga backups antigos |
+| Retenção | 7 diários | `backup.sh` apaga dumps com `find -mtime +7` (camada semanal ainda não implementada) |
 | Restore testado | trimestral | `docker/restore.sh` num Postgres limpo + `dotnet test` de fumaça |
 | RTO alvo | ≤ 1 h | subir Postgres + `restore.sh` + API/Worker (docker compose) |
-| WAL archiving / PITR | RPO ≤ 5 min | **pendente** (Fase 5 avançada): `archive_command` + volume dedicado |
+| WAL archiving / PITR | RPO ≤ 5 min | **ativo no compose (1.9.0-alpha)**: `archive_mode=on` + volume `wal_archive` (journal a cada 5 min, `archive_timeout=300`); restore com `docker/restore-pitr.sh` |
 
 ## Backup
 
@@ -33,6 +33,17 @@ docker/backup.sh   # usa POSTGRES_USER/DB do .env; grava em ./backups/<timestamp
 
 O dump contém PFX **cifrados** (envelope) — é seguro transportar, desde que a
 KEK não viaje junto.
+
+## Restore pontual (PITR — RPO ≤ 5 min)
+
+```bash
+# o volume wal_archive guarda os journals (inclusive .partial a cada 5 min)
+docker/restore-pitr.sh backups/20260906T030000.dump "2026-09-06 14:30:00" /tmp/restore-pitr
+```
+
+O script restaura o base backup, escreve `recovery.signal` +
+`recovery_target_time` e promove o cluster ao ponto solicitado. Após o
+promote, rodar a fumaça (documento + certificado carregável) do checklist.
 
 ## Restore (testar antes de precisar)
 
@@ -56,13 +67,22 @@ curl http://localhost:8080/health/ready
 ## Hardening de produção (checklist de go-live)
 
 - [ ] TLS terminado no proxy + HSTS no proxy (a API escuta HTTP interno).
-- [ ] `ADMIN_JWT_SECRET` e `Certificados:ChaveMestraKEK` fora de `.env`
-      (secret manager: Docker secrets / Azure Key Vault / Vault).
-- [ ] Postgres com `pgcrypto`/volume criptografado (criptografia em repouso).
-- [ ] Role da aplicação sem UPDATE/DELETE em `auditoria` (ver migration
-      `EnforceAuditoriaAppendOnly`).
-- [ ] Backup da KEK em cofre separado do backup do banco.
-- [ ] Teste de restore executado e documentado (data + resultado).
+      *(ops — fora do código)*
+- [x] `ADMIN_JWT_SECRET` e `Certificados:ChaveMestraKEK` fora de `.env` —
+      **suportado (1.9.0-alpha)**: convenção `CHAVE_FILE` (Docker secrets /
+      K8s mounted files) via `AddFileSecrets()`; execução é do ambiente.
+- [x] Postgres com `pgcrypto` — **suportado (1.9.0-alpha)**:
+      `docker/postgres-init/01-extensions.sql` cria a extensão no primeiro
+      boot; volume criptografado continua sendo opção do host.
+- [x] Role da aplicação sem UPDATE/DELETE em `auditoria` — **migration
+      `EnforceAuditoriaAppendOnly` aplica o REVOKE no startup** (verificado).
+- [x] Migrations em produção — **suportado (1.12.1-alpha)**: `MigrateAsync`
+      roda em Development ou com `Fiscal:RodarMigrations=true`; no compose,
+      só a API roda (`true`) e o Worker espera `api: healthy`. Em
+      multi-instância, manter a flag em uma única réplica (ou job de init).
+- [ ] Backup da KEK em cofre separado do backup do banco. *(ops)*
+- [ ] Teste de restore executado e documentado (data + resultado). *(ops —
+      agora também há `docker/restore-pitr.sh` para testar o PITR)*
 - [ ] Política de retenção LGPD: XMLs fiscais têm guarda legal (5+ anos);
       dados sensíveis de titulares não devem entrar em campos livres
-      (justificativas/motivos) — revisar no consumo dos webhooks.
+      (justificativas/motivos) — revisar no consumo dos webhooks. *(ops)*

@@ -28,12 +28,19 @@ public class ProcessarDocumentoJob
         TimeSpan.FromMinutes(10),
     };
 
+    /// <summary>Teto de tentativas em CONTINGENCIA (~8h de backoff máx. 10 min):
+    /// esgotou → FALHA_EMISSAO (terminal) + webhook — nunca retry infinito.</summary>
+    private const int MaxTentativas = 48;
+
+
     private readonly FiscalDbContext _db;
     private readonly IRepositorioDocumentoFiscal _docRepo;
     private readonly IRepositorioCertificado _certRepo;
     private readonly IRepositorioAuditoria _auditoria;
     private readonly IEnumerable<IEmissorFiscal> _emissores;
+    private readonly IEnumerable<ITransmissorEpec> _transmissoresEpec;
     private readonly ICertificadoStore _certStore;
+    private readonly MetricasFiscais _metricas;
     private readonly bool _sandbox;
     private readonly ILogger<ProcessarDocumentoJob> _logger;
 
@@ -43,7 +50,9 @@ public class ProcessarDocumentoJob
         IRepositorioCertificado certRepo,
         IRepositorioAuditoria auditoria,
         IEnumerable<IEmissorFiscal> emissores,
+        IEnumerable<ITransmissorEpec> transmissoresEpec,
         ICertificadoStore certStore,
+        MetricasFiscais metricas,
         IConfiguration configuration,
         ILogger<ProcessarDocumentoJob> logger)
     {
@@ -52,26 +61,74 @@ public class ProcessarDocumentoJob
         _certRepo = certRepo;
         _auditoria = auditoria;
         _emissores = emissores;
+        _transmissoresEpec = transmissoresEpec;
         _certStore = certStore;
+        _metricas = metricas;
         _sandbox = configuration.GetValue("Fiscal:ModoSandbox", false);
         _logger = logger;
     }
 
     [Hangfire.AutomaticRetry(Attempts = 1)]
+    [Hangfire.DisableConcurrentExecution(timeoutInSeconds: 600)]
     public async Task ExecutarAsync(Guid documentoId, CancellationToken ct)
     {
-        var doc = await _docRepo.ObterPorIdAsync(documentoId, await TenantIdDoDocumento(documentoId, ct), ct);
-        if (doc is null)
+        // Claim atômico: assume o documento apenas se ainda estiver enfileirável
+        // (PENDENTE/CONTINGENCIA). Se 0 linhas, outra execução já assumiu (corrida
+        // varredor × replay × retry do Hangfire) ou o doc chegou a status terminal
+        // — abortar sem retransmitir (evita duplicidade e sobrescrita de sucesso).
+        // ProximaTentativaEm vira lease (+15 min): se a execução morrer no meio,
+        // o VarrerContingenciaJob resgata o órfão em PROCESSANDO.
+        DateTimeOffset? leaseAte = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(15);
+        var claimado = await _db.DocumentosFiscais
+            .Where(d => d.Id == documentoId
+                && (d.Status == StatusDocumento.PENDENTE || d.Status == StatusDocumento.CONTINGENCIA))
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(d => d.Status, StatusDocumento.PROCESSANDO)
+                .SetProperty(d => d.ProximaTentativaEm, leaseAte)
+                .SetProperty(d => d.AtualizadoEm, DateTimeOffset.UtcNow), ct);
+        if (claimado == 0)
         {
-            _logger.LogWarning("DocumentoFiscal {Id} não encontrado — descartando job.", documentoId);
+            _logger.LogInformation("DocumentoFiscal {Id} não está mais PENDENTE/CONTINGENCIA — nada a fazer.", documentoId);
             return;
         }
 
-        if (doc.Status is StatusDocumento.AUTORIZADA or StatusDocumento.REJEITADA
-            or StatusDocumento.CANCELADA or StatusDocumento.DENEGADA
-            or StatusDocumento.ERRO_INTERNO)
+        var doc = await _db.DocumentosFiscais.FirstOrDefaultAsync(d => d.Id == documentoId, ct);
+        if (doc is null)
         {
-            _logger.LogInformation("DocumentoFiscal {Id} já em status terminal {Status} — nada a fazer.", doc.Id, doc.Status);
+            _logger.LogWarning("DocumentoFiscal {Id} não encontrado após claim — descartando job.", documentoId);
+            return;
+        }
+
+        // Janela de contingência: OFFLINE (NFC-e tpEmis 9) = 24h; demais
+        // (SVC/EPEC) = 168h. Fora da janela a SEFAZ rejeita — falha alto
+        // em vez de rejeição em loop.
+        var janela = doc.ModoContingencia switch
+        {
+            "OFFLINE" => TimeSpan.FromHours(24),
+            null => TimeSpan.Zero,
+            _ => TimeSpan.FromHours(168),
+        };
+        if (janela > TimeSpan.Zero && doc.CriadoEm < DateTimeOffset.UtcNow - janela)
+        {
+            _logger.LogError("DocumentoFiscal {Id}: janela de contingência ({Modo}) expirada — marcando FALHA_EMISSAO.",
+                doc.Id, doc.ModoContingencia);
+            await MarcarErroTerminalAsync(doc,
+                $"Janela de contingência ({doc.ModoContingencia}) expirada — reemita o documento com nova numeração.", ct);
+            return;
+        }
+
+        // Contingência EPEC: o evento prévio (110140, SVRS) precisa ser
+        // autorizado ANTES da transmissão da NF-e completa (tpEmis 4).
+        // Sucesso → protocolo salvo; a NF-e vai no próximo ciclo.
+        if (doc.ModoContingencia == "EPEC" && doc.EpecProtocolo is null && !_sandbox)
+        {
+            var epecOk = await TransmitirEpecAsync(doc, ct);
+            if (!epecOk) return; // CONTINGENCIA/ERRO já persistidos em TransmitirEpecAsync
+            doc.Status = StatusDocumento.CONTINGENCIA;
+            doc.ProximaTentativaEm = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
+            await _docRepo.AtualizarAsync(doc, ct);
+            await _db.SaveChangesAsync(ct);
+            _logger.LogInformation("DocumentoFiscal {Id}: EPEC autorizado — NF-e completa entra na fila.", doc.Id);
             return;
         }
 
@@ -139,6 +196,8 @@ public class ProcessarDocumentoJob
         catch (Exception ex)
         {
             // Erro de transmissão genuíno (timeout, SEFAZ fora, etc.) → CONTINGENCIA + backoff.
+            _logger.LogError(ex, "Erro de transmissão ao emitir documento {Id} (tentativa {Tentativa}).",
+                doc.Id, doc.Tentativas);
             resultado = new ResultadoEmissao(
                 ResultadoEmissaoStatus.ErroTransmissao,
                 ChaveAcesso: null,
@@ -179,8 +238,20 @@ public class ProcessarDocumentoJob
                 break;
 
             case ResultadoEmissaoStatus.ErroTransmissao:
-                doc.Status = StatusDocumento.CONTINGENCIA;
-                doc.ProximaTentativaEm = DateTimeOffset.UtcNow + ProximoBackoff(doc.Tentativas);
+                if (doc.Tentativas >= MaxTentativas)
+                {
+                    // Esgotou — terminal + webhook; não volta mais à fila sozinho.
+                    doc.Status = StatusDocumento.FALHA_EMISSAO;
+                    doc.ProximaTentativaEm = null;
+                    _logger.LogError("DocumentoFiscal {Id} esgotou {Max} tentativas de transmissão — FALHA_EMISSAO.",
+                        doc.Id, MaxTentativas);
+                }
+                else
+                {
+                    doc.Status = StatusDocumento.CONTINGENCIA;
+                    doc.ProximaTentativaEm = DateTimeOffset.UtcNow + ProximoBackoff(doc.Tentativas);
+                    _metricas.ContingenciaAcionada(doc.ModoContingencia ?? "fila");
+                }
                 break;
 
             default:
@@ -193,6 +264,13 @@ public class ProcessarDocumentoJob
 
         await _docRepo.AtualizarAsync(doc, ct);
         await _db.SaveChangesAsync(ct);
+
+        _metricas.DocumentoProcessado(doc.Tipo, doc.Status, tenant.Uf, doc.Ambiente == (short)Ambiente.Producao);
+        if (doc.Status == StatusDocumento.AUTORIZADA)
+        {
+            _metricas.LatenciaAutorizacao(
+                (doc.AtualizadoEm - doc.CriadoEm).TotalSeconds, doc.Tipo, tenant.Uf);
+        }
 
         _logger.LogInformation("DocumentoFiscal {Id} processado → {Status} (tentativa {Tentativa})",
             doc.Id, doc.Status, doc.Tentativas);
@@ -209,6 +287,7 @@ public class ProcessarDocumentoJob
             StatusDocumento.AUTORIZADA => Webhooks.EventoAutorizado,
             StatusDocumento.REJEITADA => Webhooks.EventoRejeitado,
             StatusDocumento.DENEGADA => Webhooks.EventoDenegado,
+            StatusDocumento.FALHA_EMISSAO => Webhooks.EventoFalhaEmissao,
             _ => null,
         };
         if (tipo is null || tenant.WebhookUrl is null) return;
@@ -242,14 +321,83 @@ public class ProcessarDocumentoJob
         };
     }
 
-    private async Task<Guid> TenantIdDoDocumento(Guid documentoId, CancellationToken ct) =>
-        await _db.DocumentosFiscais
-            .Where(d => d.Id == documentoId)
-            .Select(d => d.TenantId)
-            .FirstAsync(ct);
-
     private static TimeSpan ProximoBackoff(int tentativa) =>
         tentativa <= 0 ? Backoff[0] : Backoff[Math.Min(tentativa - 1, Backoff.Length - 1)];
+
+    /// <summary>
+    /// Envia o evento prévio EPEC (110140) para a SVRS. true = autorizado
+    /// (protocolo salvo); false = falha já persistida (documento volta a
+    /// CONTINGENCIA com backoff — ou ERRO_INTERNO nos casos não recuperáveis).
+    /// </summary>
+    private async Task<bool> TransmitirEpecAsync(DocumentoFiscal doc, CancellationToken ct)
+    {
+        var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Id == doc.TenantId, ct);
+        if (tenant is null)
+        {
+            await MarcarErroInternoAsync(doc, $"Tenant {doc.TenantId} não encontrado (EPEC).", ct);
+            return false;
+        }
+        var cert = await _certRepo.ObterAtivoPorTenantAsync(doc.TenantId, ct);
+        if (cert is null)
+        {
+            doc.MotivoStatus = "EPEC sem certificado ativo para o tenant.";
+            doc.AtualizadoEm = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return false;
+        }
+
+        var transmissor = _transmissoresEpec.FirstOrDefault()
+            ?? throw new ErroNaoRecuperavelException("Nenhum transmissor EPEC registrado.");
+        doc.Status = StatusDocumento.CONTINGENCIA;
+        doc.ProximaTentativaEm = DateTimeOffset.UtcNow + TimeSpan.FromSeconds(30);
+
+        try
+        {
+            using var x509 = await _certStore.CarregarAsync(cert, ct);
+            var resultado = await transmissor.TransmitirAsync(doc, tenant, x509, (Ambiente)doc.Ambiente, ct);
+
+            if (resultado.Status == ResultadoEventoStatus.Processado && resultado.Protocolo is not null)
+            {
+                doc.EpecProtocolo = resultado.Protocolo;
+                doc.XmlRetornoSefaz = resultado.XmlRetorno;
+                doc.MotivoStatus = $"EPEC autorizado ({resultado.Protocolo}); NF-e completa será transmitida em seguida.";
+                doc.AtualizadoEm = DateTimeOffset.UtcNow;
+                await _db.SaveChangesAsync(ct);
+                _metricas.ContingenciaAcionada("epec");
+                return true;
+            }
+
+            doc.Status = StatusDocumento.CONTINGENCIA;
+            doc.ProximaTentativaEm = DateTimeOffset.UtcNow + ProximoBackoff(doc.Tentativas + 1);
+            doc.MotivoStatus = resultado.Status == ResultadoEventoStatus.Rejeitado
+                ? $"EPEC rejeitado: {resultado.Motivo}"
+                : $"Erro de transmissão do EPEC: {resultado.Motivo}";
+            doc.XmlRetornoSefaz = resultado.XmlRetorno;
+            doc.AtualizadoEm = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return false;
+        }
+        catch (ErroNaoRecuperavelException ex)
+        {
+            _logger.LogError(ex, "Erro não recuperável no EPEC do documento {Id}.", doc.Id);
+            await MarcarErroInternoAsync(doc, ex.Message, ct);
+            return false;
+        }
+        catch (NotImplementedException ex)
+        {
+            await MarcarErroInternoAsync(doc, ex.Message, ct);
+            return false;
+        }
+        catch (Exception ex)
+        {
+            doc.Status = StatusDocumento.CONTINGENCIA;
+            doc.ProximaTentativaEm = DateTimeOffset.UtcNow + ProximoBackoff(doc.Tentativas + 1);
+            doc.MotivoStatus = $"Erro de transmissão do EPEC: {ex.GetType().Name}: {ex.Message}";
+            doc.AtualizadoEm = DateTimeOffset.UtcNow;
+            await _db.SaveChangesAsync(ct);
+            return false;
+        }
+    }
 
     private async Task MarcarErroInternoAsync(DocumentoFiscal doc, string motivo, CancellationToken ct)
     {
@@ -258,6 +406,22 @@ public class ProcessarDocumentoJob
         doc.Tentativas += 1;
         doc.AtualizadoEm = DateTimeOffset.UtcNow;
         doc.ProximaTentativaEm = null;
+        await _docRepo.AtualizarAsync(doc, ct);
+        await _db.SaveChangesAsync(ct);
+    }
+
+    /// <summary>Terminal por regra de negócio (ex.: janela SVC) — webhook de falha.</summary>
+    private async Task MarcarErroTerminalAsync(DocumentoFiscal doc, string motivo, CancellationToken ct)
+    {
+        doc.Status = StatusDocumento.FALHA_EMISSAO;
+        doc.MotivoStatus = motivo;
+        doc.Tentativas += 1;
+        doc.AtualizadoEm = DateTimeOffset.UtcNow;
+        doc.ProximaTentativaEm = null;
+
+        var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Id == doc.TenantId, ct);
+        if (tenant is not null) EnfileirarWebhook(doc, tenant);
+
         await _docRepo.AtualizarAsync(doc, ct);
         await _db.SaveChangesAsync(ct);
     }

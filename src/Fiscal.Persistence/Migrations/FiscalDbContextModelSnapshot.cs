@@ -244,6 +244,11 @@ namespace Fiscal.Persistence.Migrations
                         .HasColumnType("smallint")
                         .HasColumnName("modelo");
 
+                    b.Property<string>("EpecProtocolo")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("epec_protocolo");
+
                     b.Property<string>("ModoContingencia")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
@@ -282,8 +287,8 @@ namespace Fiscal.Persistence.Migrations
 
                     b.Property<string>("Status")
                         .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
                         .HasColumnName("status");
 
                     b.Property<Guid>("TenantId")
@@ -372,8 +377,8 @@ namespace Fiscal.Persistence.Migrations
 
                     b.Property<string>("Status")
                         .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
                         .HasColumnName("status");
 
                     b.Property<Guid>("TenantId")
@@ -438,6 +443,10 @@ namespace Fiscal.Persistence.Migrations
                         .HasColumnType("uuid")
                         .HasColumnName("nota_recebida_id");
 
+                    b.Property<DateTimeOffset?>("ProximaTentativaEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("proxima_tentativa_em");
+
                     b.Property<string>("Protocolo")
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
@@ -445,8 +454,8 @@ namespace Fiscal.Persistence.Migrations
 
                     b.Property<string>("Status")
                         .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
                         .HasColumnName("status");
 
                     b.Property<Guid>("TenantId")
@@ -653,6 +662,10 @@ namespace Fiscal.Persistence.Migrations
                         .HasColumnType("text")
                         .HasColumnName("webhook_secret");
 
+                    b.Property<byte[]>("WebhookSecretCriptografado")
+                        .HasColumnType("bytea")
+                        .HasColumnName("webhook_secret_criptografado");
+
                     b.Property<string>("WebhookUrl")
                         .HasColumnType("text")
                         .HasColumnName("webhook_url");
@@ -661,6 +674,11 @@ namespace Fiscal.Persistence.Migrations
                         .HasMaxLength(20)
                         .HasColumnType("character varying(20)")
                         .HasColumnName("inscricao_estadual");
+
+                    b.Property<string>("InscricaoMunicipal")
+                        .HasMaxLength(20)
+                        .HasColumnType("character varying(20)")
+                        .HasColumnName("inscricao_municipal");
 
                     b.Property<string>("Logradouro")
                         .HasMaxLength(100)
@@ -730,8 +748,8 @@ namespace Fiscal.Persistence.Migrations
 
                     b.Property<string>("Status")
                         .IsRequired()
-                        .HasMaxLength(20)
-                        .HasColumnType("character varying(20)")
+                        .HasMaxLength(30)
+                        .HasColumnType("character varying(30)")
                         .HasColumnName("status");
 
                     b.Property<Guid>("TenantId")

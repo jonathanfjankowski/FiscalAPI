@@ -6,12 +6,15 @@
 
 > **API open source para emissão de NF-e, NFC-e e NFS-e (padrão Nacional) — multi-tenant, assíncrona, .NET 10.**
 
-> 🚧 **PROJETO EM DESENVOLVIMENTO — ALPHA (`1.3.0-alpha`).**
+> 🚧 **PROJETO EM DESENVOLVIMENTO — ALPHA (`1.12.2-alpha`).**
 > Está funcional ponta a ponta em **modo sandbox** e a emissão real de
-> NF-e/NFC-e está implementada, mas **ainda não passou por homologação
-> contra a SEFAZ** (exige certificado A1) e o contrato de API **pode mudar**
-> até o 1.0. **Não use em produção.** Acompanhe o estado em
-> [docs/status-atual.md](docs/status-atual.md).
+> NF-e/NFC-e está implementada. A **bateria de homologação contra a SEFAZ
+> começou** (SEFAZ-PR, A1 real): status-serviço OK (`cStat 107`), emissão
+> transmitindo e sendo assinada de verdade — ainda **sem autorização
+> ponta a ponta** (aguarda IE real do emitente) e o contrato de API **pode
+> mudar** até o 1.0. **Não use em produção.** Roteiro e rejeições vistas em
+> [docs/guia-primeira-emissao.md (seção 9)](docs/guia-primeira-emissao.md);
+> estado geral em [docs/status-atual.md](docs/status-atual.md).
 
 ## O que é
 
@@ -31,8 +34,8 @@ numeração isolados.
 - **NF-e (55)** — emissão real via Unimake.DFe, fluxo assíncrono em duas
   fases (lote → recibo → consulta), layout 4.00 (ICMS CST 00/40/41/50).
 - **NFC-e (65)** — emissão síncrona com CSC/IdCSC do tenant (cifrado) e QR code.
-- **NFS-e Nacional (DPS)** — envelope REST completo com sandbox; transmissão
-  real é a próxima sprint.
+- **NFS-e Nacional (DPS)** — envelope REST completo; transmissão real
+  implementada (sandbox via `EmissorMock`).
 - **Eventos** — cancelamento, carta de correção e inutilização transmitidos
   à SEFAZ com retry próprio.
 - **Contingência SVC-AN/SVC-RS** — em timeout/rede, consulta o protocolo e
@@ -50,8 +53,9 @@ numeração isolados.
   [docs/revisao-seguranca.md](docs/revisao-seguranca.md).
 
 > 📘 **Integrando um ERP?** Comece pelo
-> [Guia de Integração](docs/integracao-api.md) — autenticação, fluxo de
-> emissão e referência completa de endpoints e DTOs.
+> [Guia da primeira emissão](docs/guia-primeira-emissao.md) — onboarding
+> passo a passo do zero à nota autorizada com PDF, em modo sandbox — e use a
+> [Referência da API](docs/integracao-api.md) para todos os endpoints e DTOs.
 
 ## Início rápido (Docker, modo sandbox — sem certificado)
 
@@ -87,7 +91,7 @@ curl http://localhost:8080/health/ready
 ```bash
 dotnet restore
 dotnet build
-dotnet test              # 75 testes (unitários + integração)
+dotnet test              # 224 testes (128 unitários + 96 integração)
 dotnet run --project src/Fiscal.Api      # API em http://localhost:5039
 dotnet run --project src/Fiscal.Worker   # host Hangfire (jobs)
 ```
@@ -197,7 +201,9 @@ startup via seed (`ADMIN_EMAIL`/`ADMIN_PASSWORD`, segredo em
 | `POST` | `/v1/admin/auth/login` | — | Login do operador do painel (`{email, senha}` → `{token, expiraEm}`) |
 | `GET/POST/PUT/DELETE` | `/v1/admin/tenants` | Admin JWT | CRUD de tenants (DELETE = desativação soft) |
 | `GET/POST/DELETE` | `/v1/admin/tenants/{tenantId}/api-keys` | Admin JWT | Gera/lista/revoga API keys de um tenant (chave em claro 1x) |
-| `GET/POST` | `/v1/admin/tenants/{tenantId}/certificados` | Admin JWT | Lista/upload de certificado em nome do tenant |
+| `GET/POST` | `/v1/admin/tenants/{tenantId}/certificados` | Admin JWT | Lista/upload de certificado em nome do tenant (upload rotaciona: 1 ativo/tenant) |
+| `DELETE` | `/v1/admin/tenants/{tenantId}/certificados/{id}` | Admin JWT | Desativa certificado (soft-delete, idempotente) |
+| `POST` | `/v1/admin/tenants/{tenantId}/certificados/{id}/ativar` | Admin JWT | Reativa um certificado (desativa os demais) |
 | `GET` | `/v1/admin/documentos-fiscais` | Admin JWT | Listagem cross-tenant (`tenantId, status, modelo, de, ate, page, pageSize`) |
 | `GET` | `/v1/admin/documentos-fiscais/{id}` | Admin JWT | Detalhe completo (XMLs, protocolo, tentativas) |
 | `POST` | `/v1/admin/documentos-fiscais/{id}/cancelamento` | Admin JWT | Cancela via painel (mesmas regras do endpoint de tenant) |
@@ -206,14 +212,16 @@ startup via seed (`ADMIN_EMAIL`/`ADMIN_PASSWORD`, segredo em
 | `POST` | `/v1/api-keys` | ApiKey | Cria nova chave (retorna em texto puro uma vez) |
 | `GET` | `/v1/api-keys` | ApiKey | Lista metadados |
 | `DELETE` | `/v1/api-keys/{id}` | ApiKey | Revoga chave |
-| `POST` | `/v1/certificados` | ApiKey | Upload de `.pfx` (multipart) — cifra com envelope AES-GCM |
+| `POST` | `/v1/certificados` | ApiKey | Upload de `.pfx` (multipart) — cifra com envelope AES-GCM; desativa o certificado anterior (rotação) |
+| `DELETE` | `/v1/certificados/{id}` | ApiKey | Desativa certificado (soft-delete, idempotente) |
+| `POST` | `/v1/certificados/{id}/ativar` | ApiKey | Reativa um certificado (desativa os demais) |
 | `GET` | `/v1/status-servico` | ApiKey | Status do serviço SEFAZ da UF do tenant (`?modelo=55|65&ambiente=`) — cache 60 s |
 | `GET` | `/v1/tenants/perfil` | ApiKey | Perfil fiscal do emitente (dados usados na NF-e/NFC-e) |
 | `PUT` | `/v1/tenants/perfil` | ApiKey | Atualiza emitente (IE + endereço) e CSC/IdCSC da NFC-e (cifrado) |
 | `GET` | `/v1/certificados` | ApiKey | Lista metadados |
 | `POST` | `/v1/documentos-fiscais/nfe` | ApiKey | Emite NF-e (assíncrono, `202 Accepted` com `{id, status, links}`) |
 | `POST` | `/v1/documentos-fiscais/nfce` | ApiKey | Emite NFC-e (assíncrono, `202 Accepted`) |
-| `POST` | `/v1/documentos-fiscais/nfse` | ApiKey | Emite NFS-e Nacional/DPS (assíncrono; sandbox via mock; transmissão real na próxima sprint NFS-e) |
+| `POST` | `/v1/documentos-fiscais/nfse` | ApiKey | Emite NFS-e Nacional/DPS (assíncrono; sandbox via mock; transmissão real implementada — DPS) |
 | `GET` | `/v1/documentos-fiscais/{id}` | ApiKey | Consulta status e metadados |
 | `GET` | `/v1/documentos-fiscais/{id}/pdf` | ApiKey | DANFE/DANFCe (PDF binário; `?formato=base64` para JSON) — só AUTORIZADA/CANCELADA |
 | `POST` | `/v1/documentos-fiscais/{id}/cancelamento` | ApiKey | Cancela NF-e/NFC-e autorizada (até janela da SEFAZ) |
@@ -264,8 +272,9 @@ transmissão** (timeout/rede) dispara, na ordem:
    reemite via **SVC-AN/SVC-RS** (tpEmis 6/7) — a Unimake roteia ao
    webservice certo.
 
-EPEC (nota pré-notificada offline) e NFC-e offline (tpEmis 9) ficam para
-sprint futura.
+NFC-e offline (tpEmis 9, `contingenciaOffline: true`) e EPEC
+(`Fiscal:Contingencia:Modo=EPEC`) implementados; o QR modo 2 embutido no
+XML do DANFCe offline ainda depende de comportamento interno da Unimake.
 
 ## Webhooks (outbox + HMAC)
 
@@ -315,17 +324,21 @@ para `FALHA` (terminal, visível na tabela `outbox_webhooks`).
 - 🚧 **Projeto em alpha** — sem homologação real contra SEFAZ ainda; o
   contrato pode mudar até o 1.0.
 - **Certificado A1 apenas** — A3/HSM fora de escopo.
-- **Mapper da NF-e cobre um subconjunto do layout 4.00** (emissão real, não
-  sandbox): ICMS com CST 00/40/41/50, um grupo de imposto por item,
-  unidade fixa `UN`, sem IPI/PIS/COFINS/CSOSN, sem transporte/volumes e sem
-  desconto/frete/seguro. Defaults adotados quando o payload não traz:
-  `natOp` (`naturezaOperacao` opcional no payload, default `"VENDA"`),
-  `tpNF` saída, `finNFe` normal, `indFinal` consumidor final, `indPres`
-  presencial (internet quando a UF do destinatário difere), `modBC` 3,
-  `transp` sem ocorrência. CST 60, CSOSN e os demais grupos entram em
-  sprint futura — hoje falham alto (`ERRO_INTERNO` com mensagem explícita)
-  em vez de transmitir errado. A evolução disso está planejada em
-  [docs/plano-evolucao-contrato-v2.md](docs/plano-evolucao-contrato-v2.md).
+- **Mapper da NF-e cobre ICMS completo + grupos federais + item rico**
+  (emissão real, não sandbox): CST `00–90` e **CSOSN do Simples Nacional
+  `101–900`** (ST, FCP e DIFAL), **IPI/PIS/COFINS**, GTIN, CEST, unidade,
+  desconto por item e frete/seguro/outras — via grupo `impostosV2`; a lista
+  plana legada `impostos[]` segue suportada (CST 00/40/41/50), além de
+  NF-ref/devolução (F4) e reforma IBS/CBS/IS (F5, NT 2025.x). Fica para
+  depois: transporte/volumes (backlog v2).
+  Defaults adotados quando o payload não traz: `natOp` (`naturezaOperacao`
+  opcional no payload, default `"VENDA"`), `tpNF` saída, `finNFe` normal,
+  `indFinal` consumidor final, `indPres` presencial (internet quando a UF do
+  destinatário difere), `modBC` 3, `transp` sem ocorrência. Combinações fora
+  do contrato falham alto (`ERRO_INTERNO` com mensagem explícita) em vez de
+  transmitir errado. A evolução está planejada em
+  [docs/plano-evolucao-contrato-v2.md](docs/plano-evolucao-contrato-v2.md)
+  (F1 concluída na 1.4.0-alpha).
 - **NF-e (modelo 55) é assíncrona em duas fases**: lote via `NFeAutorizacao`
   → recibo persistido (`recibo_lote`) → consulta via `NFeRetAutorizacao`;
   "lote em processamento" (cStat 105) reconsulta dentro do fluxo de
@@ -339,16 +352,19 @@ para `FALHA` (terminal, visível na tabela `outbox_webhooks`).
   estadual + endereço) e falha alto sem isso — configure via
   `PUT /v1/tenants/perfil`. Em dev/sandbox, `MODO_SANDBOX=true` (EmissorMock)
   dispensa certificado, CSC e perfil.
-- **NFS-e (padrão Nacional/DPS)**: envelope completo (rota, numeração
-  interna, fila, sandbox, PDF simplificado, cancelamento 409 com orientação
-  de substituição). A **transmissão DPS real** à SEFAZ Nacional é a próxima
-  sprint (fora de sandbox falha alto).
+- **NFS-e (padrão Nacional/DPS)**: transmissão DPS real implementada
+  (`POST /nfse/dps`, layout 1.01 síncrono) + **substituição**
+  (`POST {id}/substituicao`); a rota legada (`POST /nfse`) segue só para
+  sandbox. A bateria de homologação exige certificado A1 e **credenciamento
+  do prestador** na SEFAZ Nacional.
 - **Distribuição DFe sincroniza por NSU** a cada 60 s no Worker; em produção
   exige certificado A1; em sandbox a consulta responde "sem documentos" (mock).
-- **PDF (DANFE/DANFCe/DANFSe)** em layout **simplificado** — sem código de
-  barras/QR do leiaute oficial de 20 campos (evolução no plano v2).
-- **Webhooks** sem página de reenvio manual na outbox (consultável via
-  banco: tabela `outbox_webhooks`).
+- **PDF (DANFE/DANFCe/DANFSe)** em leiaute **simplificado** (com barcode
+  CODE-128 da chave e QR do DANFCe extraído do XML) — implementado com
+  canhoto, quadro de cálculo do imposto, fatura, transportador/volumes e
+  dados adicionais (F6).
+- **Webhooks**: reenvio manual via API (`POST /v1/webhooks/{id}/reenviar`);
+  página no painel segue como evolução.
 - **Em homologação real** você precisa de um certificado A1 válido (a SEFAZ
   aceita o mesmo certificado de produção; não há certificado "de teste").
 
@@ -358,7 +374,7 @@ para `FALHA` (terminal, visível na tabela `outbox_webhooks`).
 dotnet test
 ```
 
-75 testes (42 unitários no `Fiscal.Core.Tests`, 33 de integração no
+224 testes (128 unitários no `Fiscal.Core.Tests`, 96 de integração no
 `Fiscal.Api.Tests`), incluindo segurança (PBKDF2, envelope AES-GCM, API
 keys, upload de certificado), contingência, distribuição DFe/manifestação e
 webhooks. Classes de integração rodam serializadas (`[Collection]`) sobre o
@@ -366,13 +382,23 @@ mesmo SQLite compartilhado.
 
 ### Checklist de homologação real (fora do CI)
 
-A emissão real fala com a SEFAZ e exige recursos que o pipeline não tem:
+A emissão real fala com a SEFAZ e exige recursos que o pipeline não tem.
+Roteiro detalhado e rejeições já encontradas:
+[docs/guia-primeira-emissao.md, seção 9](docs/guia-primeira-emissao.md).
 
 1. Certificado A1 válido do emitente (upload em `POST /v1/certificados`).
-2. `PUT /v1/tenants/perfil` com IE e endereço do emitente (e CSC/IdCSC para NFC-e).
-3. `Fiscal:ModoSandbox=false` no **Worker** (quem executa o job) e API key do ambiente correspondente.
-4. Emitir em homologação (`ambiente: "homologacao"`), conferir `motivoStatus`,
+2. **IE real do emitente** em `PUT /v1/tenants/perfil` — a SEFAZ valida IE
+   mesmo em homologação (PR rejeita com `209` IE de teste); CSC/IdCSC para NFC-e.
+3. `MODO_SANDBOX=false` na **API e no Worker** (`MODO_SANDBOX=false docker compose ... up`)
+   e API key do ambiente correspondente.
+4. Smoke: `GET /v1/status-servico?modelo=55&ambiente=homologacao` → `cStat 107`.
+5. Emitir em homologação (`ambiente: "homologacao"`), conferir `motivoStatus`,
    `chaveAcesso` e XMLs (`xmlAssinado`/`xmlRetornoSefaz`) no `GET /v1/documentos-fiscais/{id}`.
+
+Estado da bateria (2026-09-17, SEFAZ-PR, A1 real): status-serviço `cStat 107`;
+NF-e assinada e transmitida com sucesso; pendente autorização ponta a ponta
+(aguardando IE real). Rejeição `452` de lote unitário assíncrono já corrigida
+(`indSinc=1` sempre).
 
 ## Operações (backup / DR / go-live)
 
@@ -390,7 +416,8 @@ go-live estão em **[docs/backup-dr.md](docs/backup-dr.md)**:
 
 | Doc | Conteúdo |
 |---|---|
-| [docs/integracao-api.md](docs/integracao-api.md) | **Guia de integração** — autenticação, fluxo, endpoints, DTOs |
+| [docs/guia-primeira-emissao.md](docs/guia-primeira-emissao.md) | **Guia da primeira emissão** — onboarding do zero à nota + PDF em sandbox |
+| [docs/integracao-api.md](docs/integracao-api.md) | **Referência da API** — autenticação, fluxo, endpoints, DTOs |
 | [docs/status-atual.md](docs/status-atual.md) | **Status do projeto** — o que está pronto e o que falta |
 | [docs/arquitetura.md](docs/arquitetura.md) | Como funciona por dentro |
 | [docs/revisao-seguranca.md](docs/revisao-seguranca.md) | Validação de segurança |
@@ -407,4 +434,4 @@ go-live estão em **[docs/backup-dr.md](docs/backup-dr.md)**:
 
 ## Licença
 
-MIT (sujeito à confirmação da licença do `Unimake.DFe`).
+MIT. Licença da dependência `Unimake.DFe` confirmada como MIT.

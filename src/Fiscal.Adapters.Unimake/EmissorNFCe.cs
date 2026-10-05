@@ -28,6 +28,7 @@ public class EmissorNFCe : IEmissorFiscal
     private readonly IConsultaProtocolo _consultaProtocolo;
     private readonly bool _contingenciaHabilitada;
     private readonly string _modoContingencia;
+    private readonly MapperEnviNFe.RespTecDados? _respTec;
 
     public EmissorNFCe(ICertificadoStore cscStore, IConsultaProtocolo consultaProtocolo, IConfiguration configuration)
     {
@@ -35,6 +36,7 @@ public class EmissorNFCe : IEmissorFiscal
         _consultaProtocolo = consultaProtocolo;
         _contingenciaHabilitada = configuration.GetValue("Fiscal:Contingencia:Habilitada", false);
         _modoContingencia = configuration.GetValue("Fiscal:Contingencia:Modo", "SVCAN")!;
+        _respTec = EmissorNFe.LerRespTec(configuration);
     }
 
     public Task<ResultadoEmissao> EmitirAsync(
@@ -63,7 +65,7 @@ public class EmissorNFCe : IEmissorFiscal
         X509Certificate2 certificado, Ambiente ambiente,
         Configuracao config, CancellationToken ct)
     {
-        var envi = MapperEnviNFe.Criar(doc, tenant, request, ambiente);
+        var envi = MapperEnviNFe.Criar(doc, tenant, request, ambiente, _respTec);
         var xmlGerado = envi.GerarXML().OuterXml;
         var chaveOriginal = envi.NFe[0].InfNFeField.Chave;
 
@@ -115,10 +117,15 @@ public class EmissorNFCe : IEmissorFiscal
                     var consultado = await _consultaProtocolo.ConsultarAsync(tenant, 65, chaveOriginal, ambiente, certificado, ct);
                     if (consultado is not null)
                     {
+                        // Autorizada sem protNFe no retorno: reconstrói o nfeProc
+                        // (XML assinado salvo antes + protNFe da consulta) — sem
+                        // isso o DANFCe sai sem QR e o consumidor fica sem XML.
+                        var nfeProc = MontadorNfeProc.Montar(doc.XmlAssinado, consultado.XmlProtNFe);
                         return new ResultadoEmissao(
                             ResultadoEmissaoStatus.Autorizada,
                             consultado.ChNFe, consultado.NProt,
-                            XmlAssinado: null, XmlRetornoSefaz: null,
+                            XmlAssinado: doc.XmlAssinado,
+                            XmlRetornoSefaz: nfeProc ?? consultado.XmlProtNFe,
                             Motivo: null,
                             XmlGerado: xmlGerado);
                     }

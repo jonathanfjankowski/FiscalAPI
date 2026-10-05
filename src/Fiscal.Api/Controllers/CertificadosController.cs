@@ -4,6 +4,7 @@ using Fiscal.Core.Interfaces;
 using Fiscal.Persistence;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 
 namespace Fiscal.Api.Controllers;
 
@@ -59,6 +60,12 @@ public class CertificadosController : ControllerBase
         }
 
         var tenantId = HttpContext.GetTenantId();
+        var anteriores = await _db.Certificados
+            .Where(c => c.TenantId == tenantId && c.Ativo)
+            .ToListAsync(ct);
+        foreach (var anterior in anteriores)
+            anterior.Ativo = false;
+
         var cert = new Certificado
         {
             TenantId = tenantId,
@@ -80,6 +87,17 @@ public class CertificadosController : ControllerBase
             IpOrigem = HttpContext.Connection.RemoteIpAddress,
             Detalhe = $"{{\"thumbprint\":\"{envelope.Thumbprint}\",\"validoAte\":\"{envelope.ValidoAte:O}\"}}"
         }, ct);
+        if (anteriores.Count > 0)
+        {
+            await _auditoria.RegistrarAsync(new Auditoria
+            {
+                TenantId = tenantId,
+                Acao = "CERTIFICADO_SUBSTITUIDO",
+                RecursoId = cert.Id,
+                IpOrigem = HttpContext.Connection.RemoteIpAddress,
+                Detalhe = $"{{\"thumbprintsAnteriores\":[{string.Join(",", anteriores.Select(a => $"\"{a.Thumbprint}\""))}],\"thumbprintNovo\":\"{envelope.Thumbprint}\"}}"
+            }, ct);
+        }
         // BUG corrigido (pego pelos testes de segurança): sem SaveChanges o
         // certificado "criado" nunca chegava ao banco.
         await _db.SaveChangesAsync(ct);
@@ -102,5 +120,67 @@ public class CertificadosController : ControllerBase
         var certs = await _repo.ListarPorTenantAsync(tenantId, ct);
         var resp = certs.Select(c => new CertificadoResponse(c.Id, c.Thumbprint, c.ValidoAte, c.Ativo, c.CriadoEm));
         return Ok(resp);
+    }
+
+    /// <summary>
+    /// Desativa o certificado (soft-delete). O histórico é mantido; a emissão
+    /// fora do sandbox sem nenhum certificado ativo falha no processamento.
+    /// </summary>
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Desativar(Guid id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        var cert = await _repo.ObterPorIdAsync(id, tenantId, ct);
+        if (cert is null) return NotFound("Certificado não encontrado.");
+
+        var jaInativo = !cert.Ativo;
+        cert.Ativo = false;
+        await _repo.AtualizarAsync(cert, ct);
+        if (!jaInativo)
+        {
+            await _auditoria.RegistrarAsync(new Auditoria
+            {
+                TenantId = tenantId,
+                Acao = "CERTIFICADO_REVOGADO",
+                RecursoId = cert.Id,
+                IpOrigem = HttpContext.Connection.RemoteIpAddress,
+                Detalhe = $"{{\"thumbprint\":\"{cert.Thumbprint}\"}}"
+            }, ct);
+        }
+        await _db.SaveChangesAsync(ct);
+        return NoContent();
+    }
+
+    /// <summary>
+    /// Reativa este certificado e desativa os demais (volta atrás numa rotação).
+    /// </summary>
+    [HttpPost("{id:guid}/ativar")]
+    public async Task<IActionResult> Ativar(Guid id, CancellationToken ct)
+    {
+        var tenantId = HttpContext.GetTenantId();
+        var cert = await _repo.ObterPorIdAsync(id, tenantId, ct);
+        if (cert is null) return NotFound("Certificado não encontrado.");
+
+        if (!cert.Ativo)
+        {
+            var outros = await _db.Certificados
+                .Where(c => c.TenantId == tenantId && c.Ativo)
+                .ToListAsync(ct);
+            foreach (var outro in outros)
+                outro.Ativo = false;
+            cert.Ativo = true;
+            await _repo.AtualizarAsync(cert, ct);
+
+            await _auditoria.RegistrarAsync(new Auditoria
+            {
+                TenantId = tenantId,
+                Acao = "CERTIFICADO_ATIVADO",
+                RecursoId = cert.Id,
+                IpOrigem = HttpContext.Connection.RemoteIpAddress,
+                Detalhe = $"{{\"thumbprint\":\"{cert.Thumbprint}\"}}"
+            }, ct);
+            await _db.SaveChangesAsync(ct);
+        }
+        return Ok(new CertificadoResponse(cert.Id, cert.Thumbprint, cert.ValidoAte, cert.Ativo, cert.CriadoEm));
     }
 }

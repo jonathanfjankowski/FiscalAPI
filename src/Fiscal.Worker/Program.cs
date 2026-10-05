@@ -1,5 +1,6 @@
 using Fiscal.Adapters.Unimake;
 using Fiscal.Core.Interfaces;
+using Fiscal.Core.Services;
 using Fiscal.Persistence;
 using Fiscal.Persistence.Criptografia;
 using Fiscal.Persistence.Repositories;
@@ -8,7 +9,10 @@ using Fiscal.Worker.Jobs;
 using Fiscal.Worker.Delivery;
 using Hangfire;
 using Hangfire.PostgreSql;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.EntityFrameworkCore;
+using OpenTelemetry.Metrics;
+using OpenTelemetry.Resources;
 using Serilog;
 
 var builder = Host.CreateApplicationBuilder(args);
@@ -23,6 +27,21 @@ var connStr = builder.Configuration.GetConnectionString("Postgres")
 builder.Services.AddDbContext<FiscalDbContext>(opt => opt.UseNpgsql(connStr));
 
 builder.Services.AddSingleton<ICertificadoStore, EnvelopeEncryptionService>();
+builder.Services.AddSingleton<MetricasFiscais>();
+
+// --- OpenTelemetry (métricas de negócio) ---
+// Worker não tem endpoint HTTP: as métricas saem por OTLP quando
+// Fiscal:Observabilidade:OtlpEndpoint está configurado; sem ele, são no-ops.
+var builderOtel = builder.Services.AddOpenTelemetry()
+    .ConfigureResource(r => r.AddService("FiscalAPI.Worker", serviceVersion: MetricasFiscais.VersaoServico))
+    .WithMetrics(m =>
+    {
+        m.AddRuntimeInstrumentation();
+        m.AddMeter(MetricasFiscais.NomeMedidor);
+        var otlp = builder.Configuration["Fiscal:Observabilidade:OtlpEndpoint"];
+        if (!string.IsNullOrWhiteSpace(otlp))
+            m.AddOtlpExporter(o => o.Endpoint = new Uri(otlp));
+    });
 builder.Services.AddScoped<IRepositorioDocumentoFiscal, RepositorioDocumentoFiscal>();
 builder.Services.AddScoped<IRepositorioCertificado, RepositorioCertificado>();
 builder.Services.AddScoped<IRepositorioTenant, RepositorioTenant>();
@@ -33,8 +52,9 @@ builder.Services.AddScoped<IRepositorioManifestacao, RepositorioManifestacao>();
 builder.Services.AddScoped<IRepositorioNsu, RepositorioNsu>();
 
 // ModoSandbox=true no Worker também registra EmissorMock (caso queira rodar
-// ponta-a-ponta sem certificado real). Default: false (produção).
-var modoSandbox = builder.Configuration.GetValue("Fiscal:ModoSandbox", false);
+// ponta-a-ponta sem certificado real). Default: true (falha segura, igual à
+// API) — produção sobe com Fiscal__ModoSandbox=false explícito.
+var modoSandbox = builder.Configuration.GetValue("Fiscal:ModoSandbox", true);
 if (modoSandbox)
 {
     builder.Services.AddSingleton<IEmissorFiscal, EmissorMock>();
@@ -49,6 +69,7 @@ if (modoSandbox)
     builder.Services.AddSingleton<ITransmissorEventoFiscal, TransmissorEventoMock>();
 }
 builder.Services.AddSingleton<ITransmissorEventoFiscal, TransmissorEventoUnimake>();
+builder.Services.AddSingleton<ITransmissorEpec, TransmissorEpecUnimake>();
 
 // Distribuição DFe + manifestação: mesma regra do emissor (sandbox → mock).
 if (modoSandbox)
@@ -101,42 +122,47 @@ builder.Services.AddHangfireServer();
 
 var host = builder.Build();
 
+// Jobs recorrentes via IRecurringJobManager (DI) — a API estática
+// (RecurringJob.AddOrUpdate) exige JobStorage.Current, que só é inicializado
+// quando o HangfireServer (hosted service) sobe; aqui o host ainda não rodou.
+var recorrentes = host.Services.GetRequiredService<IRecurringJobManager>();
+
 // Job recorrente: varre CONTINGENCIA e reenfileira (a cada 30s).
-RecurringJob.AddOrUpdate<VarrerContingenciaJob>(
+recorrentes.AddOrUpdate<VarrerContingenciaJob>(
     "varrer-contingencia",
     j => j.ExecutarAsync(CancellationToken.None),
-    "*/30 * * * * *");
+    "15,45 * * * * *");
 
 // Job recorrente: reenfileira eventos (cancelamento/CC-e/inutilização) cujo
 // retry de transmissão venceu (a cada 30s).
-RecurringJob.AddOrUpdate<VarrerEventosJob>(
+recorrentes.AddOrUpdate<VarrerEventosJob>(
     "varrer-eventos",
     j => j.ExecutarAsync(CancellationToken.None),
-    "*/30 * * * * *");
+    "15,45 * * * * *");
 
 // Job recorrente: entrega webhooks da outbox cujo retry venceu (a cada 60s).
-RecurringJob.AddOrUpdate<VarrerWebhooksJob>(
+recorrentes.AddOrUpdate<VarrerWebhooksJob>(
     "varrer-webhooks",
     j => j.ExecutarAsync(CancellationToken.None),
-    "*/60 * * * * *");
+    "* * * * *");
 
 // Job recorrente: distribuição DFe (NSU) por tenant/ambiente (a cada 60s).
-RecurringJob.AddOrUpdate<SincronizarDistribuicaoDFeJob>(
+recorrentes.AddOrUpdate<SincronizarDistribuicaoDFeJob>(
     "sincronizar-distribuicao-dfe",
     j => j.ExecutarAsync(CancellationToken.None),
-    "*/60 * * * * *");
+    "* * * * *");
 
 // Job recorrente: retry de manifestações pendentes (a cada 30s).
-RecurringJob.AddOrUpdate<VarrerManifestacoesJob>(
+recorrentes.AddOrUpdate<VarrerManifestacoesJob>(
     "varrer-manifestacoes",
     j => j.ExecutarAsync(CancellationToken.None),
-    "*/30 * * * * *");
+    "15,45 * * * * *");
 
 // Job recorrente: alerta de certificados vencendo (diário, 12:00).
-RecurringJob.AddOrUpdate<AlertarCertificadosVencendoJob>(
+recorrentes.AddOrUpdate<AlertarCertificadosVencendoJob>(
     "alertar-certificados-vencendo",
     j => j.ExecutarAsync(CancellationToken.None),
-    "0 0 12 * * *");
+    "1 0 12 * * *");
 
 host.Run();
 

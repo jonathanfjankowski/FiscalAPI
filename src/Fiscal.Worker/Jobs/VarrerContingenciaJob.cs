@@ -29,6 +29,28 @@ public class VarrerContingenciaJob
     public async Task ExecutarAsync(CancellationToken ct)
     {
         var agora = DateTimeOffset.UtcNow;
+
+        // Órfãos: crash entre o claim (PROCESSANDO + lease) e o save final —
+        // voltam a PENDENTE e vão para a fila novamente.
+        var orfaos = await _db.DocumentosFiscais
+            .Where(d => d.Status == StatusDocumento.PROCESSANDO
+                        && d.ProximaTentativaEm != null
+                        && d.ProximaTentativaEm <= agora)
+            .Select(d => d.Id)
+            .Take(100)
+            .ToListAsync(ct);
+        if (orfaos.Count > 0)
+        {
+            _logger.LogWarning("VarrerContingencia: resgatando {Count} documento(s) órfão(s) em PROCESSANDO.", orfaos.Count);
+            await _db.DocumentosFiscais
+                .Where(d => orfaos.Contains(d.Id) && d.Status == StatusDocumento.PROCESSANDO)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(d => d.Status, StatusDocumento.PENDENTE)
+                    .SetProperty(d => d.ProximaTentativaEm, (DateTimeOffset?)null), ct);
+            foreach (var id in orfaos)
+                await _fila.EnfileirarAsync(id, ct);
+        }
+
         var pendentes = await _db.DocumentosFiscais
             .Where(d => d.Status == StatusDocumento.CONTINGENCIA
                         && d.ProximaTentativaEm != null

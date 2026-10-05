@@ -74,7 +74,8 @@ PENDENTE → `ProcessarEventoJob` transmite (`RecepcaoEvento` 110111/110110,
 `InutNFe`) → PROCESSADO (cancelamento → documento `CANCELADA`; CC-e mantém
 AUTORIZADA) / REJEITADO (cancelamento → `ERRO_CANCELAMENTO`) / PENDENTE com
 backoff (`VarrerEventosJob`). Inutilização carrega modelo/série/faixa em
-`dados_evento` (jsonb). NFSe bloqueada (409) — substituição é sprint própria.
+`dados_evento` (jsonb). NFS-e não usa evento — usa substituição de DPS
+(`POST /v1/documentos-fiscais/{id}/substituicao`).
 
 ## 5. Webhooks (outbox + HMAC)
 
@@ -100,7 +101,8 @@ webhook `manifestacao.processada`. Endpoints de listagem/detalhe/`xml-completo`.
 Envelope completo (`POST /v1/documentos-fiscais/nfse`, modelo interno 115 —
 não é código SEFAZ; o DPS não usa modelo), numeração/fila/idempotência/sandbox
 iguais ao resto, PDF simplificado, cancelamento 409 (usa substituição).
-`EmissorNFSe` real (transmissão DPS) é a pendência — falha alto fora de sandbox.
+`EmissorNFSe` real (transmissão DPS) implementado — fora do sandbox exige
+credenciamento do prestador homologado.
 
 ## 8. Jobs (Worker)
 
@@ -152,16 +154,24 @@ manualmente.
 | Chave | Default | Uso |
 |---|---|---|
 | `Certificados:ChaveMestraKEK` | — (obrigatória) | KEK do envelope |
-| `Fiscal:ModoSandbox` | API: true / Worker: false | mock vs transmissão real |
+| `Fiscal:ModoSandbox` | true (API e Worker) | mock vs transmissão real |
 | `Fiscal:Contingencia:Habilitada` | false | troca automática p/ SVC |
 | `Fiscal:Contingencia:Modo` | SVCAN | SVCAN ou SVCRS |
 | `Fiscal:RateLimit:PorMinuto` | 100 | rate limit global por IP |
+| `Fiscal:Redis:ConnectionString` | — | cache + rate limit distribuído |
+| `Fiscal:Cors:Origens` | localhost 5173/4173 | origens CORS (produção: configurar) |
+| `Fiscal:Observabilidade:MetricsAnonimos` | false | `/metrics` sem auth (opt-in) |
+| `Fiscal:Proxies:KnownProxies` | loopback | proxies confiáveis p/ X-Forwarded-For |
+| `Fiscal:Webhooks:PermitirRedesPrivadas` | false | opt-out do guarda SSRF |
+| `Fiscal:RodarMigrations` | dev: true | migrations fora de dev só com flag |
+| `Fiscal:RespTec:Cnpj/Contato/Email/Fone` | — | grupo infRespTec (972 em algumas SEFAZ) |
+| `Certificados:ChaveMestraKEKAnterior` | — | KEK anterior durante rotação |
 | `ADMIN_JWT_SECRET` | — (painel) | ≥ 32 chars |
 
 ## 12. Testes
 
-75 testes (42 unitários em `Fiscal.Core.Tests` — mapper EnviNFe, contingência,
-extrator DFe, assinatura webhook, PDF, validador, mocks; 33 de integração em
+224 testes (128 unitários em `Fiscal.Core.Tests` — mapper EnviNFe, contingência,
+extrator DFe, assinatura webhook, PDF, validador, mocks; 96 de integração em
 `Fiscal.Api.Tests` — emissão ponta a ponta, eventos, webhooks, distribuição +
 manifestação, admin, **segurança** (PBKDF2, envelope AES-GCM, API keys
 criar/usar/revogar, upload de certificado real, idempotency guard)).

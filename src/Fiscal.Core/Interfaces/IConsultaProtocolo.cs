@@ -4,7 +4,14 @@ using Fiscal.Core.Enums;
 
 namespace Fiscal.Core.Interfaces;
 
-public record ProtocoloConsultado(int CStat, string? XMotivo, string? NProt, string? ChNFe);
+/// <summary>
+/// ProtNFe recuperado na consulta (elemento assinado da resposta CONSIT) —
+/// permite montar o nfeProc de distribuição quando a autorização é recuperada
+/// sem o retorno completo do lote. Null quando indisponível.
+/// </summary>
+/// <param name="XmlProtNFe">XML do elemento protNFe (com assinatura da SEFAZ).</param>
+public record ProtocoloConsultado(
+    int CStat, string? XMotivo, string? NProt, string? ChNFe, string? XmlProtNFe = null);
 
 /// <summary>
 /// Consulta o protocolo de autorização de uma chave de acesso. Usada quando a

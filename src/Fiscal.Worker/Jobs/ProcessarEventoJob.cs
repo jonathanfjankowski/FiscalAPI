@@ -29,6 +29,10 @@ public class ProcessarEventoJob
         TimeSpan.FromMinutes(10),
     };
 
+    /// <summary>Teto de tentativas (~8h de backoff máx. 10 min): esgotou → ERRO
+    /// (terminal) — nunca retry infinito.</summary>
+    private const int MaxTentativas = 48;
+
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
     private readonly FiscalDbContext _db;
@@ -36,6 +40,7 @@ public class ProcessarEventoJob
     private readonly IRepositorioAuditoria _auditoria;
     private readonly IEnumerable<ITransmissorEventoFiscal> _transmissores;
     private readonly ICertificadoStore _certStore;
+    private readonly MetricasFiscais _metricas;
     private readonly bool _sandbox;
     private readonly ILogger<ProcessarEventoJob> _logger;
 
@@ -45,6 +50,7 @@ public class ProcessarEventoJob
         IRepositorioAuditoria auditoria,
         IEnumerable<ITransmissorEventoFiscal> transmissores,
         ICertificadoStore certStore,
+        MetricasFiscais metricas,
         IConfiguration configuration,
         ILogger<ProcessarEventoJob> logger)
     {
@@ -53,24 +59,36 @@ public class ProcessarEventoJob
         _auditoria = auditoria;
         _transmissores = transmissores;
         _certStore = certStore;
+        _metricas = metricas;
         _sandbox = configuration.GetValue("Fiscal:ModoSandbox", false);
         _logger = logger;
     }
 
     [Hangfire.AutomaticRetry(Attempts = 1)]
+    [Hangfire.DisableConcurrentExecution(timeoutInSeconds: 600)]
     public async Task ExecutarAsync(Guid eventoId, CancellationToken ct)
     {
-        var evento = await _db.EventosFiscais.FirstOrDefaultAsync(e => e.Id == eventoId, ct);
-        if (evento is null)
+        // Claim atômico (mesmo padrão do ProcessarDocumentoJob): assume o evento
+        // apenas se ainda estiver PENDENTE. Se 0 linhas, outra execução já assumiu
+        // ou o evento chegou a status terminal — abortar sem retransmitir.
+        // ProximaTentativaEm vira lease (+15 min): o VarrerEventosJob resgata
+        // órfãos em PROCESSANDO quando ela vence.
+        DateTimeOffset? leaseAte = DateTimeOffset.UtcNow + TimeSpan.FromMinutes(15);
+        var claimado = await _db.EventosFiscais
+            .Where(e => e.Id == eventoId && e.Status == "PENDENTE")
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(e => e.Status, "PROCESSANDO")
+                .SetProperty(e => e.ProximaTentativaEm, leaseAte), ct);
+        if (claimado == 0)
         {
-            _logger.LogWarning("EventoFiscal {Id} não encontrado — descartando job.", eventoId);
+            _logger.LogInformation("EventoFiscal {Id} não está mais PENDENTE — nada a fazer.", eventoId);
             return;
         }
 
-        if (evento.Status is "PROCESSADO" or "REJEITADO" or "ERRO")
+        var evento = await _db.EventosFiscais.FirstOrDefaultAsync(e => e.Id == eventoId, ct);
+        if (evento is null)
         {
-            _logger.LogInformation("EventoFiscal {Id} já em status terminal {Status} — nada a fazer.",
-                evento.Id, evento.Status);
+            _logger.LogWarning("EventoFiscal {Id} não encontrado após claim — descartando job.", eventoId);
             return;
         }
 
@@ -136,7 +154,7 @@ public class ProcessarEventoJob
                 }
                 if (doc is not null && evento.TipoEvento is "CANCELAMENTO" or "CCE")
                 {
-                    EnfileirarWebhook(doc, tenant, evento.TipoEvento == "CANCELAMENTO"
+                    EnfileirarWebhook(doc, evento, tenant, evento.TipoEvento == "CANCELAMENTO"
                         ? Webhooks.EventoCancelado
                         : Webhooks.EventoCartaCorrecao);
                 }
@@ -167,13 +185,31 @@ public class ProcessarEventoJob
                 break;
 
             default:
-                // Erro de transmissão — volta a PENDENTE; VarrerEventosJob reenfileira.
-                evento.Status = "PENDENTE";
-                evento.ProximaTentativaEm = DateTimeOffset.UtcNow + ProximoBackoff(evento.Tentativas);
+                if (evento.Tentativas >= MaxTentativas)
+                {
+                    // Esgotou — terminal; cancelamento rejeitado por esgotamento
+                    // deixa o documento em ERRO_CANCELAMENTO.
+                    evento.Status = "ERRO";
+                    evento.ProximaTentativaEm = null;
+                    if (doc is not null && evento.TipoEvento == "CANCELAMENTO")
+                    {
+                        doc.Status = StatusDocumento.ERRO_CANCELAMENTO;
+                        doc.AtualizadoEm = DateTimeOffset.UtcNow;
+                    }
+                    _logger.LogError("EventoFiscal {Id} esgotou {Max} tentativas de transmissão — ERRO.",
+                        evento.Id, MaxTentativas);
+                }
+                else
+                {
+                    // Erro de transmissão — volta a PENDENTE; VarrerEventosJob reenfileira.
+                    evento.Status = "PENDENTE";
+                    evento.ProximaTentativaEm = DateTimeOffset.UtcNow + ProximoBackoff(evento.Tentativas);
+                }
                 break;
         }
 
         await _db.SaveChangesAsync(ct);
+        _metricas.EventoProcessado(evento.TipoEvento, evento.Status);
         _logger.LogInformation("EventoFiscal {Id} ({Tipo}) processado → {Status} (tentativa {Tentativa})",
             evento.Id, evento.TipoEvento, evento.Status, evento.Tentativas);
     }
@@ -220,7 +256,7 @@ public class ProcessarEventoJob
         texto is null ? "" : texto.Length <= 80 ? texto : texto[..80].Replace("\"", "'");
 
     /// <summary>Outbox de webhook na mesma SaveChanges do resultado do evento.</summary>
-    private void EnfileirarWebhook(DocumentoFiscal doc, Tenant tenant, string tipo)
+    private void EnfileirarWebhook(DocumentoFiscal doc, EventoFiscal evento, Tenant tenant, string tipo)
     {
         if (tenant.WebhookUrl is null) return;
 
@@ -229,7 +265,7 @@ public class ProcessarEventoJob
             TenantId = tenant.Id,
             DocumentoId = doc.Id,
             TipoEvento = tipo,
-            Payload = Webhooks.PayloadPara(doc, tipo, DateTimeOffset.UtcNow),
+            Payload = Webhooks.PayloadEventoPara(doc, evento, tipo, DateTimeOffset.UtcNow),
             Status = "PENDENTE",
             ProximaTentativaEm = DateTimeOffset.UtcNow,
         });

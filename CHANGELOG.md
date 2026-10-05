@@ -1,5 +1,398 @@
 # Changelog
 
+## [Não released]
+
+### Adicionado
+- **Reenvio manual de webhooks** — `GET /v1/webhooks` (lista paginada da outbox
+  do tenant, filtro por status) e `POST /v1/webhooks/{id}/reenviar` (FALHA volta
+  a PENDENTE com ciclo novo de tentativas; PENDENTE tem a tentativa adiantada
+  para agora; ENTREGUE/ENTREGANDO → 409).
+- **NFC-e offline (tpEmis 9)** — `contingenciaOffline: true` no POST de NFC-e
+  marca o documento como OFFLINE: o mapper gera o XML com tpEmis 9 e a
+  transmissão segue pelo fluxo de contingência (janela de 24h — fora dela o
+  documento vai para FALHA_EMISSAO com motivo explícito).
+- **Contingência EPEC (NF-e)** — `Fiscal:Contingencia:Modo=EPEC`: em falha de
+  transmissão o documento é marcado EPEC, o evento prévio 110140 é enviado à
+  SVRS (`ITransmissorEpec`/`TransmissorEpecUnimake`) e, autorizado, o protocolo
+  fica salvo (`documentos_fiscais.epec_protocolo`) — a NF-e completa (tpEmis 4)
+  é transmitida no ciclo seguinte, dentro da janela de 168h.
+- **Backlog v2 §7 (contrato)** — grupo `transporte` (modalidade, transportadora,
+  volumes com lacres), dados de cartão no pagamento (`tipoIntegracao`, `bandeira`,
+  `autorizacao`, `cnpjCredenciadora` → grupo card/tpIntegra/tBand/cAut),
+  `impostosV2.icms` CST 10 com partilha (`percentualBcOperacao`/`ufSt` → ICMSPart)
+  e importação (`dis[]` → grupo DI com adições; `impostosV2.ii` → grupo II, somado
+  ao vII dos totais).
+- **DANFE leiaute completo (F6)** — canhoto de recebimento, quadro "Cálculo do
+  Imposto" (12 campos), DEST/REM completo (IE/endereço/bairro/município/UF/CEP/IBGE),
+  Fatura/Pagamentos com dados de cartão, Transportador/Volumes com lacres, tabela
+  de itens com CST/BC-ICMS/V-ICMS por item e bloco Dados Adicionais (inclui
+  contingência/protocolo EPEC).
+- **Espelho do arredondamento bancário V004 da FiscalLIB** — a lib passa a
+  emitir `base × alíquota / 100` com half-to-even em 2 casas (antes truncava
+  via bcmath, mascarado pela tolerância). Testes travam o contrato nos dois
+  lados: valores V004 (ex.: 100 × 12,3456% → 12,35 · 333,33 × 18% → 60,00 ·
+  meio-exato → dígito par) passam na tolerância de R$ 0,01; divergência acima
+  disso continua rejeitando.
+- **Guarda DIFAL negativo (espelho FiscalLIB)** — `vICMSUFDest < 0` só existe
+  com pICMSUFDest < pICMSInter (entrada impossível no MOC): agora vira 422 no
+  `ValidadorImpostosV2` em vez de passar pela aritmética.
+- **R-NFS014 (exportação de serviços) no `ValidadorNfseDps`** —
+  `tribISSQN = 3` exige `valores.codigoPaisResultado` (cPaisResult, ISO
+  3166-1 numérico, 3 dígitos) e alíquota ISS nula/zero. Campo novo e opcional
+  no `NfseDpsRequest`, mapeado para o DPS pelo `MapperDps`. Espelho da
+  `FiscalLIB` (`NfseBuilder::codigoPaisResultado()`).
+- **Download do XML de eventos (cancelamento/CC-e)** — `GET /v1/documentos-fiscais/{id}/eventos/{eventoId}/xml`
+  devolve o XML protocolado persistido em `EventoFiscal.XmlRetorno` (`application/xml`; 409
+  "ainda não disponível" enquanto o evento não chega a PROCESSADO/REJEITADO; 404 se o evento
+  não pertence ao documento). Consumidores arquivam o XML para o contador sem depender de
+  reprocesso.
+- **Campo `xml` na resposta de cancelamento/CC-e** — no replay idempotente de evento já
+  processado o corpo traz `xml` (o XML protocolado); no primeiro aceite (PENDENTE) vem nulo.
+- **Payload do webhook de evento identifica o evento** — `documento.cancelado` e
+  `documento.carta_correcao` agora incluem `evento: {id, protocolo, status, criadoEm}` para o
+  consumidor casar o webhook com o registro local e baixar o XML na hora.
+- **Estado terminal `FALHA_EMISSAO`** — emissão esgotada (`MaxTentativas` 48 em
+  CONTINGENCIA, ~8h) não reprocessa mais para sempre: terminal + webhook
+  `documento.falha_emissao`. Eventos esgotam em `ERRO`.
+- **Guarda SSRF no webhook** — o despachante bloqueia IPs privados/loopback/link-local na
+  conexão (`ConnectCallback`, imune a DNS rebinding). Opt-out on-premise:
+  `Fiscal:Webhooks:PermitirRedesPrivadas=true`.
+- **Lockout no login admin** — 5 falhas por (IP, e-mail) em 15 min retornam 429
+  (contador no `IDistributedCache`, compatível com Redis).
+- **Rotação de KEK** — envelope de criptografia versado (`[0x02, kid]`): config
+  `Certificados:ChaveMestraKEKAnterior` mantém o legado legível enquanto os dados novos
+  nascem com a KEK nova (envelopes antigos continuam lendo sem prefixo).
+- **`nfeProc` na recuperação CONSIT** — autorização recuperada por consulta de protocolo
+  agora reconstrói o XML de distribuição (XML assinado salvo + protNFe da consulta);
+  NFC-e recuperada sai com QR code. `ProtocoloConsultado` ganhou `XmlProtNFe`.
+- **`Fiscal:Proxies:KnownProxies`** — `UseForwardedHeaders` configurável; atrás de proxy
+  TLS o rate limit por IP volta a discriminar clientes.
+
+### Corrigido
+- **Cancelamento/CC-e via painel admin não transmitiam** — o evento era criado PENDENTE sem
+  enfileirar `ProcessarEventoJob` e o varredor ignorava eventos sem agenda (`ProximaTentativaEm`
+  nula): documento ficava em `CANCELAMENTO_PENDENTE` para sempre. O admin enfileira o job e o
+  `VarrerEventosJob` também resgata PENDENTES sem agenda (redes contra restart).
+- **Distribuição DFe avançava o cursor com `MaxNSU`** — com mais de 50 notas pendentes, todo
+  NSU não entregue na página era pulado para sempre. O cursor agora é o `UltNSU` da resposta,
+  com loop até consumir a fila (cStat 138, limite de 20 iterações); documento sem chave
+  extraível é logado em `Error` (nunca silenciosamente descartado).
+- **Corridas nos jobs (dupla transmissão/sobrescrita de status)** — `[DisableConcurrentExecution]`
+  + claim atômico (`UPDATE ... WHERE status IN (enfileiráveis)`) em documentos, eventos,
+  manifestações e webhooks; `ProximaTentativaEm` vira lease (+15/+30 min) e os varredores
+  resgatam órfãos em `PROCESSANDO`/`ENTREGANDO` (crash no meio da execução). O método morto
+  `ObterParaLockAsync` (SELECT FOR UPDATE sem chamadores) foi removido.
+- **Idempotência concorrente devolvia 500** — duas requests simultâneas com a mesma
+  `Idempotency-Key`: a segunda agora devolve o documento/evento vencedor (replay) em vez de
+  violar o índice único. Em emissão, evento, inutilização, manifestação e caminho admin.
+- **Manifestações sem backoff** — `VarrerManifestacoesJob` re-enfileirava a cada 30 s (sem
+  `ProximaTentativaEm`) e ignorava manifestações com `Tentativas == 0` (enqueue perdido ficava
+  preso). Coluna nova `manifestacoes.proxima_tentativa_em` (migration) + backoff real + resgate.
+- **Órfãos em `PROCESSANDO` travados para sempre** — nenhum varredor cobria o status;
+  agora resgatados por lease vencido.
+- **Notas recebidas: `Take(1000)` sem ORDER BY no SQL** — com mais de 1000 notas as recentes
+  podiam não aparecer; agora ordenação (`RecebidaEm DESC`) e paginação (`page`/`pageSize`,
+  máx. 200) no banco.
+- **`/metrics` sombreado pelo fallback do SPA** — com o painel publicado, request a
+  `/metrics` recebia `index.html` (Prometheus parava de raspar); `/metrics` entrou na lista
+  de exclusões do `MapWhen`.
+- **Exceção não tratada sem RFC 7807** — `AddProblemDetails` + `UseExceptionHandler` global;
+  `/v1/status-servico` não vaza mais `ex.Message` para o cliente (503 genérico, detalhe no log).
+- **FluentValidation registrado e nunca executado** — pacote e validadores mortos removidos
+  (a validação real é DataAnnotations + validadores fiscais manuais).
+- **`Math.Abs(GetHashCode())` podia lançar OverflowException** — substituído por
+  `& 0x7fffffff` (lote/protocolo idem em mock e transmissores).
+- **Inutilização aceitava modelos 56–64** (`[Range(55,65)]`) — agora só 55/65; cancelamento
+  admin também valida modelo 55/65.
+- **`MetricasFiscais.VersaoServico` hardcoded "1.10.0"** — versão do assembly (mesmo
+  mecanismo do `verAplic`).
+- **`catch (Exception)` engolia cancelamento no shutdown** do DFe (OperationCanceledException
+  repropagada).
+- **`.gitignore` não cobria variantes de `.env`** (`.env*` + `!.env.example`).
+
+## [1.12.2-alpha] — 2026-09-17
+
+### Corrigido
+- **DIFAL: `vICMSUFDest` com o valor errado (lib + API consistentemente
+  errados)** — o validador exigia `valorIcmsDestino = baseDestino × interna
+  cheia`, mas o MOC (rejeições SEFAZ **815/816**) define
+  `vICMSUFDest = vBCUFDest × (pICMSUFDest − pICMSInter)`: o ICMS próprio já
+  remete `base × interestadual` à UF de origem. Em UFs com o validador ativo,
+  toda NF-e com DIFAL rejeitaria com 815; nas demais, o XML passaria e o
+  emissor remeteria o diferencial a mais ao estado de destino. Ex. (BC 1000,
+  inter 7%, interna 18%): antes 180,00 → agora 110,00.
+- **`verAplic` do XML defasado** ("FiscalAPI 1.10.0" hardcoded) — agora vem
+  da versão do assembly (`VersionPrefix 1.12.2` no `Directory.Build.props`).
+- **`vIBS` do item zerado** (`gIBSCBS`): o mapper nunca somava
+  `vIBSUF + vIBSMun` no total do item — SEFAZ-PR rejeitava com **1150**
+  ("vIBS informado 0.00, calculado 0.10") em qualquer item com IBS. Agora
+  o total é calculado no mapper.
+- **`IdDest` fixo em "operação interna"**: NF-e com destinatário de outra UF
+  ia como interna e a SEFAZ-PR rejeitava com **521**. Agora o mapper deriva
+  interna × interestadual comparando a UF do destinatário com a UF do
+  emitente (NFC-e segue sempre interna).
+
+### Adicionado
+- **`indicadorIntermediador` / `cnpjIntermediador` no `EmissaoRequest`**
+  (NT 2020.006 — grupo `indIntermed`/`infIntermed`, só NF-e mod 55). Default
+  `0` (sem intermediador) quando ausente — SEFAZ-PR rejeitava toda NF-e sem
+  o campo com **434**. Com `1`, `cnpjIntermediador` é obrigatório e vira o
+  grupo `infIntermed` no XML. Validado em homologação real (PR): a 434 sai,
+  a emissão avança para as validações de cadastro.
+- **NFS-e: motivo de rejeição genérica do ADN carrega o corpo bruto da
+  resposta** (trecho de até 300 chars) quando o retorno vem sem código nem
+  descrição útil (típico de pendência de credenciamento) — antes era só
+  "0: O retorno do servidor não contém o evento processado nem os detalhes
+  do erro", sem pista sobre a causa.
+
+
+## [1.12.1-alpha] — 2026-09-17
+
+### Corrigido — pendências da revisão técnica pós-release
+- **DANFSe próprio**: `GerarDanfseAsync` reutilizava o gerador de DANFE —
+  NFS-e saía com layout de NF-e, silenciosamente e com 200 (o comentário do
+  código prometia "falha alto" que nunca existiu). Agora há DANFSe
+  simplificado da NFS-e Nacional: prestador/tomador, detalhamento do serviço
+  (cTribNac/cTribMun/NBS), valores (ISSQN, retenções federais, total de
+  tributos), identificador NFS-e e protocolo. Lê `NfseDpsRequest` direto ou
+  embrulhado em substituição (mesma regra do `MapperDps`); payload legado da
+  rota sandbox segue gerando PDF, sem as seções de serviço/tomador.
+- **`/metrics` passa a exigir autenticação** (API key/JWT) — expunha métricas
+  de negócio anonimamente. Opt-in anônimo para raspagem Prometheus em rede
+  interna: `Fiscal:Observabilidade:MetricsAnonimos=true`.
+- **Worker alinhado à API no default de `Fiscal:ModoSandbox` (true)** —
+  rodando sem config, a API ia de mock e o Worker de SEFAZ real. Produção
+  segue com `Fiscal__ModoSandbox=false` explícito (compose/appsettings já
+  fixam o valor).
+- **CORS configurável**: `Fiscal:Cors:Origens` (env
+  `Fiscal__Cors__Origens__0=…`), fallback para os defaults de dev do Vite.
+- **Migrations fora do Development**: `MigrateAsync` agora roda também com
+  `Fiscal:RodarMigrations=true` (antes produção não tinha caminho de schema).
+  Compose: só a API roda (`true`), Worker fica `false` e espera
+  `api: healthy` — sem corrida de schema/Hangfire.
+- **Healthchecks no compose**: API via `/health/ready` (busybox wget) e
+  Worker por processo (`pgrep` — não serve HTTP).
+- **Higiene de segredos**: `.pfx` A1 real saiu da raiz do repositório (estava
+  com a senha no nome do arquivo — gitignored, mas exposto no disco).
+- **182/182 testes** (118 + 64): DANFSe ganha DPS/substituição/legado;
+  `/metrics` anônimo → 401 e autenticado → 200; Id do DPS atualizado ao
+  layout 1.01 (45 posições com tpInsc, NDPS sem zeros à esquerda) — teste
+  que o 1.12.0 deixou defasado contra o mapper.
+
+## [1.12.0-alpha] — 2026-09-17
+
+### Adicionado — ciclo de vida de certificado + bateria de homologação real iniciada (SEFAZ-PR, A1 real)
+- **Ciclo de vida de certificado** (tenant e admin): upload agora **rotaciona**
+  — desativa o ativo anterior e audita `CERTIFICADO_SUBSTITUIDO` (restaura a
+  invariante de 1 ativo/tenant; `ObterAtivoPorTenantAsync` era não-determinístico
+  com 2+ ativos). Novos endpoints: `DELETE /v1/certificados/{id}` (soft-delete
+  idempotente, auditoria `CERTIFICADO_REVOGADO`) e
+  `POST /v1/certificados/{id}/ativar` (reativa desativando os demais);
+  espelhos em `/v1/admin/tenants/{tenantId}/certificados/…`.
+- **Bateria de homologação real contra a SEFAZ-PR** com certificado A1 real
+  (RFB e-CNPJ, AC SOLUTI): `MODO_SANDBOX=false` na stack, tenant/IE/upload,
+  **status-serviço `cStat 107`**, NF-e assinada (XML-DSig via Unimake) e
+  transmitida com sucesso — autorização ponta a ponta pendente de IE real do
+  emitente (rejeição `209 — IE do emitente invalida` com IE de teste; a PR
+  valida IE mesmo em homologação).
+- **Correção de rejeição `452`** (descoberta na bateria): a PR rejeita lote
+  unitário assíncrono — `MapperEnviNFe` passa a enviar **sempre síncrono**
+  (`indSinc=1`); o caminho assíncrono (103 + recibo → retAutorização)
+  permanece como fallback no `EmissorNFe`.
+- **Segurança**: `*.pfx`/`*.p12` no `.gitignore`.
+- **`infRespTec`** no XML de NF-e/NFC-e via config `Fiscal:RespTec:*`
+  (CNPJ/contato/e-mail) — resolve a rejeição `972` da SEFAZ-PR.
+- **Licença**: dependência `Unimake.DFe` confirmada como **MIT** — bloqueio
+  do release público (aberto em 1.8.0-alpha) removido.
+- **Docs**: guia-primeira-emissao ganhou a seção 9 (homologação real:
+  pré-requisitos, roteiro, diagnóstico de rejeições); README (aviso, tabela
+  de endpoints, checklist); integracao-api corrigida (transmissão de eventos
+  já real, webhook, limitações) e com os endpoints novos.
+- **180/180 testes** (116 + 64): +2 do ciclo de vida (rotação → desativação →
+  reativação, invariante 1 ativo/tenant, 404s, idempotência).
+
+## [1.11.0-alpha] — 2026-09-09
+
+### Adicionado — bootstrap em 1 request (tenant + primeira API key)
+- `POST /v1/admin/tenants` aceita `criarApiKey` opcional (`"producao"` |
+  `"homologacao"`): cria o tenant e a primeira API key **na mesma
+  transação** (mesmo `SaveChanges`), com geração/hash/auditoria idênticos ao
+  endpoint de keys (`GenerateKey`, prefixo 12 chars, hash PBKDF2,
+  `API_KEY_CRIADA`). Resposta vira `{tenant, apiKey}` com a chave em claro —
+  exibição única, mesma garantia de sempre.
+- Campo ausente/null preserva o contrato atual (corpo = GUID do tenant);
+  `criarApiKey` inválido → `422` sem persistir nada; `PUT /tenants/{id}`
+  rejeita o campo (só vale na criação).
+- **62/62 testes de API** (+4: `fk_test_` com hash persistido e chave
+  autenticando na API, `fk_live_` para produção, 422 não cria tenant,
+  comportamento legado intacto).
+
+## [1.10.0-alpha] — 2026-09-06
+
+### Adicionado — contrato v2 F5 (reforma IBS/CBS + IS) e F6 (barcode/QR no DANFE)
+- **F5 (G8)**: `impostosV2.ibsCbs` (CST/cClassTrib SEPEC, base, alíquotas e
+  valores IBS estadual/municipal e CBS → grupos `IBSCBS`/`gIBSCBS`) e
+  `impostosV2.is` (Imposto Seletivo, por valor ou quantidade → grupo `IS`).
+  Totais em `IBSCBSTot` (vBC, vIBS = UF+municipal, vCBS) e `ISTot`.
+  Validação: cClassTrib obrigatório, CSTs por tamanho de tabela SEPEC,
+  aritmética por componente (422), IS por quantidade com unidade+quantidade.
+- **F6 (G9, parcial)**: DANFE com **código de barras CODE-128 da chave de
+  acesso** (ZXing.Net/SkiaSharp) e **QR Code do DANFCe** extraído do
+  `infNFeSupl/qrCode` do XML autorizado (QRCoder) — o PDF passa a servir à
+  circulação em NFC-e com CSC. O leiaute visual completo de 20 campos segue
+  como evolução.
+- **173/173 testes** (116 + 57): +5 (IBSCBS/IS no XML e totais, validação
+  SEPEC, DANFCe com barcode/QR).
+
+## [1.9.0-alpha] — 2026-09-06
+
+### Adicionado — PITR + secret manager plugável + hardening de go-live (roadmap item 6)
+- **PITR/WAL archiving (RPO ≤ 5 min)**: compose do Postgres sobe com
+  `wal_level=replica`, `archive_mode=on`, `archive_timeout=300` e volume
+  `wal_archive` (journals a cada 5 min, `.partial` inclusos);
+  **`docker/restore-pitr.sh`** restaura base backup + journals até
+  `recovery_target_time`.
+- **Secret manager plugável**: convenção `CHAVE_FILE=/caminho` (Docker
+  secrets / K8s mounted files) — `AddFileSecrets()` mapeia
+  `ADMIN_JWT_SECRET_FILE` e `CERTIFICADOS__CHAVEMESTRAKEK_FILE` para as
+  chaves de config; valor direto da env segue vencendo o arquivo.
+- **pgcrypto**: `docker/postgres-init/01-extensions.sql` cria a extensão no
+  primeiro boot (checklist de criptografia em repouso do backup-dr.md).
+- **backup-dr.md**: checklist de go-live anotado com o que virou código e
+  seção de restore pontual.
+- **168/168 testes** (113 + 55): +2 do provider de segredos.
+
+## [1.8.0-alpha] — 2026-09-06
+
+### Adicionado — contrato v2 F4: NF-ref / devolução
+- `finalidade` (normal|complementar|ajuste|devolucao → finNFe),
+  `tipoOperacao` (saida|entrada → tpNF), `indicadorPresenca`
+  (presencial/internet/teleatendimento/entrega_domicilio/fora_estabelecimento/
+  outros → indPres) e `indicadorConsumidorFinal` (sim|nao → indFinal) —
+  deixam de ser fixos/derivados; defaults preservados.
+- `nfesReferenciadas` (grupo `NFref`, chaves de 44 dígitos) — **devolução
+  exige NF-e referenciada** (422 sem ela; chave com tamanho errado → 422;
+  fail-loud no mapper).
+- **166/166 testes** (111 + 55): +7 (Ide configurável, defaults mantidos,
+  NF-ref no XML, guardas 422 de devolução/chave).
+
+### Segurança/CI (pendências da revisão)
+- **CI**: lint do painel admin (oxlint) no `build-and-test.yml` — pendência 4.
+- **Logs**: confirmado que nenhum XML completo é logado em nível Info
+  (apenas ids/status — pendência 5; sem mudança de código necessária).
+- **SECURITY.md**: e-mail real já configurado — pendência 6 (e-mail) fechada;
+  a confirmação da licença da Unimake.DFe segue como bloqueio do release.
+
+## [1.7.0-alpha] — 2026-09-06
+
+### Adicionado — OpenTelemetry/Prometheus + Redis (roadmap itens 4 e 5)
+- **Métricas de negócio** (meter `FiscalAPI`): `fiscal_documentos`
+  (tipo/status/UF/ambiente), `fiscal_latencia_autorizacao` (histograma
+  PENDENTE→AUTORIZADA), `fiscal_eventos`, `fiscal_webhooks` (evento ×
+  resultado) e `fiscal_contingencia` (modo) — instrumentados nos jobs do
+  Worker. Docs de alertas sugeridos em `docs/observabilidade.md`.
+- **`GET /metrics`** (Prometheus) na API + instrumentação
+  ASP.NET/HttpClient/runtime; Worker expõe por **OTLP** quando
+  `Fiscal:Observabilidade:OtlpEndpoint` está configurado.
+- **Redis opcional** (`Fiscal:Redis:ConnectionString`):
+  rate limiting **distribuído** de janela fixa (INCR+PEXPIRE atômicos,
+  fail-open) **particionado por API key** caindo para IP — pendência 3 de
+  `docs/revisao-seguranca.md`; **cache compartilhado** do status-serviço
+  via `IDistributedCache` (antes in-memory). Sem Redis, tudo segue
+  in-memory (single-node, como no alpha).
+- `docker-compose`: serviço `redis` + volume (`REDIS_CONNECTION_STRING`).
+- **159/159 testes** (108 + 51): smoke de métricas + `/metrics`.
+
+## [1.6.0-alpha] — 2026-09-06
+
+### Adicionado — contrato v2 F2 (item rico + totais) e F3 (IPI/PIS/COFINS)
+- **Item rico (F2)**: `cest` (7), `gtin` (EAN 8/12/13/14), `unidade`
+  (uCom/uTrib, default `UN`) e `valorDesconto` por item; `totais` ganha
+  `valorDesconto`, `valorFrete`, `valorSeguro` e `outrasDespesas`.
+  Frete > 0 muda `modFrete` para CIF (0).
+- **Grupos federais (F3)**: `impostosV2.ipi` (IPITrib/IPINT, cEnq default
+  999), `.pis` e `.cofins` (PISAliq/PISNT/PISOutr — CST 03 por quantidade
+  fora do contrato). NFC-e rejeita os grupos (422/fail-loud).
+- **Fórmula v2 do `valorNota`** (§5.2, determinística): com qualquer campo
+  novo presente, `valorNota = Σ brutos − descontos + frete + seguro +
+  outras + ST + FCP-ST + IPI` (conferida com tolerância de R$ 0,01 → 422
+  `"Fórmula v2"`; payload legado segue com a soma simples). Nota: FCP
+  próprio e DIFAL não compõem o vNF (fórmula oficial da SEFAZ).
+- `ICMSTot` completo: `vDesc`, `vFrete`, `vSeg`, `vOutro`, `vIPI`, `vPIS`,
+  `vCOFINS` somados dos itens.
+- Validação: aritmética por grupo federal; CST isento (IPI 01–05/51,
+  PIS/COFINS 04–09) com valor > 0 → 422.
+- **158/158 testes** (107 + 51): +14 novos (GTIN/CEST/unidade/desconto,
+  modFrete, IPI/PIS/COFINS no XML e nos totais, fórmula v2, guardas NFC-e).
+
+## [1.5.0-alpha] — 2026-09-06
+
+### Adicionado — NFS-e Nacional com transmissão DPS real
+- **`POST /v1/documentos-fiscais/nfse/dps`** — novo contrato próprio da
+  NFS-e Nacional (`NfseDpsRequest`: tomador, serviço com cTribNac/cNBS,
+  valores com ISS/PIS/COFINS/retenções, bloco RTC IBS/CBS da reforma).
+  Autorização **síncrona** via webservice "GerarNfse" (REST gzip) da SEFAZ
+  Nacional, com assinatura do DPS e chave de 50 dígitos ("NFS...").
+- **`POST /v1/documentos-fiscais/{id}/substituicao`** — substituição de
+  NFS-e: emite DPS substituto com grupo `<subst>` (chave da substituída +
+  cMotivo/xMotivo); a SEFAZ desativa a original quando autoriza a
+  substituta. Exige NFS-e AUTORIZADA (409 caso contrário) e ambiente igual
+  ao da original.
+- `MapperDps` (Unimake NACIONAL layout 1.01): Id determinístico
+  "DPS + cLocEmi + CNPJ + série(5) + nDPS(15)", prest com regime do tenant,
+  toma (CPF/CNPJ), serv, valores (tribMun/tribFed/totTrib), IBSCBS.
+- `ValidadorNfseDps`: campos mínimos do DPS → 422 com `campo` exato.
+- Tenant ganha `inscricao_municipal` (prest.IM — exigido na NFS-e real;
+  configurável via `PUT /v1/tenants/perfil`). Migration
+  `WebhookSecretCriptografadoInscricaoMunicipal`.
+- Rota legada `POST /nfse` (EmissaoRequest) segue funcionando **apenas em
+  sandbox**; fora dela falha alto com orientação para a rota nova.
+- Transmissão real contra a SEFAZ Nacional (produção/homologação) depende
+  de credenciamento + certificado A1 — trilha de homologação do README.
+
+### Testes
+- **144/144** (96 + 48). Novos: 15 unitários de DPS/substituição (Id, XML
+  prest/toma/serv/valores/IBSCBS/subst, validação declarativa) e 7 de
+  integração (nfse/dps 202 → AUTORIZADA em sandbox, 422s, substituição
+  ponta a ponta, 409/422 das guardas).
+
+## [1.4.0-alpha] — 2026-09-06
+
+### Adicionado — contrato v2 F1: ICMS completo + CSOSN (Simples Nacional emite!)
+- **Grupo `impostosV2` por item** (evolução aditiva — sem rota `/v2`): CST
+  `00/10/20/40/41/51/60/70/90` e **CSOSN `101–900` do Simples Nacional**
+  (destrava a maior fatia do varejo, que não emitia), com origem 0–8,
+  `modBc`, redução de base, **ICMS-ST própria e retida**, **FCP**
+  (próprio/ST/retido), **DIFAL** (`ICMSUFDest`, partilha 100% destino —
+  Convênio 190/2017) e crédito do Simples (`pCredSN`/`vCredICMSSN`).
+- `ValidadorImpostosV2`: obrigatoriedade por CST/CSOSN, isento × valor e
+  aritmética por grupo (tolerância R$ 0,01) → `422` com `campo` exato.
+  Item com `impostos` **e** `impostosV2` → `400` (ambíguo).
+- `ICMSTot` completo para os novos grupos (`vBCST`, `vST`, `vFCP*`,
+  `vICMSUFDest`, `vICMSUFRemet`, `vFCPUFDest`).
+- Payload legado (`impostos[]`) continua emitindo igual (ICMS 00/40/41/50).
+- **Corrigido (bug legado)**: `ValidadorConsistenciaFiscal` tratava CST
+  `00/20/90` (tributados) como isentos — rejeitava emissões com destaque
+  válido; a lista de isentos agora é 40/41/50/60.
+
+### Infra — self-service de webhook (G10)
+- **`GET/PUT /v1/tenants/webhooks`** — o integrador configura
+  `webhookUrl`/`webhookSecret` sem depender do painel admin (URL http(s)
+  validada; segredo de 16–200 caracteres).
+
+### Segurança
+- **`webhook_secret` cifrado em repouso** (pendência 2 de
+  docs/revisao-seguranca.md): mesmo envelope AES-GCM (DEK/KEK) do CSC e dos
+  certificados — migration `WebhookSecretCriptografado`; segredos legados em
+  texto plano são migrados em voo pelo `ProcessarWebhookJob` e a coluna
+  antiga é esvaziada. Painel admin também grava cifrado.
+
+### Testes
+- **122/122** (81 + 41). Novos: 22 unitários de ICMS/CSOSN (grupos, ST, FCP,
+  DIFAL, validação declarativa) + 7 de integração (emissão com CSOSN 102/DIFAL,
+  ambiguidade → 400, isento → 422, self-service de webhook com segredo cifrado,
+  migração em voo do segredo legado).
+
 ## [1.3.0-alpha] — 2026-09-04
 
 ### Segurança (revisão completa em docs/revisao-seguranca.md)

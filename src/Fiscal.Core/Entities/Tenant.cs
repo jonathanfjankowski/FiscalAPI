@@ -14,6 +14,9 @@ public class Tenant
 
     // Dados do emitente exigidos pelo layout da NFe (grupo emit/enderEmit).
     public string? InscricaoEstadual { get; set; }
+
+    /// <summary>Inscrição municipal — exigida pela NFS-e Nacional (prest.IM).</summary>
+    public string? InscricaoMunicipal { get; set; }
     public string? Logradouro { get; set; }
     public string? Numero { get; set; }
     public string? Complemento { get; set; }
@@ -27,7 +30,13 @@ public class Tenant
     public byte[]? CscCriptografado { get; set; }
 
     public string? WebhookUrl { get; set; }
+
+    /// <summary>Legado (texto plano). Novos segredos vão para WebhookSecretCriptografado;
+    /// o job de entrega migra em voo e limpa esta coluna.</summary>
     public string? WebhookSecret { get; set; }
+
+    /// <summary>Segredo HMAC dos webhooks, cifrado com a KEK (EnvelopeEncryptionService).</summary>
+    public byte[]? WebhookSecretCriptografado { get; set; }
     public bool Ativo { get; set; } = true;
     public DateTimeOffset CriadoEm { get; set; } = DateTimeOffset.UtcNow;
 
