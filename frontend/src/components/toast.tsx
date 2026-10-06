@@ -32,9 +32,10 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   )
 
   const cor: Record<ToastType, string> = {
-    sucesso: 'border-emerald-500/40 bg-emerald-950/90 text-emerald-200',
-    erro: 'border-red-500/40 bg-red-950/90 text-red-200',
-    info: 'border-zinc-700 bg-zinc-900/95 text-zinc-200',
+    sucesso:
+      'border-emerald-200 bg-white text-emerald-800 dark:border-emerald-500/40 dark:bg-emerald-950/90 dark:text-emerald-200',
+    erro: 'border-red-200 bg-white text-red-800 dark:border-red-500/40 dark:bg-red-950/90 dark:text-red-200',
+    info: 'border-zinc-200 bg-white text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900/95 dark:text-zinc-200',
   }
 
   return (
@@ -44,7 +45,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
         {toasts.map((t) => (
           <div
             key={t.id}
-            className={cn('rounded-lg border px-4 py-3 shadow-xl backdrop-blur', cor[t.tipo])}
+            className={cn('rounded-md border px-4 py-3 shadow-xl backdrop-blur', cor[t.tipo])}
           >
             <p className="text-sm font-medium">{t.titulo}</p>
             {t.detalhe && <p className="mt-0.5 text-xs opacity-80">{t.detalhe}</p>}

@@ -1,6 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
+import { ArrowLeft, Copy } from 'lucide-react'
 import { api } from '../lib/api'
 import { Button, Card, Field, Modal, PageHeader, PageLoading, StatusBadge, Textarea } from '../components/ui'
 import { useToast } from '../components/toast'
@@ -34,7 +35,7 @@ export default function DocumentoDetail() {
           <>
             <StatusBadge status={doc.status} />
             <Link to="/documentos">
-              <Button variant="ghost">← Voltar</Button>
+              <Button variant="ghost"><ArrowLeft className="h-3.5 w-3.5" /> Voltar</Button>
             </Link>
           </>
         }
@@ -52,7 +53,7 @@ export default function DocumentoDetail() {
       )}
 
       {doc.status === 'CONTINGENCIA' && (
-        <Card className="mb-4 border-amber-500/30 bg-amber-500/5 p-4 text-xs text-amber-200">
+        <Card className="mb-4 border-amber-200 bg-amber-50 p-4 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/5 dark:text-amber-200">
           Documento em contingência — nova tentativa{' '}
           {doc.proximaTentativaEm ? formatarData(doc.proximaTentativaEm) : 'em breve'} (tentativa{' '}
           {doc.tentativas + 1}). O VarrerContingenciaJob do Worker reenfileira a cada 30s.
@@ -60,7 +61,7 @@ export default function DocumentoDetail() {
       )}
 
       <div className="grid gap-4 lg:grid-cols-2">
-        <Card className="divide-y divide-zinc-800/60">
+        <Card className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
           <Linha titulo="Status" valor={<StatusBadge status={doc.status} />} />
           <Linha titulo="Motivo" valor={doc.motivoStatus ?? '—'} />
           <Linha
@@ -77,12 +78,12 @@ export default function DocumentoDetail() {
           <Linha titulo="Recibo do lote" valor={doc.reciboLote ?? '—'} />
         </Card>
 
-        <Card className="divide-y divide-zinc-800/60">
+        <Card className="divide-y divide-zinc-100 dark:divide-zinc-800/60">
           <Linha titulo="Tenant" valor={doc.tenantRazaoSocial} />
           <Linha titulo="Modelo / Série / Número" valor={`${doc.modelo ?? '—'} / ${doc.serie ?? '—'} / ${doc.numero ?? '—'}`} />
           <Linha titulo="Ambiente" valor={doc.ambiente} />
           <Linha titulo="Tentativas de transmissão" valor={String(doc.tentativas)} />
-          <Linha titulo="Documento ID" valor={<code className="text-xs text-zinc-400">{doc.id}</code>} />
+          <Linha titulo="Documento ID" valor={<code className="text-xs text-zinc-500 dark:text-zinc-400">{doc.id}</code>} />
         </Card>
       </div>
 
@@ -120,7 +121,7 @@ function Linha({ titulo, valor }: { titulo: string; valor: React.ReactNode }) {
   return (
     <div className="flex items-center justify-between gap-4 px-4 py-3">
       <span className="text-xs font-medium text-zinc-500">{titulo}</span>
-      <span className="text-right text-sm text-zinc-200">{valor}</span>
+      <span className="text-right text-sm text-zinc-800 dark:text-zinc-200">{valor}</span>
     </div>
   )
 }
@@ -128,7 +129,7 @@ function Linha({ titulo, valor }: { titulo: string; valor: React.ReactNode }) {
 function ChaveCopiavel({ texto }: { texto: string }) {
   return (
     <button
-      className="group inline-flex items-center gap-2 font-mono text-xs text-zinc-300 hover:text-emerald-300"
+      className="group inline-flex items-center gap-2 font-mono text-xs text-zinc-600 hover:text-blue-600 dark:text-zinc-300 dark:hover:text-blue-300"
       title="Copiar chave"
       onClick={async () => {
         if (await copiar(texto)) {
@@ -137,7 +138,7 @@ function ChaveCopiavel({ texto }: { texto: string }) {
       }}
     >
       {texto}
-      <span className="opacity-0 transition-opacity group-hover:opacity-100">⧉</span>
+      <Copy className="h-3 w-3 opacity-0 transition-opacity group-hover:opacity-100" />
     </button>
   )
 }
@@ -148,7 +149,7 @@ function XmlTabs({ assinado, retorno }: { assinado: string | null; retorno: stri
 
   return (
     <div>
-      <div className="flex gap-1 border-b border-zinc-800 px-4 pt-3">
+      <div className="flex gap-1 border-b border-zinc-200 px-4 pt-3 dark:border-zinc-800">
         {assinado && (
           <TabAtivo ativo={aba === 'assinado'} onClick={() => setAba('assinado')}>
             XML assinado
@@ -160,7 +161,7 @@ function XmlTabs({ assinado, retorno }: { assinado: string | null; retorno: stri
           </TabAtivo>
         )}
       </div>
-      <pre className="max-h-96 overflow-auto px-4 py-3 text-[11px] leading-relaxed text-zinc-400">
+      <pre className="max-h-96 overflow-auto px-4 py-3 text-[11px] leading-relaxed text-zinc-600 dark:text-zinc-400">
         {formatarXml(xml)}
       </pre>
     </div>
@@ -172,7 +173,7 @@ function TabAtivo({ ativo, onClick, children }: { ativo: boolean; onClick: () =>
     <button
       onClick={onClick}
       className={`-mb-px border-b-2 px-3 py-1.5 text-xs transition-colors ${
-        ativo ? 'border-emerald-500 font-medium text-emerald-300' : 'border-transparent text-zinc-500 hover:text-zinc-300'
+        ativo ? 'border-blue-600 font-medium text-blue-700 dark:border-blue-500 dark:text-blue-300' : 'border-transparent text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-200'
       }`}
     >
       {children}

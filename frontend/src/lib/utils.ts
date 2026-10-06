@@ -42,6 +42,8 @@ export async function copiar(texto: string): Promise<boolean> {
   }
 }
 
+// Cores de status (semânticas, nos dois temas). Literais — Tailwind gera
+// classes por varredura de texto, nada de construir nomes dinamicamente.
 export const STATUS_LABEL: Record<string, string> = {
   PENDENTE: 'Pendente',
   PROCESSANDO: 'Processando',
@@ -56,16 +58,22 @@ export const STATUS_LABEL: Record<string, string> = {
 }
 
 export const STATUS_COLOR: Record<string, string> = {
-  PENDENTE: 'bg-sky-500/15 text-sky-300 border-sky-500/30',
-  PROCESSANDO: 'bg-indigo-500/15 text-indigo-300 border-indigo-500/30',
-  AUTORIZADA: 'bg-emerald-500/15 text-emerald-300 border-emerald-500/30',
-  REJEITADA: 'bg-red-500/15 text-red-300 border-red-500/30',
-  CONTINGENCIA: 'bg-amber-500/15 text-amber-300 border-amber-500/30',
-  CANCELAMENTO_PENDENTE: 'bg-orange-500/15 text-orange-300 border-orange-500/30',
-  CANCELADA: 'bg-zinc-500/15 text-zinc-300 border-zinc-500/30',
-  ERRO_CANCELAMENTO: 'bg-red-500/15 text-red-300 border-red-500/30',
-  DENEGADA: 'bg-fuchsia-500/15 text-fuchsia-300 border-fuchsia-500/30',
-  ERRO_INTERNO: 'bg-red-500/15 text-red-300 border-red-500/30',
+  PENDENTE: 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300',
+  PROCESSANDO:
+    'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300',
+  AUTORIZADA:
+    'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300',
+  REJEITADA: 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300',
+  CONTINGENCIA:
+    'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300',
+  CANCELAMENTO_PENDENTE:
+    'border-orange-200 bg-orange-50 text-orange-700 dark:border-orange-500/30 dark:bg-orange-500/10 dark:text-orange-300',
+  CANCELADA: 'border-zinc-200 bg-zinc-100 text-zinc-600 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-300',
+  ERRO_CANCELAMENTO:
+    'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300',
+  DENEGADA:
+    'border-fuchsia-200 bg-fuchsia-50 text-fuchsia-700 dark:border-fuchsia-500/30 dark:bg-fuchsia-500/10 dark:text-fuchsia-300',
+  ERRO_INTERNO: 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300',
 }
 
 export const STATUS_TERMINAIS = [

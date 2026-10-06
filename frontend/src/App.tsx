@@ -8,6 +8,7 @@ import TenantDetail from './pages/TenantDetail'
 import Documentos from './pages/Documentos'
 import DocumentoDetail from './pages/DocumentoDetail'
 import Playground from './pages/Playground'
+import Configuracoes from './pages/Configuracoes'
 import type { ReactNode } from 'react'
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -30,11 +31,14 @@ export default function App() {
         }
       >
         <Route path="/" element={<Dashboard />} />
+        <Route path="/empresas" element={<Tenants />} />
+        <Route path="/empresas/:id" element={<TenantDetail />} />
         <Route path="/tenants" element={<Tenants />} />
         <Route path="/tenants/:id" element={<TenantDetail />} />
         <Route path="/documentos" element={<Documentos />} />
         <Route path="/documentos/:id" element={<DocumentoDetail />} />
         <Route path="/playground" element={<Playground />} />
+        <Route path="/configuracoes" element={<Configuracoes />} />
       </Route>
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>

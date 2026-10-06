@@ -118,6 +118,8 @@ export interface Tenant {
   cep?: string | null
   nomeMunicipio?: string | null
   webhookUrl?: string | null
+  sandbox: boolean
+  cscId?: string | null
   ativo: boolean
   criadoEm: string
   apiKeysAtivas: number
@@ -141,6 +143,9 @@ export interface TenantInput {
   webhookUrl?: string
   webhookSecret?: string
   ativo?: boolean
+  sandbox?: boolean
+  cscId?: string
+  csc?: string
 }
 
 export interface ApiKey {
@@ -216,6 +221,38 @@ export interface Dashboard {
   certificadosVencendo30Dias: number
 }
 
+export interface WebhookEntrega {
+  id: string
+  tipoEvento: string
+  status: 'PENDENTE' | 'ENTREGANDO' | 'ENTREGUE' | 'FALHA'
+  documentoId: string | null
+  tentativas: number
+  ultimoStatusCode: number | null
+  ultimoErro: string | null
+  proximaTentativaEm: string | null
+  entregueEm: string | null
+  criadoEm: string
+}
+
+export interface WebhookEntregasResp {
+  page: number
+  pageSize: number
+  itens: WebhookEntrega[]
+}
+
+export interface BootstrapKeyInfo {
+  prefixo?: string
+  criadoEm?: string
+  configurada?: boolean
+}
+
+export interface BootstrapKeyRotacionada {
+  id: string
+  chave: string
+  prefixo: string
+  aviso: string
+}
+
 export interface EmissaoResponse {
   id: string
   tipo: string
@@ -286,6 +323,26 @@ export const api = {
     request<EventoResp>(`/v1/admin/documentos-fiscais/${id}/carta-correcao`, {
       body: { correcao },
     }),
+
+  // Webhooks (visão admin, por tenant) — outbox + reenvio manual.
+  listWebhookEntregas: (tenantId: string, params: { page?: number; pageSize?: number; status?: string }) => {
+    const qs = new URLSearchParams()
+    for (const [k, v] of Object.entries(params)) {
+      if (v !== undefined && v !== null && v !== '') qs.set(k, String(v))
+    }
+    return request<WebhookEntregasResp>(
+      `/v1/admin/tenants/${tenantId}/webhooks/entregas?${qs.toString()}`,
+    )
+  },
+  reenviarWebhookEntrega: (tenantId: string, entregaId: string) =>
+    request<unknown>(`/v1/admin/tenants/${tenantId}/webhooks/entregas/${entregaId}/reenviar`, {
+      method: 'POST',
+    }),
+
+  // Chave bootstrap ("master") — usada pelo ERP em POST /v1/empresas.
+  getBootstrapKey: () => request<BootstrapKeyInfo>('/v1/admin/bootstrap-key'),
+  rotacionarBootstrapKey: () =>
+    request<BootstrapKeyRotacionada>('/v1/admin/bootstrap-key/rotacionar', { method: 'POST' }),
 
   // Playground — caminho real de um integrador (API key de tenant).
   emitir: (modelo: 'nfe' | 'nfce', apiKey: string, body: unknown, idempotencyKey: string) =>

@@ -77,7 +77,10 @@ Todo POST de emissão e de eventos exige o header `Idempotency-Key`. Ele garante
 Você informa apenas a **série**. O número do documento é reservado sequencialmente pela API por (tenant, modelo, série, ambiente) — não há como colidir ou pular número por concorrência. Para inutilizar faixas de numeração (ex.: notas canceladas antes da transmissão), use o endpoint de [inutilização](#post-v1inutilizacoes-).
 
 ### Sandbox vs produção
-Quando a API roda com `Fiscal:ModoSandbox=true`, o emissor real (SEFAZ) é substituído por um **emissor mock**, que autoriza documentos de teste sem contato externo — útil para desenvolver a integração ponta a ponta. Em produção o modo sandbox fica desligado e a transmissão vai para a SEFAZ de verdade (homologação ou produção, conforme a chave).
+O sandbox é **por empresa (tenant)**: com `sandbox=true`, o emissor real (SEFAZ) é substituído por um **emissor mock**, que autoriza documentos de teste sem contato externo e dispensa certificado A1 — ideal para desenvolver a integração ponta a ponta. Com `sandbox=false`, a transmissão vai para a SEFAZ de verdade (homologação ou produção, conforme a chave).
+
+- O flag é controlado pelo painel admin (aba Sandbox da empresa, `PUT /v1/admin/tenants/{id}` com `"sandbox": true|false`).
+- Empresas novas herdam o default de `Fiscal:ModoSandbox` (true em dev, false em produção).
 
 ---
 
