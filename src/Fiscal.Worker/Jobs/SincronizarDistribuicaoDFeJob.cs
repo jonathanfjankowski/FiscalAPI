@@ -23,7 +23,6 @@ public class SincronizarDistribuicaoDFeJob
     private readonly IRepositorioCertificado _certRepo;
     private readonly ICertificadoStore _certStore;
     private readonly IEnumerable<IConsultaDistribuicaoDfe> _consultas;
-    private readonly bool _sandbox;
     private readonly ILogger<SincronizarDistribuicaoDFeJob> _logger;
 
     public SincronizarDistribuicaoDFeJob(
@@ -33,7 +32,6 @@ public class SincronizarDistribuicaoDFeJob
         IRepositorioCertificado certRepo,
         ICertificadoStore certStore,
         IEnumerable<IConsultaDistribuicaoDfe> consultas,
-        IConfiguration configuration,
         ILogger<SincronizarDistribuicaoDFeJob> logger)
     {
         _db = db;
@@ -42,24 +40,17 @@ public class SincronizarDistribuicaoDFeJob
         _certRepo = certRepo;
         _certStore = certStore;
         _consultas = consultas;
-        _sandbox = configuration.GetValue("Fiscal:ModoSandbox", false);
         _logger = logger;
     }
 
     public async Task ExecutarAsync(CancellationToken ct)
     {
-        IConsultaDistribuicaoDfe? consulta =
-            _consultas.OfType<ConsultaDistribuicaoMock>().FirstOrDefault()
-            ?? _consultas.OfType<ConsultaDistribuicaoUnimake>().FirstOrDefault()
-            ?? _consultas.FirstOrDefault();
-        if (consulta is null) return;
-
         var tenants = await _db.Tenants.Where(t => t.Ativo).ToListAsync(ct);
         foreach (var tenant in tenants)
         {
             try
             {
-                await SincronizarTenantAsync(tenant, consulta, ct);
+                await SincronizarTenantAsync(tenant, ct);
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested)
             {
@@ -74,10 +65,18 @@ public class SincronizarDistribuicaoDFeJob
         }
     }
 
-    private async Task SincronizarTenantAsync(Tenant tenant, IConsultaDistribuicaoDfe consulta, CancellationToken ct)
+    private async Task SincronizarTenantAsync(Tenant tenant, CancellationToken ct)
     {
+        // Consulta por tenant: sandbox → mock (adianta NSU sem falar com a RFB).
+        IConsultaDistribuicaoDfe? consulta = tenant.Sandbox
+            ? (IConsultaDistribuicaoDfe?)_consultas.OfType<ConsultaDistribuicaoMock>().FirstOrDefault()
+                ?? _consultas.OfType<ConsultaDistribuicaoUnimake>().FirstOrDefault()
+            : _consultas.OfType<ConsultaDistribuicaoUnimake>().FirstOrDefault();
+        consulta ??= _consultas.FirstOrDefault();
+        if (consulta is null) return;
+
         var cert = await _certRepo.ObterAtivoPorTenantAsync(tenant.Id, ct);
-        if (cert is null && !_sandbox) return; // sem certificado em produção: nada a fazer
+        if (cert is null && !tenant.Sandbox) return; // sem certificado em produção: nada a fazer
         using var x509 = cert is null ? null : await _certStore.CarregarAsync(cert, ct);
 
         foreach (var ambiente in new[] { Ambiente.Producao, Ambiente.Homologacao })

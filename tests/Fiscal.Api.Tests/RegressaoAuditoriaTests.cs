@@ -90,13 +90,11 @@ public class RegressaoAuditoriaTests : IClassFixture<EmissaoIntegracaoFactory.Fa
     private static SincronizarDistribuicaoDFeJob NovoJob(
         FiscalDbContext db, IConsultaDistribuicaoDfe consulta)
     {
-        var config = new ConfigurationBuilder().AddInMemoryCollection(new Dictionary<string, string?>
-        {
-            ["Fiscal:ModoSandbox"] = "true",
-        }).Build();
+        // Sandbox é por tenant (Tenant.Sandbox): o mock é escolhido quando o
+        // tenant criado abaixo está em sandbox (default true).
         return new SincronizarDistribuicaoDFeJob(
             db, new RepositorioNotaRecebida(db), new RepositorioNsu(db), new RepositorioCertificado(db),
-            new CertificadoStoreStub(), new IConsultaDistribuicaoDfe[] { consulta }, config,
+            new CertificadoStoreStub(), new IConsultaDistribuicaoDfe[] { consulta },
             NullLogger<SincronizarDistribuicaoDFeJob>.Instance);
     }
 

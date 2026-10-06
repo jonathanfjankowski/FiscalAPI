@@ -41,7 +41,6 @@ public class ProcessarEventoJob
     private readonly IEnumerable<ITransmissorEventoFiscal> _transmissores;
     private readonly ICertificadoStore _certStore;
     private readonly MetricasFiscais _metricas;
-    private readonly bool _sandbox;
     private readonly ILogger<ProcessarEventoJob> _logger;
 
     public ProcessarEventoJob(
@@ -51,7 +50,6 @@ public class ProcessarEventoJob
         IEnumerable<ITransmissorEventoFiscal> transmissores,
         ICertificadoStore certStore,
         MetricasFiscais metricas,
-        IConfiguration configuration,
         ILogger<ProcessarEventoJob> logger)
     {
         _db = db;
@@ -60,7 +58,6 @@ public class ProcessarEventoJob
         _transmissores = transmissores;
         _certStore = certStore;
         _metricas = metricas;
-        _sandbox = configuration.GetValue("Fiscal:ModoSandbox", false);
         _logger = logger;
     }
 
@@ -104,7 +101,7 @@ public class ProcessarEventoJob
         }
 
         var cert = await _certRepo.ObterAtivoPorTenantAsync(evento.TenantId, ct);
-        if (cert is null && !_sandbox)
+        if (cert is null && !tenant.Sandbox)
         {
             // Produção não assina o evento sem certificado — falha não recuperável.
             await MarcarErroAsync(evento, doc, "Nenhum certificado ativo para o tenant.", ct);
@@ -119,7 +116,7 @@ public class ProcessarEventoJob
         try
         {
             using var x509 = cert is null ? null : await _certStore.CarregarAsync(cert, ct);
-            resultado = await ResolverTransmissor().TransmitirAsync(
+            resultado = await ResolverTransmissor(tenant.Sandbox).TransmitirAsync(
                 evento, doc, tenant, x509!, ResolverAmbiente(evento, doc), ct);
         }
         catch (ErroNaoRecuperavelException ex)
@@ -214,11 +211,14 @@ public class ProcessarEventoJob
             evento.Id, evento.TipoEvento, evento.Status, evento.Tentativas);
     }
 
-    private ITransmissorEventoFiscal ResolverTransmissor()
+    private ITransmissorEventoFiscal ResolverTransmissor(bool sandbox)
     {
-        // Mesma ordem do ResolverEmissor: mock (sandbox) → Unimake → qualquer.
-        var mock = _transmissores.OfType<TransmissorEventoMock>().FirstOrDefault();
-        if (mock is not null) return mock;
+        // Mesma ordem do ResolverEmissor: tenant em sandbox → mock → Unimake.
+        if (sandbox)
+        {
+            var mock = _transmissores.OfType<TransmissorEventoMock>().FirstOrDefault();
+            if (mock is not null) return mock;
+        }
         return _transmissores.OfType<TransmissorEventoUnimake>().FirstOrDefault() ?? _transmissores.First();
     }
 

@@ -14,30 +14,27 @@ namespace Fiscal.Api.Controllers;
 [Authorize(AuthenticationSchemes = ApiKeyAuthenticationOptions.SchemeName)]
 public class StatusServicoController : ControllerBase
 {
-    private readonly IConsultaStatusServico _consulta;
+    private readonly IEnumerable<IConsultaStatusServico> _consultas;
     private readonly IRepositorioCertificado _certRepo;
     private readonly ICertificadoStore _certStore;
     private readonly IRepositorioTenant _tenantRepo;
     private readonly IDistributedCache _cache;
     private readonly ILogger<StatusServicoController> _logger;
-    private readonly bool _sandbox;
 
     public StatusServicoController(
-        IConsultaStatusServico consulta,
+        IEnumerable<IConsultaStatusServico> consultas,
         IRepositorioCertificado certRepo,
         ICertificadoStore certStore,
         IRepositorioTenant tenantRepo,
         IDistributedCache cache,
-        IConfiguration configuration,
         ILogger<StatusServicoController> logger)
     {
-        _consulta = consulta;
+        _consultas = consultas;
         _certRepo = certRepo;
         _certStore = certStore;
         _tenantRepo = tenantRepo;
         _cache = cache;
         _logger = logger;
-        _sandbox = configuration.GetValue("Fiscal:ModoSandbox", true);
     }
 
     /// <summary>
@@ -74,15 +71,22 @@ public class StatusServicoController : ControllerBase
         var tenant = await _tenantRepo.ObterPorIdAsync(tenantId, ct);
         if (tenant is null) return NotFound();
 
+        // Sandbox por tenant: mock consulta sem certificado e sem SEFAZ.
+        var consulta = tenant.Sandbox
+            ? _consultas.FirstOrDefault(c => c is Fiscal.Adapters.Unimake.ConsultaStatusServicoMock)
+                ?? _consultas.First()
+            : _consultas.FirstOrDefault(c => c is not Fiscal.Adapters.Unimake.ConsultaStatusServicoMock)
+                ?? _consultas.First();
+
         var cert = await _certRepo.ObterAtivoPorTenantAsync(tenantId, ct);
-        if (cert is null && !_sandbox)
+        if (cert is null && !tenant.Sandbox)
             return Problem(statusCode: 409, title: "Nenhum certificado ativo para o tenant.");
 
         using var x509 = cert is null ? null : await _certStore.CarregarAsync(cert, ct);
 
         try
         {
-            var status = await _consulta.ConsultarAsync(tenant, modelo, x509, ambienteEfetivo, ct);
+            var status = await consulta.ConsultarAsync(tenant, modelo, x509, ambienteEfetivo, ct);
             await _cache.SetStringAsync(cacheKey, JsonSerializer.Serialize(status),
                 new DistributedCacheEntryOptions
                 {

@@ -26,6 +26,10 @@ services:
       - Fiscal__RespTec__Contato=${RESPTEC_CONTATO:-}
       - Fiscal__RespTec__Email=${RESPTEC_EMAIL:-}
       - Fiscal__RespTec__Fone=${RESPTEC_FONE:-}
+      # CORS — origens que chamam a API pelo browser. Painel admin é servido em
+      # origem própria (apifiscal.homologacao...) e chama a API em fiscal.homologacao...
+      # Não deixar vazio no .env: string vazia sobrescreve com origem "".
+      - Fiscal__Cors__Origens__0=${FISCAL_CORS_ORIGEM_0:-https://apifiscal.homologacao.oktosistemas.com.br}
     healthcheck:
       # wget busybox (imagem alpine) no /health/ready — valida Postgres também.
       test: ["CMD-SHELL", "wget -q -O /dev/null http://localhost:8080/health/ready || exit 1"]

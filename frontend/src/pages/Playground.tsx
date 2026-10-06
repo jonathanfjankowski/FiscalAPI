@@ -204,7 +204,7 @@ export default function Playground() {
         <div className="space-y-4">
           {/* Configuração */}
           <Card className="p-5">
-            <h2 className="text-sm font-semibold text-zinc-200">Configuração</h2>
+            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-200">Configuração</h2>
             <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
               <Field label="Tenant">
                 <Select value={tenantId} onChange={(e) => setTenantId(e.target.value)}>
@@ -262,8 +262,8 @@ export default function Playground() {
           {/* Conteúdo da emissão */}
           <Card className="p-5">
             <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-zinc-200">Documento</h2>
-              <div className="flex rounded-lg border border-zinc-700 p-0.5 text-xs">
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-200">Documento</h2>
+              <div className="flex rounded-md border border-zinc-300 p-0.5 text-xs dark:border-zinc-700">
                 {(['form', 'json'] as const).map((m) => (
                   <button
                     key={m}
@@ -272,7 +272,7 @@ export default function Playground() {
                       setModo(m)
                     }}
                     className={`rounded-md px-3 py-1 transition-colors ${
-                      modo === m ? 'bg-zinc-700 font-medium text-zinc-100' : 'text-zinc-500 hover:text-zinc-300'
+                      modo === m ? 'bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-700 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
                     }`}
                   >
                     {m === 'form' ? 'Formulário' : 'JSON cru'}
@@ -304,7 +304,7 @@ export default function Playground() {
                   </div>
                   <div className="space-y-2">
                     {itens.map((item, idx) => (
-                      <div key={idx} className="grid grid-cols-12 items-end gap-2 rounded-lg border border-zinc-800 p-3">
+                      <div key={idx} className="grid grid-cols-12 items-end gap-2 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
                         <Field label="Código" className="col-span-2">
                           <Input value={item.codigo} onChange={(e) => setItem(idx, 'codigo', e.target.value)} />
                         </Field>
@@ -328,8 +328,8 @@ export default function Playground() {
                         </Field>
                         <div className="col-span-12 flex items-center justify-between text-[11px] text-zinc-500">
                           <span>
-                            Total do item: <span className="text-zinc-300">{formatarDecimal(totalItem(item))}</span> ·
-                            ICMS: <span className="text-zinc-300">{formatarDecimal(Math.round(((totalItem(item) * item.aliquota) / 100) * 100) / 100)}</span>
+                            Total do item: <span className="text-zinc-700 dark:text-zinc-300">{formatarDecimal(totalItem(item))}</span> ·
+                            ICMS: <span className="text-zinc-700 dark:text-zinc-300">{formatarDecimal(Math.round(((totalItem(item) * item.aliquota) / 100) * 100) / 100)}</span>
                           </span>
                           {itens.length > 1 && (
                             <button className="text-red-400 hover:text-red-300" onClick={() => setItens((arr) => arr.filter((_, i) => i !== idx))}>
@@ -341,7 +341,7 @@ export default function Playground() {
                     ))}
                   </div>
                   <p className="mt-3 text-right text-sm text-zinc-400">
-                    Total da nota: <span className="font-semibold text-emerald-300">{formatarDecimal(totalNota)}</span>
+                    Total da nota: <span className="font-semibold text-emerald-600 dark:text-emerald-300">{formatarDecimal(totalNota)}</span>
                   </p>
                 </div>
               </div>
@@ -353,13 +353,13 @@ export default function Playground() {
                   onChange={(e) => setJsonCru(e.target.value)}
                   spellCheck={false}
                 />
-                <button className="mt-2 text-[11px] text-zinc-500 hover:text-zinc-300" onClick={() => setJsonCru(jsonGerado)}>
+                <button className="mt-2 text-[11px] text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300" onClick={() => setJsonCru(jsonGerado)}>
                   restaurar JSON gerado pelo formulário
                 </button>
               </div>
             )}
 
-            <div className="mt-5 flex items-center justify-between border-t border-zinc-800 pt-4">
+            <div className="mt-5 flex items-center justify-between border-t border-zinc-200 pt-4 dark:border-zinc-800">
               <p className="text-[11px] text-zinc-600">
                 Idempotency-Key (uuid) gerada automaticamente a cada envio.
               </p>
@@ -373,7 +373,7 @@ export default function Playground() {
         {/* Acompanhamento */}
         <div className="space-y-4">
           <Card className="p-5">
-            <h2 className="text-sm font-semibold text-zinc-200">Acompanhamento</h2>
+            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-200">Acompanhamento</h2>
             {!seguindo ? (
               <p className="py-8 text-center text-xs text-zinc-600">
                 Emita um documento para acompanhar
@@ -391,15 +391,15 @@ export default function Playground() {
                   {transicoes.map((t, i) => (
                     <li key={i} className="relative flex gap-3 pb-3 pl-1">
                       {i < transicoes.length - 1 && (
-                        <span className="absolute top-3.5 left-[7px] h-full w-px bg-zinc-700" />
+                        <span className="absolute top-3.5 left-[7px] h-full w-px bg-zinc-300 dark:bg-zinc-700" />
                       )}
                       <span
                         className={`mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 ${
                           STATUS_COLOR[t.status] ?? 'border-zinc-600 bg-zinc-700'
-                        } bg-zinc-950`}
+                        } bg-white dark:bg-zinc-950`}
                       />
                       <div>
-                        <p className="text-xs font-medium text-zinc-200">{t.status}</p>
+                        <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200">{t.status}</p>
                         <p className="text-[10px] text-zinc-500">{formatarData(t.em)}</p>
                       </div>
                     </li>
@@ -407,7 +407,7 @@ export default function Playground() {
                 </ol>
 
                 {(seguindo.chaveAcesso || seguindo.numero !== null) && (
-                  <div className="rounded-lg border border-emerald-500/30 bg-emerald-500/10 p-3 text-xs text-emerald-200">
+                  <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
                     {seguindo.numero !== null && (
                       <p>
                         Número <strong>{seguindo.serie}/{String(seguindo.numero).padStart(9, '0')}</strong>
@@ -426,11 +426,11 @@ export default function Playground() {
 
           {historico.length > 0 && (
             <Card className="p-5">
-              <h2 className="text-sm font-semibold text-zinc-200">Emissões desta sessão</h2>
+              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-200">Emissões desta sessão</h2>
               <div className="mt-3 space-y-1.5">
                 {historico.map((h) => (
                   <div key={h.id} className="flex items-center justify-between gap-2 text-xs">
-                    <Link to={`/documentos/${h.id}`} className="truncate font-mono text-[10px] text-zinc-400 hover:text-emerald-300">
+                    <Link to={`/documentos/${h.id}`} className="truncate font-mono text-[10px] text-zinc-500 hover:text-blue-600 dark:text-zinc-400 dark:hover:text-blue-300">
                       {h.modelo.toUpperCase()} · {h.id.slice(0, 8)}…
                     </Link>
                     <Badge className={STATUS_COLOR[h.status]}>{h.status}</Badge>

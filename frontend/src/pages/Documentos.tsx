@@ -56,7 +56,7 @@ export default function Documentos() {
     <>
       <PageHeader
         titulo="Documentos fiscais"
-        descricao="Todos os documentos de todos os tenants"
+        descricao="Todos os documentos de todas as empresas"
         acoes={
           isFetching && !isLoading ? (
             <span className="text-[11px] text-zinc-500">atualizando…</span>
@@ -67,7 +67,7 @@ export default function Documentos() {
       <Card className="mb-4 p-4">
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
           <Select value={filtros.tenantId} onChange={(e) => setFiltro('tenantId', e.target.value)}>
-            <option value="">Todos os tenants</option>
+            <option value="">Todas as empresas</option>
             {(tenants ?? []).map((t) => (
               <option key={t.id} value={t.id}>
                 {t.razaoSocial}
@@ -91,13 +91,13 @@ export default function Documentos() {
             type="date"
             value={filtros.de}
             onChange={(e) => setFiltro('de', e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-300"
+            className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
           />
           <input
             type="date"
             value={filtros.ate}
             onChange={(e) => setFiltro('ate', e.target.value)}
-            className="rounded-lg border border-zinc-700 bg-zinc-900 px-3 py-2 text-sm text-zinc-300"
+            className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
           />
         </div>
       </Card>
@@ -116,7 +116,7 @@ export default function Documentos() {
                 <tr>
                   <Th>Número</Th>
                   <Th>Tipo</Th>
-                  <Th>Tenant</Th>
+                  <Th>Empresa</Th>
                   <Th>Status</Th>
                   <Th>Chave de acesso</Th>
                   <Th>Ambiente</Th>
@@ -125,9 +125,12 @@ export default function Documentos() {
               </thead>
               <tbody>
                 {data.itens.map((d) => (
-                  <tr key={d.id} className="transition-colors hover:bg-zinc-800/30">
+                  <tr key={d.id} className="transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/30">
                     <Td>
-                      <Link to={`/documentos/${d.id}`} className="font-mono text-xs font-medium text-zinc-100 hover:text-emerald-300">
+                      <Link
+                        to={`/documentos/${d.id}`}
+                        className="font-mono text-xs font-medium text-blue-700 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
+                      >
                         {d.serie !== null ? `${d.serie}/${String(d.numero ?? 0).padStart(9, '0')}` : '—'}
                       </Link>
                     </Td>
@@ -135,8 +138,8 @@ export default function Documentos() {
                       <Badge
                         className={
                           d.tipo === 'NFE'
-                            ? 'border-indigo-500/30 bg-indigo-500/10 text-indigo-300'
-                            : 'border-violet-500/30 bg-violet-500/10 text-violet-300'
+                            ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300'
+                            : 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300'
                         }
                       >
                         {d.tipo === 'NFE' ? 'NF-e 55' : d.tipo === 'NFCE' ? 'NFC-e 65' : d.tipo}
@@ -146,7 +149,7 @@ export default function Documentos() {
                     <Td>
                       <Badge className={STATUS_COLOR[d.status]}>{STATUS_LABEL[d.status] ?? d.status}</Badge>
                       {d.motivoStatus && d.status === 'REJEITADA' && (
-                        <p className="mt-0.5 max-w-64 truncate text-[11px] text-red-400/80" title={d.motivoStatus}>
+                        <p className="mt-0.5 max-w-64 truncate text-[11px] text-red-500/90 dark:text-red-400/80" title={d.motivoStatus}>
                           {d.motivoStatus}
                         </p>
                       )}
@@ -156,8 +159,8 @@ export default function Documentos() {
                       <Badge
                         className={
                           d.ambiente === 'producao'
-                            ? 'border-red-500/30 bg-red-500/10 text-red-300'
-                            : 'border-sky-500/30 bg-sky-500/10 text-sky-300'
+                            ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300'
+                            : 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300'
                         }
                       >
                         {d.ambiente}
@@ -176,16 +179,16 @@ export default function Documentos() {
                 <button
                   disabled={page <= 1}
                   onClick={() => setFiltro('page', String(page - 1))}
-                  className="rounded-md border border-zinc-700 px-2.5 py-1 disabled:opacity-40 hover:enabled:border-zinc-500"
+                  className="rounded-md border border-zinc-300 px-2.5 py-1 disabled:opacity-40 hover:enabled:border-zinc-400 dark:border-zinc-700 dark:hover:enabled:border-zinc-500"
                 >
-                  ← Anterior
+                  Anterior
                 </button>
                 <button
                   disabled={page >= totalPaginas}
                   onClick={() => setFiltro('page', String(page + 1))}
-                  className="rounded-md border border-zinc-700 px-2.5 py-1 disabled:opacity-40 hover:enabled:border-zinc-500"
+                  className="rounded-md border border-zinc-300 px-2.5 py-1 disabled:opacity-40 hover:enabled:border-zinc-400 dark:border-zinc-700 dark:hover:enabled:border-zinc-500"
                 >
-                  Próxima →
+                  Próxima
                 </button>
               </div>
             </div>

@@ -51,34 +51,28 @@ builder.Services.AddScoped<IRepositorioNotaRecebida, RepositorioNotaRecebida>();
 builder.Services.AddScoped<IRepositorioManifestacao, RepositorioManifestacao>();
 builder.Services.AddScoped<IRepositorioNsu, RepositorioNsu>();
 
-// ModoSandbox=true no Worker também registra EmissorMock (caso queira rodar
-// ponta-a-ponta sem certificado real). Default: true (falha segura, igual à
-// API) — produção sobe com Fiscal__ModoSandbox=false explícito.
-var modoSandbox = builder.Configuration.GetValue("Fiscal:ModoSandbox", true);
-if (modoSandbox)
-{
-    builder.Services.AddSingleton<IEmissorFiscal, EmissorMock>();
-}
+// Emissores/eventos/distribuição/manifestação: mocks e adapters reais são
+// SEMPRE registrados — a escolha é por tenant (Tenant.Sandbox) em runtime,
+// não por configuração global. Fiscal:ModoSandbox só define o default de
+// novos tenants.
+builder.Services.AddSingleton<IEmissorFiscal, EmissorMock>();
 builder.Services.AddSingleton<IEmissorFiscal, EmissorNFe>();
 builder.Services.AddSingleton<IEmissorFiscal, EmissorNFCe>();
 builder.Services.AddSingleton<IEmissorFiscal, EmissorNFSe>();
 
-// Transmissores de eventos: mesma regra do emissor (sandbox → mock).
-if (modoSandbox)
-{
-    builder.Services.AddSingleton<ITransmissorEventoFiscal, TransmissorEventoMock>();
-}
+builder.Services.AddSingleton<ITransmissorEventoFiscal, TransmissorEventoMock>();
 builder.Services.AddSingleton<ITransmissorEventoFiscal, TransmissorEventoUnimake>();
 builder.Services.AddSingleton<ITransmissorEpec, TransmissorEpecUnimake>();
 
-// Distribuição DFe + manifestação: mesma regra do emissor (sandbox → mock).
-if (modoSandbox)
-{
-    builder.Services.AddSingleton<IConsultaDistribuicaoDfe, ConsultaDistribuicaoMock>();
-    builder.Services.AddSingleton<ITransmissorManifestacao, TransmissorManifestacaoMock>();
-}
+builder.Services.AddSingleton<IConsultaDistribuicaoDfe, ConsultaDistribuicaoMock>();
 builder.Services.AddSingleton<IConsultaDistribuicaoDfe, ConsultaDistribuicaoUnimake>();
-// Consulta de protocolo (recuperação de timeout/contingência): única.
+builder.Services.AddSingleton<ITransmissorManifestacao, TransmissorManifestacaoMock>();
+builder.Services.AddSingleton<ITransmissorManifestacao, TransmissorManifestacaoUnimake>();
+
+// Consulta de protocolo (recuperação de timeout/contingência) é dependência
+// direta dos emissores reais — permanece única, guiada por Fiscal:ModoSandbox
+// (o mock só é usado quando TODA a aplicação está em sandbox).
+var modoSandbox = builder.Configuration.GetValue("Fiscal:ModoSandbox", true);
 if (modoSandbox)
 {
     builder.Services.AddSingleton<IConsultaProtocolo, ConsultaProtocoloMock>();
@@ -88,16 +82,9 @@ else
     builder.Services.AddSingleton<IConsultaProtocolo, ConsultaProtocoloUnimake>();
 }
 
-// Status de serviço: implementação única (mock em sandbox, Unimake em produção).
-if (modoSandbox)
-{
-    builder.Services.AddSingleton<IConsultaStatusServico, ConsultaStatusServicoMock>();
-}
-else
-{
-    builder.Services.AddSingleton<IConsultaStatusServico, ConsultaStatusServicoUnimake>();
-}
-builder.Services.AddSingleton<ITransmissorManifestacao, TransmissorManifestacaoUnimake>();
+// Status de serviço: resolvido por tenant (sandbox → mock) no controller/job.
+builder.Services.AddSingleton<IConsultaStatusServico, ConsultaStatusServicoMock>();
+builder.Services.AddSingleton<IConsultaStatusServico, ConsultaStatusServicoUnimake>();
 
 // Entrega de webhooks (outbox) — HTTP assinado com HMAC.
 builder.Services.AddSingleton<IDespachanteWebhook, DespachanteWebhookHttp>();

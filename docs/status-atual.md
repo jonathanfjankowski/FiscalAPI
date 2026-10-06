@@ -110,10 +110,29 @@ As principais:
 - Certificado **A1 apenas** (A3/HSM fora de escopo).
 - NFS-e real exige credenciamento do prestador na SEFAZ Nacional +
   certificado A1 (homologação manual).
-- Reenvio manual de webhooks via API (`POST /v1/webhooks/{id}/reenviar`);
-  painel segue como evolução.
+- Reenvio manual de webhooks via API (`POST /v1/webhooks/{id}/reenviar`)
+  **e pelo painel** (`POST /v1/admin/tenants/{tenantId}/webhooks/entregas/{id}/reenviar`).
 - Homologação real exige certificado A1 válido (não existe certificado
   "de teste" separado na SEFAZ).
+
+## Painel admin (out/2026)
+
+- Frontend refatorado: desktop-first, tema claro/escuro (toggle), acento azul,
+  ícones lucide-react, tabelas densas estilo ERP.
+- **Sandbox por empresa**: `Tenant.Sandbox` controla mock vs SEFAZ por tenant
+  (toggle no painel, `PUT /v1/admin/tenants/{id}` com `sandbox`). Novos tenants
+  herdam de `Fiscal:ModoSandbox`. Mocks de emissor/eventos/DFe ficam sempre
+  registrados; a escolha é em runtime.
+- **Chave master no banco**: o `X-Bootstrap-Key` do provisionamento do ERP
+  (`POST /v1/empresas`) passou a ser validado contra `chave_bootstrap`
+  (hash PBKDF2), com fallback ao config `Fiscal:BootstrapToken`. Rotação via
+  painel (`GET/POST /v1/admin/bootstrap-key[/rotacionar]`) — a chave em claro
+  aparece uma única vez.
+- Painel cobre: empresas (dados fiscais, CSC, API keys, certificados, sandbox,
+  webhooks + outbox com reenvio), documentos (cancelamento/CC-e), playground,
+  dashboard, chave master.
+- Migration `20261006000000_TenantSandboxChaveBootstrap` (tenants.sandbox
+  default true + tabela chave_bootstrap).
 
 ## Health do projeto
 

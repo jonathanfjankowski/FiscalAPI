@@ -7,7 +7,6 @@ using Fiscal.Core.Interfaces;
 using Fiscal.Core.Services;
 using Fiscal.Persistence;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.Extensions.Configuration;
 
 namespace Fiscal.Worker.Jobs;
 
@@ -15,7 +14,7 @@ namespace Fiscal.Worker.Jobs;
 /// Pega um documento PENDENTE (ou CONTINGENCIA) e tenta transmitir à SEFAZ via IEmissorFiscal.
 /// Persiste o resultado, escreve auditoria, e em caso de erro de transmissão agenda retry
 /// (status CONTINGENCIA + ProximaTentativaEm) — sem mexer em REJEITADA (essa não é reprocessada).
-/// Em ModoSandbox (EmissorMock) o certificado é opcional — o mock não assina nada.
+/// Tenant em sandbox (EmissorMock) dispensa certificado — o mock não assina nada.
 /// </summary>
 public class ProcessarDocumentoJob
 {
@@ -41,7 +40,6 @@ public class ProcessarDocumentoJob
     private readonly IEnumerable<ITransmissorEpec> _transmissoresEpec;
     private readonly ICertificadoStore _certStore;
     private readonly MetricasFiscais _metricas;
-    private readonly bool _sandbox;
     private readonly ILogger<ProcessarDocumentoJob> _logger;
 
     public ProcessarDocumentoJob(
@@ -53,7 +51,6 @@ public class ProcessarDocumentoJob
         IEnumerable<ITransmissorEpec> transmissoresEpec,
         ICertificadoStore certStore,
         MetricasFiscais metricas,
-        IConfiguration configuration,
         ILogger<ProcessarDocumentoJob> logger)
     {
         _db = db;
@@ -64,7 +61,6 @@ public class ProcessarDocumentoJob
         _transmissoresEpec = transmissoresEpec;
         _certStore = certStore;
         _metricas = metricas;
-        _sandbox = configuration.GetValue("Fiscal:ModoSandbox", false);
         _logger = logger;
     }
 
@@ -99,6 +95,17 @@ public class ProcessarDocumentoJob
             return;
         }
 
+        var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Id == doc.TenantId, ct);
+        if (tenant is null)
+        {
+            await MarcarErroInternoAsync(doc, $"Tenant {doc.TenantId} não encontrado.", ct);
+            return;
+        }
+
+        // Sandbox é por tenant (Tenant.Sandbox): mock não fala com SEFAZ e não
+        // exige certificado — a escolha do emissor acontece em ResolverEmissor.
+        var sandbox = tenant.Sandbox;
+
         // Janela de contingência: OFFLINE (NFC-e tpEmis 9) = 24h; demais
         // (SVC/EPEC) = 168h. Fora da janela a SEFAZ rejeita — falha alto
         // em vez de rejeição em loop.
@@ -120,7 +127,7 @@ public class ProcessarDocumentoJob
         // Contingência EPEC: o evento prévio (110140, SVRS) precisa ser
         // autorizado ANTES da transmissão da NF-e completa (tpEmis 4).
         // Sucesso → protocolo salvo; a NF-e vai no próximo ciclo.
-        if (doc.ModoContingencia == "EPEC" && doc.EpecProtocolo is null && !_sandbox)
+        if (doc.ModoContingencia == "EPEC" && doc.EpecProtocolo is null && !sandbox)
         {
             var epecOk = await TransmitirEpecAsync(doc, ct);
             if (!epecOk) return; // CONTINGENCIA/ERRO já persistidos em TransmitirEpecAsync
@@ -133,7 +140,7 @@ public class ProcessarDocumentoJob
         }
 
         var cert = await _certRepo.ObterAtivoPorTenantAsync(doc.TenantId, ct);
-        if (cert is null && !_sandbox)
+        if (cert is null && !sandbox)
         {
             // Produção não tem como assinar sem certificado — falha não recuperável.
             doc.Status = StatusDocumento.ERRO_INTERNO;
@@ -161,14 +168,7 @@ public class ProcessarDocumentoJob
             }, ct);
         }
 
-        var emissor = ResolverEmissor(doc.Tipo);
-
-        var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Id == doc.TenantId, ct);
-        if (tenant is null)
-        {
-            await MarcarErroInternoAsync(doc, $"Tenant {doc.TenantId} não encontrado.", ct);
-            return;
-        }
+        var emissor = ResolverEmissor(doc.Tipo, sandbox);
 
         ResultadoEmissao resultado;
         try
@@ -303,14 +303,17 @@ public class ProcessarDocumentoJob
         });
     }
 
-    private IEmissorFiscal ResolverEmissor(TipoDocumento tipo)
+    private IEmissorFiscal ResolverEmissor(TipoDocumento tipo, bool sandbox)
     {
         // Ordem de resolução:
-        // 1) EmissorMock (registrado em ModoSandbox=true) — cobre NFE e NFCE.
+        // 1) Tenant em sandbox → EmissorMock (cobre NFE e NFCE).
         // 2) Emissor específico pelo TipoDocumento (NFE → EmissorNFe, NFCE → EmissorNFCe).
         // 3) Qualquer outro emissor registrado (testes podem injetar um único fake).
-        var mock = _emissores.OfType<EmissorMock>().FirstOrDefault();
-        if (mock is not null) return mock;
+        if (sandbox)
+        {
+            var mock = _emissores.OfType<EmissorMock>().FirstOrDefault();
+            if (mock is not null) return mock;
+        }
 
         return tipo switch
         {

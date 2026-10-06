@@ -154,7 +154,7 @@ manualmente.
 | Chave | Default | Uso |
 |---|---|---|
 | `Certificados:ChaveMestraKEK` | — (obrigatória) | KEK do envelope |
-| `Fiscal:ModoSandbox` | true (API e Worker) | mock vs transmissão real |
+| `Fiscal:ModoSandbox` | true (API e Worker) | default de sandbox para novos tenants (o flag efetivo é `Tenant.Sandbox`, por empresa) |
 | `Fiscal:Contingencia:Habilitada` | false | troca automática p/ SVC |
 | `Fiscal:Contingencia:Modo` | SVCAN | SVCAN ou SVCRS |
 | `Fiscal:RateLimit:PorMinuto` | 100 | rate limit global por IP |

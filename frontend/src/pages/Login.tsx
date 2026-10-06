@@ -31,11 +31,11 @@ export default function Login() {
     <div className="flex min-h-screen items-center justify-center p-4">
       <div className="w-full max-w-sm">
         <div className="mb-8 flex flex-col items-center gap-3">
-          <div className="flex h-12 w-12 items-center justify-center rounded-xl bg-emerald-600/20 text-lg font-bold text-emerald-400">
+          <div className="flex h-12 w-12 items-center justify-center rounded-lg bg-blue-600 text-lg font-bold text-white">
             F
           </div>
           <div className="text-center">
-            <h1 className="text-lg font-semibold text-zinc-100">FiscalAPI Admin</h1>
+            <h1 className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">FiscalAPI Admin</h1>
             <p className="mt-1 text-xs text-zinc-500">Acesso restrito a operadores</p>
           </div>
         </div>
@@ -67,7 +67,7 @@ export default function Login() {
           </form>
         </Card>
 
-        <p className="mt-6 text-center text-[11px] leading-relaxed text-zinc-600">
+        <p className="mt-6 text-center text-[11px] leading-relaxed text-zinc-500 dark:text-zinc-400">
           O primeiro operador é criado via seed no startup da API
           <br />
           (envs ADMIN_EMAIL / ADMIN_PASSWORD).

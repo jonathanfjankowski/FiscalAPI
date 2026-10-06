@@ -33,14 +33,12 @@ public class TenantsController : ControllerBase
     private readonly FiscalDbContext _db;
     private readonly ICertificadoStore _certStore;
     private readonly IRepositorioAuditoria _auditoria;
-    private readonly bool _sandbox;
 
-    public TenantsController(FiscalDbContext db, ICertificadoStore certStore, IRepositorioAuditoria auditoria, IConfiguration configuration)
+    public TenantsController(FiscalDbContext db, ICertificadoStore certStore, IRepositorioAuditoria auditoria)
     {
         _db = db;
         _certStore = certStore;
         _auditoria = auditoria;
-        _sandbox = configuration.GetValue("Fiscal:ModoSandbox", true);
     }
 
     /// <summary>Perfil fiscal do tenant (dados do emitente usados na NFe/NFC-e).</summary>
@@ -154,7 +152,8 @@ public class TenantsController : ControllerBase
 
         if (req.WebhookUrl is not null)
         {
-            var problema = ValidadorWebhookUrl.Validar(req.WebhookUrl, _sandbox);
+            // HTTPS só é exigido para tenants fora do sandbox (Tenant.Sandbox).
+            var problema = ValidadorWebhookUrl.Validar(req.WebhookUrl, tenant.Sandbox);
             if (problema is not null)
                 return Problem(statusCode: 422, title: "webhookUrl inválida", detail: problema);
             var url = req.WebhookUrl.Trim();

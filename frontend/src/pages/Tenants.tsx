@@ -74,7 +74,7 @@ export function TenantFormModal({
     onSuccess: (id) => {
       qc.invalidateQueries({ queryKey: ['tenants'] })
       qc.invalidateQueries({ queryKey: ['tenant', inicial?.id] })
-      toast({ tipo: 'sucesso', titulo: inicial ? 'Tenant atualizado' : 'Tenant criado' })
+      toast({ tipo: 'sucesso', titulo: inicial ? 'Empresa atualizada' : 'Empresa criada' })
       if (!inicial && criado && id) criado(id)
       onClose()
     },
@@ -106,14 +106,14 @@ export function TenantFormModal({
     <Modal
       open={open}
       onClose={onClose}
-      titulo={inicial ? `Editar — ${inicial.razaoSocial}` : 'Novo tenant'}
+      titulo={inicial ? `Editar — ${inicial.razaoSocial}` : 'Nova empresa'}
       largura="max-w-2xl"
       rodape={
         <>
-          {erro && <p className="mr-auto text-xs text-red-400">{erro}</p>}
+          {erro && <p className="mr-auto text-xs text-red-500 dark:text-red-400">{erro}</p>}
           <Button onClick={onClose}>Cancelar</Button>
           <Button variant="primary" loading={mut.isPending} onClick={() => mut.mutate()}>
-            {inicial ? 'Salvar' : 'Criar tenant'}
+            {inicial ? 'Salvar' : 'Criar empresa'}
           </Button>
         </>
       }
@@ -165,7 +165,7 @@ export function TenantFormModal({
             <option value="producao">Produção</option>
           </Select>
         </Field>
-        <Field label="Webhook URL" hint="Será usado quando o dispatcher de webhooks existir">
+        <Field label="Webhook URL" hint="Endpoint que receberá os eventos do tenant">
           <Input value={form.webhookUrl ?? ''} onChange={(e) => set('webhookUrl', e.target.value)} placeholder="https://…" />
         </Field>
         {inicial && (
@@ -188,11 +188,11 @@ export default function Tenants() {
   return (
     <>
       <PageHeader
-        titulo="Tenants"
+        titulo="Empresas"
         descricao="Empresas emitentes cadastradas na plataforma"
         acoes={
           <Button variant="primary" onClick={() => setModalNovo(true)}>
-            + Novo tenant
+            Nova empresa
           </Button>
         }
       />
@@ -201,11 +201,11 @@ export default function Tenants() {
           <PageLoading />
         ) : !data || data.length === 0 ? (
           <EmptyState
-            titulo="Nenhum tenant cadastrado"
-            descricao="Crie o primeiro tenant para poder gerar API keys e emitir documentos."
+            titulo="Nenhuma empresa cadastrada"
+            descricao="Crie a primeira empresa para poder gerar API keys e emitir documentos. O ERP também provisiona automaticamente via chave master."
             acao={
               <Button variant="primary" onClick={() => setModalNovo(true)}>
-                + Novo tenant
+                Nova empresa
               </Button>
             }
           />
@@ -217,6 +217,7 @@ export default function Tenants() {
                 <Th>CNPJ</Th>
                 <Th>UF</Th>
                 <Th>Ambiente padrão</Th>
+                <Th>Modo</Th>
                 <Th className="text-center">API keys</Th>
                 <Th className="text-center">Certificados</Th>
                 <Th>Situação</Th>
@@ -225,9 +226,9 @@ export default function Tenants() {
             </thead>
             <tbody>
               {data.map((t) => (
-                <tr key={t.id} className="transition-colors hover:bg-zinc-800/30">
+                <tr key={t.id} className="transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/30">
                   <Td>
-                    <Link to={`/tenants/${t.id}`} className="font-medium text-zinc-100 hover:text-emerald-300">
+                    <Link to={`/empresas/${t.id}`} className="font-medium text-zinc-900 hover:text-blue-600 dark:text-zinc-100 dark:hover:text-blue-300">
                       {t.razaoSocial}
                     </Link>
                   </Td>
@@ -237,11 +238,22 @@ export default function Tenants() {
                     <Badge
                       className={
                         t.ambientePadrao === 'producao'
-                          ? 'border-red-500/30 bg-red-500/10 text-red-300'
-                          : 'border-sky-500/30 bg-sky-500/10 text-sky-300'
+                          ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300'
+                          : 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300'
                       }
                     >
                       {t.ambientePadrao}
+                    </Badge>
+                  </Td>
+                  <Td>
+                    <Badge
+                      className={
+                        t.sandbox
+                          ? 'border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-300'
+                          : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300'
+                      }
+                    >
+                      {t.sandbox ? 'Sandbox' : 'Produção real'}
                     </Badge>
                   </Td>
                   <Td className="text-center tabular-nums">{t.apiKeysAtivas}</Td>
@@ -250,11 +262,11 @@ export default function Tenants() {
                     <Badge
                       className={
                         t.ativo
-                          ? 'border-emerald-500/30 bg-emerald-500/10 text-emerald-300'
-                          : 'border-zinc-600 bg-zinc-800 text-zinc-400'
+                          ? 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300'
+                          : 'border-zinc-200 bg-zinc-100 text-zinc-500 dark:border-zinc-600 dark:bg-zinc-800 dark:text-zinc-400'
                       }
                     >
-                      {t.ativo ? 'Ativo' : 'Inativo'}
+                      {t.ativo ? 'Ativa' : 'Inativa'}
                     </Badge>
                   </Td>
                   <Td className="text-xs text-zinc-500">{formatarData(t.criadoEm)}</Td>
@@ -268,7 +280,7 @@ export default function Tenants() {
         <TenantFormModal
           open
           onClose={() => setModalNovo(false)}
-          criado={(id) => window.location.assign(`/tenants/${id}`)}
+          criado={(id) => window.location.assign(`/empresas/${id}`)}
         />
       )}
     </>
