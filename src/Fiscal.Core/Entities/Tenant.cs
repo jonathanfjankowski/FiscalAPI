@@ -37,6 +37,10 @@ public class Tenant
 
     /// <summary>Segredo HMAC dos webhooks, cifrado com a KEK (EnvelopeEncryptionService).</summary>
     public byte[]? WebhookSecretCriptografado { get; set; }
+    /// <summary>Sandbox por tenant: true → EmissorMock (sem SEFAZ/certificado).
+    /// Novos tenants herdam o default de Fiscal:ModoSandbox.</summary>
+    public bool Sandbox { get; set; } = true;
+
     public bool Ativo { get; set; } = true;
     public DateTimeOffset CriadoEm { get; set; } = DateTimeOffset.UtcNow;
 

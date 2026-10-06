@@ -112,36 +112,29 @@ builder.Services.AddSingleton<ValidadorNfseDps>();
 builder.Services.AddSingleton<IGeradorPdf, GeradorPdfQuestPdf>();
 
 // --- Emissores fiscais ---
-// Em ModoSandbox=true (default em dev), todos os tipos caem no mock.
-// Em produção, registra os adapters reais. Em Testing, sempre mock (a
-// integração real exige certificado A1 + SEFAZ no ar).
+// Mocks e adapters reais são SEMPRE registrados — a escolha é por tenant
+// (Tenant.Sandbox) em runtime. Fiscal:ModoSandbox só define o default de
+// novos tenants (e Testing força sandbox para o banco de testes).
 var modoSandbox = builder.Environment.IsEnvironment("Testing")
     || builder.Configuration.GetValue("Fiscal:ModoSandbox", true);
-if (modoSandbox)
-{
-    builder.Services.AddSingleton<IEmissorFiscal, EmissorMock>();
-}
+builder.Services.AddSingleton<IEmissorFiscal, EmissorMock>();
 builder.Services.AddSingleton<IEmissorFiscal, EmissorNFe>();
 builder.Services.AddSingleton<IEmissorFiscal, EmissorNFCe>();
 builder.Services.AddSingleton<IEmissorFiscal, EmissorNFSe>();
 
 // --- Transmissores de eventos (cancelamento/CC-e/inutilização) ---
-// Mesma regra do emissor: sandbox → mock; produção → Unimake.
-if (modoSandbox)
-{
-    builder.Services.AddSingleton<ITransmissorEventoFiscal, TransmissorEventoMock>();
-}
+builder.Services.AddSingleton<ITransmissorEventoFiscal, TransmissorEventoMock>();
 builder.Services.AddSingleton<ITransmissorEventoFiscal, TransmissorEventoUnimake>();
 builder.Services.AddSingleton<ITransmissorEpec, TransmissorEpecUnimake>();
 
-// Distribuição DFe + manifestação: mesma regra do emissor (sandbox → mock).
-if (modoSandbox)
-{
-    builder.Services.AddSingleton<IConsultaDistribuicaoDfe, ConsultaDistribuicaoMock>();
-    builder.Services.AddSingleton<ITransmissorManifestacao, TransmissorManifestacaoMock>();
-}
+// Distribuição DFe + manifestação (resolvidos por tenant em runtime).
+builder.Services.AddSingleton<IConsultaDistribuicaoDfe, ConsultaDistribuicaoMock>();
 builder.Services.AddSingleton<IConsultaDistribuicaoDfe, ConsultaDistribuicaoUnimake>();
-// Consulta de protocolo (recuperação de timeout/contingência): única.
+builder.Services.AddSingleton<ITransmissorManifestacao, TransmissorManifestacaoMock>();
+builder.Services.AddSingleton<ITransmissorManifestacao, TransmissorManifestacaoUnimake>();
+
+// Consulta de protocolo (recuperação de timeout/contingência) é dependência
+// direta dos emissores reais — permanece única, guiada por Fiscal:ModoSandbox.
 if (modoSandbox)
 {
     builder.Services.AddSingleton<IConsultaProtocolo, ConsultaProtocoloMock>();
@@ -151,16 +144,9 @@ else
     builder.Services.AddSingleton<IConsultaProtocolo, ConsultaProtocoloUnimake>();
 }
 
-// Status de serviço: implementação única (mock em sandbox, Unimake em produção).
-if (modoSandbox)
-{
-    builder.Services.AddSingleton<IConsultaStatusServico, ConsultaStatusServicoMock>();
-}
-else
-{
-    builder.Services.AddSingleton<IConsultaStatusServico, ConsultaStatusServicoUnimake>();
-}
-builder.Services.AddSingleton<ITransmissorManifestacao, TransmissorManifestacaoUnimake>();
+// Status de serviço: resolvido por tenant (sandbox → mock) no controller.
+builder.Services.AddSingleton<IConsultaStatusServico, ConsultaStatusServicoMock>();
+builder.Services.AddSingleton<IConsultaStatusServico, ConsultaStatusServicoUnimake>();
 
 // --- Despacho de webhooks (outbox) ---
 // A entrega real (HTTP assinado) roda no Worker; aqui fica registrado para
@@ -362,6 +348,24 @@ if (rodarMigrations)
     using var scope = app.Services.CreateScope();
     var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
     await db.Database.MigrateAsync();
+
+    // Seed da chave bootstrap (idempotente): reaproveita Fiscal:BootstrapToken
+    // se configurado; senão gera uma nova (visível na rotação do painel).
+    if (!await db.BootstrapKeys.AnyAsync())
+    {
+        var token = builder.Configuration["Fiscal:BootstrapToken"];
+        var chaveEmClaro = string.IsNullOrEmpty(token)
+            ? Fiscal.Api.Controllers.Admin.AdminBootstrapController.GerarChave()
+            : token;
+        db.BootstrapKeys.Add(new BootstrapKey
+        {
+            Prefixo = ApiKeyAuthenticationHandler.PrefixoDa(chaveEmClaro),
+            KeyHash = ApiKeyAuthenticationHandler.HashKey(chaveEmClaro),
+            CriadoEm = DateTimeOffset.UtcNow
+        });
+        await db.SaveChangesAsync();
+        Log.Information("Chave bootstrap semeada (prefixo {Prefixo}).", ApiKeyAuthenticationHandler.PrefixoDa(chaveEmClaro));
+    }
 }
 
 // --- Seed do primeiro admin (idempotente; exige ADMIN_EMAIL/ADMIN_PASSWORD) ---

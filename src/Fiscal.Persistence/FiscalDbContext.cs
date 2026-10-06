@@ -10,6 +10,7 @@ public class FiscalDbContext : DbContext
     public DbSet<Tenant> Tenants => Set<Tenant>();
     public DbSet<ApiKey> ApiKeys => Set<ApiKey>();
     public DbSet<AdminUser> AdminUsers => Set<AdminUser>();
+    public DbSet<BootstrapKey> BootstrapKeys => Set<BootstrapKey>();
     public DbSet<Certificado> Certificados => Set<Certificado>();
     public DbSet<DocumentoFiscal> DocumentosFiscais => Set<DocumentoFiscal>();
     public DbSet<SequenciaNumeracao> SequenciasNumeracao => Set<SequenciaNumeracao>();
@@ -46,6 +47,7 @@ public class FiscalDbContext : DbContext
             b.Property(x => x.WebhookUrl).HasColumnName("webhook_url");
             b.Property(x => x.WebhookSecret).HasColumnName("webhook_secret");
             b.Property(x => x.WebhookSecretCriptografado).HasColumnName("webhook_secret_criptografado");
+            b.Property(x => x.Sandbox).HasColumnName("sandbox");
             b.Property(x => x.Ativo).HasColumnName("ativo");
             b.Property(x => x.CriadoEm).HasColumnName("criado_em");
             b.HasIndex(x => x.Cnpj).IsUnique();
@@ -177,6 +179,16 @@ public class FiscalDbContext : DbContext
             b.Property(x => x.Ativo).HasColumnName("ativo");
             b.Property(x => x.CriadoEm).HasColumnName("criado_em");
             b.HasIndex(x => x.Email).IsUnique();
+        });
+
+        modelBuilder.Entity<BootstrapKey>(b =>
+        {
+            b.ToTable("chave_bootstrap");
+            b.HasKey(x => x.Id);
+            b.Property(x => x.Id).HasColumnName("id");
+            b.Property(x => x.Prefixo).HasColumnName("prefixo").HasMaxLength(16).IsRequired();
+            b.Property(x => x.KeyHash).HasColumnName("key_hash").HasMaxLength(120).IsRequired();
+            b.Property(x => x.CriadoEm).HasColumnName("criado_em");
         });
 
         modelBuilder.Entity<Auditoria>(b =>

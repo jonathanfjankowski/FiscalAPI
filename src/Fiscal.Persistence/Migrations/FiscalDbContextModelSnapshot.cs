@@ -155,6 +155,34 @@ namespace Fiscal.Persistence.Migrations
                     b.ToTable("auditoria", (string)null);
                 });
 
+            modelBuilder.Entity("Fiscal.Core.Entities.BootstrapKey", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid")
+                        .HasColumnName("id");
+
+                    b.Property<DateTimeOffset>("CriadoEm")
+                        .HasColumnType("timestamp with time zone")
+                        .HasColumnName("criado_em");
+
+                    b.Property<string>("KeyHash")
+                        .IsRequired()
+                        .HasMaxLength(120)
+                        .HasColumnType("character varying(120)")
+                        .HasColumnName("key_hash");
+
+                    b.Property<string>("Prefixo")
+                        .IsRequired()
+                        .HasMaxLength(16)
+                        .HasColumnType("character varying(16)")
+                        .HasColumnName("prefixo");
+
+                    b.HasKey("Id");
+
+                    b.ToTable("chave_bootstrap", (string)null);
+                });
+
             modelBuilder.Entity("Fiscal.Core.Entities.Certificado", b =>
                 {
                     b.Property<Guid>("Id")
@@ -647,6 +675,10 @@ namespace Fiscal.Persistence.Migrations
                         .HasMaxLength(200)
                         .HasColumnType("character varying(200)")
                         .HasColumnName("razao_social");
+
+                    b.Property<bool>("Sandbox")
+                        .HasColumnType("boolean")
+                        .HasColumnName("sandbox");
 
                     b.Property<short>("RegimeTributario")
                         .HasColumnType("smallint")

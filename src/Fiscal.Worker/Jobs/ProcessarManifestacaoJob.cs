@@ -28,7 +28,6 @@ public class ProcessarManifestacaoJob
     private readonly IRepositorioCertificado _certRepo;
     private readonly IEnumerable<ITransmissorManifestacao> _transmissores;
     private readonly ICertificadoStore _certStore;
-    private readonly bool _sandbox;
     private readonly ILogger<ProcessarManifestacaoJob> _logger;
 
     public ProcessarManifestacaoJob(
@@ -36,14 +35,12 @@ public class ProcessarManifestacaoJob
         IRepositorioCertificado certRepo,
         IEnumerable<ITransmissorManifestacao> transmissores,
         ICertificadoStore certStore,
-        IConfiguration configuration,
         ILogger<ProcessarManifestacaoJob> logger)
     {
         _db = db;
         _certRepo = certRepo;
         _transmissores = transmissores;
         _certStore = certStore;
-        _sandbox = configuration.GetValue("Fiscal:ModoSandbox", false);
         _logger = logger;
     }
 
@@ -77,7 +74,7 @@ public class ProcessarManifestacaoJob
 
         var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Id == manif.TenantId, ct);
         var cert = await _certRepo.ObterAtivoPorTenantAsync(manif.TenantId, ct);
-        if (tenant is null || (cert is null && !_sandbox))
+        if (tenant is null || (cert is null && !tenant.Sandbox))
         {
             manif.Status = "REJEITADO";
             manif.MotivoStatus = "Tenant/certificado indisponível para transmissão.";
@@ -92,7 +89,7 @@ public class ProcessarManifestacaoJob
         try
         {
             using var x509 = cert is null ? null : await _certStore.CarregarAsync(cert, ct);
-            resultado = await ResolverTransmissor().TransmitirAsync(
+            resultado = await ResolverTransmissor(tenant.Sandbox).TransmitirAsync(
                 manif, nota, tenant, x509, (Ambiente)nota.Ambiente, ct);
         }
         catch (ErroNaoRecuperavelException ex)
@@ -158,10 +155,13 @@ public class ProcessarManifestacaoJob
             manif.Id, manif.Tipo, manif.Status, manif.Tentativas);
     }
 
-    private ITransmissorManifestacao ResolverTransmissor() =>
-        _transmissores.OfType<TransmissorManifestacaoMock>().FirstOrDefault()
-        ?? (ITransmissorManifestacao?)_transmissores.OfType<TransmissorManifestacaoUnimake>().FirstOrDefault()
-        ?? _transmissores.First();
+    private ITransmissorManifestacao ResolverTransmissor(bool sandbox) =>
+        sandbox
+            ? _transmissores.OfType<TransmissorManifestacaoMock>().FirstOrDefault()
+                ?? (ITransmissorManifestacao?)_transmissores.OfType<TransmissorManifestacaoUnimake>().FirstOrDefault()
+                ?? _transmissores.First()
+            : _transmissores.OfType<TransmissorManifestacaoUnimake>().FirstOrDefault()
+                ?? _transmissores.First();
 
     private static TimeSpan ProximoBackoff(int tentativa) =>
         tentativa <= 0 ? Backoff[0] : Backoff[Math.Min(tentativa - 1, Backoff.Length - 1)];

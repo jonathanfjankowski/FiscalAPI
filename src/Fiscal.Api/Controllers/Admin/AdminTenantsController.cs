@@ -27,6 +27,12 @@ public record AdminTenantRequest(
     string? WebhookUrl,
     string? WebhookSecret,
     bool? Ativo,
+    // Sandbox por tenant: true → EmissorMock (sem SEFAZ/certificado). Ausente
+    // na criação herda Fiscal:ModoSandbox; na atualização, null não altera.
+    bool? Sandbox,
+    // CSC/IdCSC da NFC-e (sensível — armazenado cifrado, nunca devolvido).
+    string? CscId,
+    string? Csc,
     // Opcional: "producao"|"homologacao" cria a primeira API key junto com o
     // tenant (mesma transação). Ausente/null mantém o fluxo em 2 chamadas.
     string? CriarApiKey = null);
@@ -47,6 +53,7 @@ public record AdminTenantResponse(
     string? Cep,
     string? NomeMunicipio,
     string? WebhookUrl,
+    bool Sandbox,
     bool Ativo,
     DateTimeOffset CriadoEm,
     int ApiKeysAtivas,
@@ -95,7 +102,7 @@ public class AdminTenantsController : ControllerBase
                 t.RegimeTributario,
                 t.AmbientePadrao == (short)Ambiente.Producao ? "producao" : "homologacao",
                 t.InscricaoEstadual, t.Logradouro, t.Numero, t.Complemento, t.Bairro,
-                t.Cep, t.NomeMunicipio, t.WebhookUrl, t.Ativo, t.CriadoEm,
+                t.Cep, t.NomeMunicipio, t.WebhookUrl, t.Sandbox, t.Ativo, t.CriadoEm,
                 t.ApiKeys.Count(k => k.Ativa && k.RevogadoEm == null),
                 t.Certificados.Count(c => c.Ativo)))
             .ToListAsync(ct);
@@ -112,7 +119,7 @@ public class AdminTenantsController : ControllerBase
                 t.RegimeTributario,
                 t.AmbientePadrao == (short)Ambiente.Producao ? "producao" : "homologacao",
                 t.InscricaoEstadual, t.Logradouro, t.Numero, t.Complemento, t.Bairro,
-                t.Cep, t.NomeMunicipio, t.WebhookUrl, t.Ativo, t.CriadoEm,
+                t.Cep, t.NomeMunicipio, t.WebhookUrl, t.Sandbox, t.Ativo, t.CriadoEm,
                 t.ApiKeys.Count(k => k.Ativa && k.RevogadoEm == null),
                 t.Certificados.Count(c => c.Ativo)))
             .FirstOrDefaultAsync(ct);
@@ -139,9 +146,14 @@ public class AdminTenantsController : ControllerBase
                 detail: "Use 'producao' ou 'homologacao' (ou omita o campo para não criar chave).");
         if (req.RegimeTributario is < 1 or > 3)
             return Problem(statusCode: 422, title: "RegimeTributario inválido", detail: "Use 1 (Simples), 2 (Simples exceto sublimite) ou 3 (Regime Normal).");
-        var problemaWebhook = Infrastructure.ValidadorWebhookUrl.Validar(req.WebhookUrl, _sandbox);
+        var sandboxEfetivo = req.Sandbox ?? _sandbox;
+        var problemaWebhook = Infrastructure.ValidadorWebhookUrl.Validar(req.WebhookUrl, sandboxEfetivo);
         if (problemaWebhook is not null)
             return Problem(statusCode: 422, title: "WebhookUrl inválida", detail: problemaWebhook);
+        if (req.Csc is not null && string.IsNullOrWhiteSpace(req.CscId))
+            return Problem(statusCode: 422, title: "Informe cscId junto com o csc.");
+        if (req.Csc is null && req.CscId is not null)
+            return Problem(statusCode: 422, title: "Informe o csc junto com o cscId.");
 
         if (await _db.Tenants.AnyAsync(t => t.Cnpj == cnpj, ct))
             return Problem(statusCode: 409, title: "Já existe um tenant com este CNPJ.");
@@ -165,6 +177,7 @@ public class AdminTenantsController : ControllerBase
             WebhookSecretCriptografado = req.WebhookSecret is null
                 ? null
                 : await _certStore.CifrarTextoAsync(req.WebhookSecret, ct),
+            Sandbox = sandboxEfetivo,
             Ativo = req.Ativo ?? true,
             CriadoEm = DateTimeOffset.UtcNow
         };
@@ -225,7 +238,7 @@ public class AdminTenantsController : ControllerBase
                 tenant.RegimeTributario,
                 tenant.AmbientePadrao == (short)Ambiente.Producao ? "producao" : "homologacao",
                 tenant.InscricaoEstadual, tenant.Logradouro, tenant.Numero, tenant.Complemento,
-                tenant.Bairro, tenant.Cep, tenant.NomeMunicipio, tenant.WebhookUrl, tenant.Ativo,
+                tenant.Bairro, tenant.Cep, tenant.NomeMunicipio, tenant.WebhookUrl, tenant.Sandbox, tenant.Ativo,
                 tenant.CriadoEm,
                 ApiKeysAtivas: 1,   // tenant novo: só a chave que acabou de ser criada
                 CertificadosAtivos: 0),
@@ -288,7 +301,8 @@ public class AdminTenantsController : ControllerBase
         if (req.NomeMunicipio is not null) tenant.NomeMunicipio = req.NomeMunicipio;
         if (req.WebhookUrl is not null)
         {
-            var problema = Infrastructure.ValidadorWebhookUrl.Validar(req.WebhookUrl, _sandbox);
+            // HTTPS só é exigido para tenants fora do sandbox (Tenant.Sandbox).
+            var problema = Infrastructure.ValidadorWebhookUrl.Validar(req.WebhookUrl, tenant.Sandbox);
             if (problema is not null)
                 return Problem(statusCode: 422, title: "WebhookUrl inválida", detail: problema);
             tenant.WebhookUrl = req.WebhookUrl.Trim() is { Length: > 0 } url ? url : null;
@@ -298,6 +312,16 @@ public class AdminTenantsController : ControllerBase
             // Sempre cifrado em repouso (envelope KEK); texto plano legado é limpo.
             tenant.WebhookSecretCriptografado = await _certStore.CifrarTextoAsync(req.WebhookSecret, ct);
             tenant.WebhookSecret = null;
+        }
+        if (req.Sandbox is not null) tenant.Sandbox = req.Sandbox.Value;
+        if (req.Csc is not null)
+        {
+            tenant.CscCriptografado = await _certStore.CifrarTextoAsync(req.Csc, ct);
+            tenant.CscId = req.CscId!.Trim();
+        }
+        else if (req.CscId is not null)
+        {
+            tenant.CscId = req.CscId.Trim();
         }
         if (req.Ativo is not null) tenant.Ativo = req.Ativo.Value;
 

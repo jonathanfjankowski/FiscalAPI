@@ -62,13 +62,30 @@ public class ProvisionamentoController : ControllerBase
     [HttpPost]
     public async Task<IActionResult> Provisionar([FromBody] ProvisionamentoEmpresaRequest req, CancellationToken ct)
     {
+        // Chave bootstrap: preferência pelo banco (rotacionável pelo painel admin),
+        // com fallback ao config Fiscal:BootstrapToken (compatibilidade).
+        var recebida = Request.Headers["X-Bootstrap-Key"].FirstOrDefault();
+        var autorizado = false;
         var bootstrapToken = _configuration["Fiscal:BootstrapToken"];
-        if (string.IsNullOrEmpty(bootstrapToken))
-            return Problem(statusCode: 503, title: "Provisionamento desabilitado",
-                detail: "Defina Fiscal:BootstrapToken para habilitar o provisionamento automático.");
+        if (!string.IsNullOrEmpty(bootstrapToken) && BootstrapKeyValida(recebida, bootstrapToken))
+        {
+            autorizado = true;
+        }
+        else if (!string.IsNullOrEmpty(recebida))
+        {
+            var chave = await _db.BootstrapKeys.AsNoTracking().FirstOrDefaultAsync(ct);
+            autorizado = chave is not null && ApiKeyAuthenticationHandler.VerifyKey(recebida, chave.KeyHash);
+        }
 
-        if (! BootstrapKeyValida(Request.Headers["X-Bootstrap-Key"].FirstOrDefault(), bootstrapToken))
+        if (!autorizado)
+        {
+            var existeSegredo = !string.IsNullOrEmpty(bootstrapToken)
+                || await _db.BootstrapKeys.AsNoTracking().AnyAsync(ct);
+            if (!existeSegredo)
+                return Problem(statusCode: 503, title: "Provisionamento desabilitado",
+                    detail: "Nenhuma chave bootstrap configurada — gere uma em Configurações no painel admin.");
             return Unauthorized();
+        }
 
         if (req is null) return Problem(statusCode: 400, title: "Corpo da requisição é obrigatório.");
 
@@ -82,12 +99,17 @@ public class ProvisionamentoController : ControllerBase
             return Problem(statusCode: 422, title: "Ambiente inválido", detail: "Use 'producao' ou 'homologacao'.");
         if (string.IsNullOrWhiteSpace(req.RazaoSocial))
             return Problem(statusCode: 422, title: "RazaoSocial é obrigatória.");
-        var problemaWebhook = ValidadorWebhookUrl.Validar(req.WebhookUrl, _sandbox);
-        if (problemaWebhook is not null)
-            return Problem(statusCode: 422, title: "WebhookUrl inválida", detail: problemaWebhook);
 
         var tenant = await _db.Tenants.FirstOrDefaultAsync(t => t.Cnpj == cnpj, ct);
         var criouTenant = tenant is null;
+
+        // HTTPS do webhook só é exigido fora do sandbox (sandbox do tenant
+        // existente; para tenant novo, o default global de Fiscal:ModoSandbox).
+        var sandboxEfetivo = tenant?.Sandbox ?? _sandbox;
+        var problemaWebhook = ValidadorWebhookUrl.Validar(req.WebhookUrl, sandboxEfetivo);
+        if (problemaWebhook is not null)
+            return Problem(statusCode: 422, title: "WebhookUrl inválida", detail: problemaWebhook);
+
         if (criouTenant)
         {
             tenant = new Tenant
@@ -99,6 +121,7 @@ public class ProvisionamentoController : ControllerBase
                 AmbientePadrao = ambiente == "producao" ? (short)Ambiente.Producao : (short)Ambiente.Homologacao,
                 InscricaoEstadual = req.InscricaoEstadual,
                 WebhookUrl = req.WebhookUrl,
+                Sandbox = _sandbox, // novo tenant herda o default de Fiscal:ModoSandbox
                 Ativo = true,
                 CriadoEm = DateTimeOffset.UtcNow
             };
