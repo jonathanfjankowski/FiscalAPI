@@ -18,6 +18,7 @@ public record PerfilTenantRequest(
     string? Bairro,
     string? Cep,
     string? NomeMunicipio,
+    short? RegimeTributario,
     string? CscId,
     string? Csc);
 
@@ -89,6 +90,12 @@ public class TenantsController : ControllerBase
         tenant.Bairro = req.Bairro ?? tenant.Bairro;
         tenant.Cep = req.Cep ?? tenant.Cep;
         tenant.NomeMunicipio = req.NomeMunicipio ?? tenant.NomeMunicipio;
+        if (req.RegimeTributario is not null)
+        {
+            if (req.RegimeTributario is < 1 or > 4)
+                return Problem(statusCode: 422, title: "RegimeTributario inválido", detail: "Use 1, 2, 3 ou 4 (MEI).");
+            tenant.RegimeTributario = req.RegimeTributario.Value;
+        }
 
         if (req.Csc is not null)
         {

@@ -144,8 +144,8 @@ public class AdminTenantsController : ControllerBase
         if (req.CriarApiKey is not null && req.CriarApiKey != "producao" && req.CriarApiKey != "homologacao")
             return Problem(statusCode: 422, title: "CriarApiKey inválido",
                 detail: "Use 'producao' ou 'homologacao' (ou omita o campo para não criar chave).");
-        if (req.RegimeTributario is < 1 or > 3)
-            return Problem(statusCode: 422, title: "RegimeTributario inválido", detail: "Use 1 (Simples), 2 (Simples exceto sublimite) ou 3 (Regime Normal).");
+        if (req.RegimeTributario is < 1 or > 4)
+            return Problem(statusCode: 422, title: "RegimeTributario inválido", detail: "Use 1 (Simples), 2 (Simples exceto sublimite), 3 (Regime Normal) ou 4 (MEI).");
         var sandboxEfetivo = req.Sandbox ?? _sandbox;
         var problemaWebhook = Infrastructure.ValidadorWebhookUrl.Validar(req.WebhookUrl, sandboxEfetivo);
         if (problemaWebhook is not null)
@@ -282,8 +282,8 @@ public class AdminTenantsController : ControllerBase
         if (req.CodigoMunicipioIbge is not null) tenant.CodigoMunicipioIbge = req.CodigoMunicipioIbge;
         if (req.RegimeTributario is not null)
         {
-            if (req.RegimeTributario is < 1 or > 3)
-                return Problem(statusCode: 422, title: "RegimeTributario inválido", detail: "Use 1, 2 ou 3.");
+            if (req.RegimeTributario is < 1 or > 4)
+                return Problem(statusCode: 422, title: "RegimeTributario inválido", detail: "Use 1, 2, 3 ou 4 (MEI).");
             tenant.RegimeTributario = req.RegimeTributario.Value;
         }
         if (req.AmbientePadrao is not null)

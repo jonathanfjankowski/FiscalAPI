@@ -163,7 +163,7 @@ public static class MapperDps
         {
             OpSimpNac = tenant.RegimeTributario switch
             {
-                1 or 2 => OptSimplesNacional.ME_EPP,
+                1 or 2 or 4 => OptSimplesNacional.ME_EPP,
                 _ => OptSimplesNacional.NaoOptante,
             },
         },
