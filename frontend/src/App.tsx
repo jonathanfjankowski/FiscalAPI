@@ -1,5 +1,5 @@
 import { Navigate, Route, Routes } from 'react-router-dom'
-import Layout from './components/Layout'
+import { AppShell } from './components/layout/AppShell'
 import { useAuth } from './hooks/useAuth'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
@@ -23,16 +23,18 @@ export default function App() {
   return (
     <Routes>
       <Route path="/login" element={auth ? <Navigate to="/" replace /> : <Login />} />
+
       <Route
         element={
           <RequireAuth>
-            <Layout />
+            <AppShell />
           </RequireAuth>
         }
       >
         <Route path="/" element={<Dashboard />} />
         <Route path="/empresas" element={<Tenants />} />
         <Route path="/empresas/:id" element={<TenantDetail />} />
+        {/* Alias mantido: links antigos usavam /tenants. */}
         <Route path="/tenants" element={<Tenants />} />
         <Route path="/tenants/:id" element={<TenantDetail />} />
         <Route path="/documentos" element={<Documentos />} />
@@ -40,6 +42,7 @@ export default function App() {
         <Route path="/playground" element={<Playground />} />
         <Route path="/configuracoes" element={<Configuracoes />} />
       </Route>
+
       <Route path="*" element={<Navigate to="/" replace />} />
     </Routes>
   )
