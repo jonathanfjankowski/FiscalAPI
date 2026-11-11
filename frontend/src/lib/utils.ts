@@ -12,6 +12,7 @@ export {
   formatarData,
   formatarDataCurta,
   formatarDecimal,
+  formatarXml,
 } from './format'
 
 export {
@@ -20,12 +21,3 @@ export {
   STATUS_TERMINAIS,
   STATUS_TRANSITORIOS,
 } from './fiscal'
-
-// `formatarXml` ainda vive aqui: é usado só pelo visualizador de XML, que
-// entra na Task 15 (components/fiscal/XmlViewer.tsx).
-export function formatarXml(xml: string | null | undefined): string {
-  if (!xml) return ''
-  return xml
-    .replace(/></g, '>\n<')
-    .replace(/>\s*\n\s*</g, '>\n<')
-}

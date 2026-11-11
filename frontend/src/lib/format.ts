@@ -42,6 +42,16 @@ export function apenasDigitos(valor: string): string {
 }
 
 /**
+ * Quebra o XML em linhas legíveis (um elemento por linha) para o
+ * visualizador. Não reformata nem reindenta o conteúdo — só insere quebras
+ * entre tags, para preservar os valores como vieram da SEFAZ.
+ */
+export function formatarXml(xml: string | null | undefined): string {
+  if (!xml) return ''
+  return xml.replace(/></g, '>\n<').replace(/>\s*\n\s*</g, '>\n<')
+}
+
+/**
  * Copia texto para a área de transferência. Devolve `false` quando não
  * conseguiu (sem permissão, contexto inseguro, browser sem suporte) — quem
  * chama decide o que fazer; nunca lança.
