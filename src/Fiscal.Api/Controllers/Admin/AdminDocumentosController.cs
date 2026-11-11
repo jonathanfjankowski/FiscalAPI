@@ -73,6 +73,9 @@ public class AdminDocumentosController : ControllerBase
         [FromQuery] short? modelo,
         [FromQuery] DateTimeOffset? de,
         [FromQuery] DateTimeOffset? ate,
+        [FromQuery] string? q,
+        [FromQuery] string? ordenarPor,
+        [FromQuery] string? ordem,
         [FromQuery] int page = 1,
         [FromQuery] int pageSize = 50,
         CancellationToken ct = default)
@@ -90,6 +93,23 @@ public class AdminDocumentosController : ControllerBase
             statusFiltro = parsed;
         }
 
+        // Campos de ordenação permitidos — lista fechada, não nome de coluna
+        // vindo da query (isso seria injeção de ordenação).
+        var camposOrdenacao = new[] { "criadoEm", "atualizadoEm", "numero", "serie" };
+        string? campoOrdenacao = null;
+        if (!string.IsNullOrWhiteSpace(ordenarPor))
+        {
+            campoOrdenacao = camposOrdenacao
+                .FirstOrDefault(c => c.Equals(ordenarPor.Trim(), StringComparison.OrdinalIgnoreCase));
+            if (campoOrdenacao is null)
+            {
+                return Problem(statusCode: 422, title: "Ordenação inválida",
+                    detail: $"Use um destes campos: {string.Join(", ", camposOrdenacao)}.");
+            }
+        }
+
+        var descendente = !string.Equals(ordem, "asc", StringComparison.OrdinalIgnoreCase);
+
         var query = _db.DocumentosFiscais.AsNoTracking();
         if (tenantId is not null) query = query.Where(d => d.TenantId == tenantId);
         if (statusFiltro is not null) query = query.Where(d => d.Status == statusFiltro);
@@ -97,26 +117,83 @@ public class AdminDocumentosController : ControllerBase
         if (de is not null) query = query.Where(d => d.CriadoEm >= de);
         if (ate is not null) query = query.Where(d => d.CriadoEm <= ate);
 
+        // Busca livre: chave de acesso, número ou razão social do emitente.
+        // O termo é aplicado no banco quando é numérico (chave/número) e via
+        // projeção em memória quando é texto (razão social) — o SQLite da
+        // suíte não traduz tudo, então o caminho é o mesmo do resto do repo.
+        var busca = q?.Trim();
+        if (!string.IsNullOrEmpty(busca))
+        {
+            var apenasDigitos = new string(busca.Where(char.IsDigit).ToArray());
+            query = query.Where(d =>
+                (d.ChaveAcesso != null && d.ChaveAcesso.Contains(busca)) ||
+                (apenasDigitos.Length > 0 && d.Numero != null && d.Numero.ToString() == apenasDigitos) ||
+                (d.Tenant != null && d.Tenant.RazaoSocial.Contains(busca)));
+        }
+
         var total = await query.CountAsync(ct);
 
-        // SQLite (suíte de testes) não traduz ORDER BY sobre DateTimeOffset;
-        // Postgres (produção) sim — mantém "mais recente primeiro" em produção.
-        var ordenada = _db.Database.IsSqlite()
-            ? query.OrderBy(d => d.Id)
-            : query.OrderByDescending(d => d.CriadoEm);
+        var projecao = query.Select(d => new AdminDocListItem(
+            d.Id, d.TenantId, d.Tenant!.RazaoSocial,
+            d.Tipo.ToString(), d.Status.ToString(),
+            d.Ambiente == (short)Ambiente.Producao ? "producao" : "homologacao",
+            d.Modelo, d.Serie, d.Numero, d.ChaveAcesso, d.MotivoStatus,
+            d.CriadoEm, d.AtualizadoEm));
 
-        var itens = await ordenada
-            .Skip((page - 1) * pageSize)
-            .Take(pageSize)
-            .Select(d => new AdminDocListItem(
-                d.Id, d.TenantId, d.Tenant!.RazaoSocial,
-                d.Tipo.ToString(), d.Status.ToString(),
-                d.Ambiente == (short)Ambiente.Producao ? "producao" : "homologacao",
-                d.Modelo, d.Serie, d.Numero, d.ChaveAcesso, d.MotivoStatus,
-                d.CriadoEm, d.AtualizadoEm))
-            .ToListAsync(ct);
+        List<AdminDocListItem> itens;
+        if (_db.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+        {
+            // SQLite não traduz ORDER BY sobre DateTimeOffset. Materializa,
+            // ordena e pagina em memória — volume da suíte é pequeno.
+            var todos = await projecao.ToListAsync(ct);
+            itens = Ordenar(todos, campoOrdenacao, descendente)
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToList();
+        }
+        else
+        {
+            // Postgres: ordenação e paginação no banco.
+            var ordenada = (campoOrdenacao, descendente) switch
+            {
+                ("atualizadoEm", true) => projecao.OrderByDescending(d => d.AtualizadoEm),
+                ("atualizadoEm", false) => projecao.OrderBy(d => d.AtualizadoEm),
+                ("numero", true) => projecao.OrderByDescending(d => d.Numero),
+                ("numero", false) => projecao.OrderBy(d => d.Numero),
+                ("serie", true) => projecao.OrderByDescending(d => d.Serie),
+                ("serie", false) => projecao.OrderBy(d => d.Serie),
+                (_, false) => projecao.OrderBy(d => d.CriadoEm),
+                _ => projecao.OrderByDescending(d => d.CriadoEm),
+            };
+
+            itens = await ordenada
+                .Skip((page - 1) * pageSize)
+                .Take(pageSize)
+                .ToListAsync(ct);
+        }
 
         return Ok(new { total, page, pageSize, itens });
+    }
+
+    private static IEnumerable<AdminDocListItem> Ordenar(
+        IEnumerable<AdminDocListItem> itens, string? campo, bool descendente)
+    {
+        IEnumerable<AdminDocListItem> ordenada = campo switch
+        {
+            "atualizadoEm" => descendente
+                ? itens.OrderByDescending(d => d.AtualizadoEm)
+                : itens.OrderBy(d => d.AtualizadoEm),
+            "numero" => descendente
+                ? itens.OrderByDescending(d => d.Numero)
+                : itens.OrderBy(d => d.Numero),
+            "serie" => descendente
+                ? itens.OrderByDescending(d => d.Serie)
+                : itens.OrderBy(d => d.Serie),
+            _ => descendente
+                ? itens.OrderByDescending(d => d.CriadoEm)
+                : itens.OrderBy(d => d.CriadoEm),
+        };
+        return ordenada;
     }
 
     [HttpGet("{id:guid}")]
