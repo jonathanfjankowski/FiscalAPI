@@ -116,3 +116,47 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
 
   return data as T
 }
+
+/**
+ * Baixa um arquivo binário autenticado (DANFE em PDF).
+ *
+ * Não dá para abrir a rota direto numa nova aba: o header `Authorization`
+ * não acompanha navegação, e a API responde 401. Então busca com o token
+ * e devolve um Blob para o painel abrir numa object URL.
+ */
+export async function requestBlob(path: string, opts: RequestOptions = {}): Promise<Blob> {
+  const headers: Record<string, string> = {}
+  const auth = getAuth()
+
+  if (opts.apiKey) headers['Authorization'] = `ApiKey ${opts.apiKey}`
+  else if (auth) headers['Authorization'] = `Bearer ${auth.token}`
+  if (opts.body !== undefined) headers['Content-Type'] = 'application/json'
+
+  let resp: Response
+  try {
+    resp = await fetch(API_BASE + path, {
+      method: opts.method ?? (opts.body !== undefined ? 'POST' : 'GET'),
+      headers,
+      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
+    })
+  } catch {
+    throw new ApiError(0, 'Não foi possível conectar à API.', 'Verifique se a API está rodando.')
+  }
+
+  if (!resp.ok) {
+    if (resp.status === 401 && auth && !opts.apiKey) {
+      clearAuth()
+      window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT))
+    }
+    // O corpo do erro é problem+json (RFC 7807) mesmo numa rota de arquivo.
+    let problem: { title?: string; detail?: string } | null = null
+    try {
+      problem = (await resp.json()) as { title?: string; detail?: string }
+    } catch {
+      problem = null
+    }
+    throw new ApiError(resp.status, problem?.title ?? `Erro ${resp.status}`, problem?.detail)
+  }
+
+  return await resp.blob()
+}
