@@ -158,6 +158,62 @@ public class RepositorioAuditoria : IRepositorioAuditoria
 
     public async Task RegistrarAsync(Auditoria auditoria, CancellationToken ct) =>
         await _db.Auditoria.AddAsync(auditoria, ct);
+
+    public async Task<(int Total, IReadOnlyList<Auditoria> Itens)> ListarAsync(
+        Guid? tenantId, string? acao, Guid? recursoId,
+        DateTimeOffset? de, DateTimeOffset? ate,
+        int pagina, int tamanhoPagina, CancellationToken ct)
+    {
+        var query = _db.Auditoria.AsNoTracking();
+
+        if (tenantId is not null) query = query.Where(a => a.TenantId == tenantId);
+        if (recursoId is not null) query = query.Where(a => a.RecursoId == recursoId);
+        if (de is not null) query = query.Where(a => a.CriadoEm >= de);
+        if (ate is not null) query = query.Where(a => a.CriadoEm <= ate);
+
+        // No SQLite (suíte de testes) a busca textual com ToUpperInvariant não
+        // traduz e o ORDER BY sobre DateTimeOffset lança. Nesse provider o
+        // conjunto é materializado e filtrado/ordenado/paginado em memória —
+        // o volume da suíte é pequeno por definição. Em Postgres tudo roda no
+        // banco, com o filtro e a ordenação empurrados para o SQL.
+        var sqlite = _db.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite";
+
+        List<Auditoria> todos;
+        if (sqlite)
+        {
+            todos = await query.ToListAsync(ct);
+            if (!string.IsNullOrWhiteSpace(acao))
+            {
+                var termo = acao.Trim();
+                todos = todos
+                    .Where(a => a.Acao.Contains(termo, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+            todos = todos
+                .OrderByDescending(a => a.CriadoEm)
+                .ThenByDescending(a => a.Id)
+                .ToList();
+        }
+        else
+        {
+            if (!string.IsNullOrWhiteSpace(acao))
+            {
+                // Busca parcial: o operador digita "CERTIFICADO" e vê todas as
+                // ações daquele assunto.
+                var termo = acao.Trim().ToUpperInvariant();
+                query = query.Where(a => a.Acao.Contains(termo));
+            }
+            todos = await query
+                .OrderByDescending(a => a.CriadoEm)
+                .ThenByDescending(a => a.Id)
+                .ToListAsync(ct);
+        }
+
+        var total = todos.Count;
+        var itens = todos.Skip((pagina - 1) * tamanhoPagina).Take(tamanhoPagina).ToList();
+
+        return (total, itens);
+    }
 }
 
 public class RepositorioEventoFiscal : IRepositorioEventoFiscal

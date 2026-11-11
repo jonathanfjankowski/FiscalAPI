@@ -20,7 +20,10 @@ public record ManifestacaoRequest(string Tipo, string? Justificativa);
 public class NotasRecebidasController : ControllerBase
 {
     private static readonly string[] TiposValidos = ["210200", "210210", "210220", "210240"];
-    private static readonly string[] TiposFinais = ["210200", "210220", "210240"];
+
+    // ManifestacaoAtual guarda o NOME (ProcessarManifestacaoJob.NomeAmigavel),
+    // não o código do evento. Comparar com "210200" nunca casaria.
+    private static readonly string[] ManifestacoesFinais = ["confirmacao", "desconhecimento", "nao_realizacao"];
 
     private readonly FiscalDbContext _db;
     private readonly IRepositorioNotaRecebida _notaRepo;
@@ -132,7 +135,7 @@ public class NotasRecebidasController : ControllerBase
             (string.IsNullOrWhiteSpace(req.Justificativa) || req.Justificativa.Length < 15 || req.Justificativa.Length > 1000))
             return Problem(statusCode: 422, title: "Não realização exige justificativa de 15 a 1000 caracteres.");
 
-        if (nota.ManifestacaoAtual is not null && TiposFinais.Contains(nota.ManifestacaoAtual))
+        if (nota.ManifestacaoAtual is not null && ManifestacoesFinais.Contains(nota.ManifestacaoAtual))
             return Problem(statusCode: 409, title: "Nota já manifestada em estado final.",
                 detail: $"Manifestação atual: {nota.ManifestacaoAtual}.");
 

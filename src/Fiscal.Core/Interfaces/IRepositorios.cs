@@ -41,6 +41,16 @@ public interface IRepositorioDocumentoFiscal
 public interface IRepositorioAuditoria
 {
     Task RegistrarAsync(Auditoria auditoria, CancellationToken ct);
+
+    /// <summary>
+    /// Leitura paginada da trilha. A tabela é append-only (trigger no banco):
+    /// não existe update nem delete, e é por isso que o painel pode confiar
+    /// no que lê.
+    /// </summary>
+    Task<(int Total, IReadOnlyList<Auditoria> Itens)> ListarAsync(
+        Guid? tenantId, string? acao, Guid? recursoId,
+        DateTimeOffset? de, DateTimeOffset? ate,
+        int pagina, int tamanhoPagina, CancellationToken ct);
 }
 
 public interface IRepositorioEventoFiscal
