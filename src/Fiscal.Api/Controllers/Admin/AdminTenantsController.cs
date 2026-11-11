@@ -57,7 +57,11 @@ public record AdminTenantResponse(
     bool Ativo,
     DateTimeOffset CriadoEm,
     int ApiKeysAtivas,
-    int CertificadosAtivos);
+    int CertificadosAtivos,
+    // IdCSC da NFC-e: identificador não-sensível (o CSC em si fica cifrado e
+    // nunca sai do servidor). Sem ele o painel não distingue "configurado" de
+    // "não configurado" e o card CSC mente.
+    string? CscId = null);
 
 /// <summary>
 /// Primeira API key criada junto com o tenant (criarApiKey). Mesma garantia
@@ -104,7 +108,8 @@ public class AdminTenantsController : ControllerBase
                 t.InscricaoEstadual, t.Logradouro, t.Numero, t.Complemento, t.Bairro,
                 t.Cep, t.NomeMunicipio, t.WebhookUrl, t.Sandbox, t.Ativo, t.CriadoEm,
                 t.ApiKeys.Count(k => k.Ativa && k.RevogadoEm == null),
-                t.Certificados.Count(c => c.Ativo)))
+                t.Certificados.Count(c => c.Ativo),
+                t.CscId))
             .ToListAsync(ct);
         return Ok(tenants);
     }
@@ -121,7 +126,8 @@ public class AdminTenantsController : ControllerBase
                 t.InscricaoEstadual, t.Logradouro, t.Numero, t.Complemento, t.Bairro,
                 t.Cep, t.NomeMunicipio, t.WebhookUrl, t.Sandbox, t.Ativo, t.CriadoEm,
                 t.ApiKeys.Count(k => k.Ativa && k.RevogadoEm == null),
-                t.Certificados.Count(c => c.Ativo)))
+                t.Certificados.Count(c => c.Ativo),
+                t.CscId))
             .FirstOrDefaultAsync(ct);
         if (tenant is null) return NotFound();
         return Ok(tenant);
@@ -182,6 +188,14 @@ public class AdminTenantsController : ControllerBase
             CriadoEm = DateTimeOffset.UtcNow
         };
 
+        // CSC/IdCSC da NFC-e: validado acima e — até então — silenciosamente
+        // descartado. O CSC é sensível e vai cifrado; o IdCSC fica em claro.
+        if (req.Csc is not null)
+        {
+            tenant.CscCriptografado = await _certStore.CifrarTextoAsync(req.Csc, ct);
+            tenant.CscId = req.CscId!.Trim();
+        }
+
         _db.Tenants.Add(tenant);
 
         // Primeira API key (opcional, criarApiKey): mesma geração/semântica do
@@ -241,7 +255,8 @@ public class AdminTenantsController : ControllerBase
                 tenant.Bairro, tenant.Cep, tenant.NomeMunicipio, tenant.WebhookUrl, tenant.Sandbox, tenant.Ativo,
                 tenant.CriadoEm,
                 ApiKeysAtivas: 1,   // tenant novo: só a chave que acabou de ser criada
-                CertificadosAtivos: 0),
+                CertificadosAtivos: 0,
+                CscId: tenant.CscId),
             new AdminTenantApiKeyCriadaResponse(
                 apiKey.Id, chaveEmClaro, apiKey.Prefixo,
                 apiKey.Ambiente == (short)Ambiente.Producao ? "producao" : "homologacao",
