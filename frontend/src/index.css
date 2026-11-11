@@ -1,4 +1,20 @@
+/* ==========================================================================
+   Entry point de estilos.
+
+   Tudo em UM arquivo de entrada: o Tailwind v4 compila cada CSS
+   importado como uma unidade separada, e o `@theme` de tokens.css só
+   registra as utilidades de cor na mesma unidade que contém
+   `@import "tailwindcss"`. Se tokens.css fosse importado separado (como
+   em main.tsx), o tema não alcançaria o contexto de geração das
+   utilities — e `text-aprovado` simplesmente não existiria no bundle.
+   ========================================================================== */
+
 @import "tailwindcss";
+
+/* Tokens: paleta, tipografia, raios — antes do base para que o base possa
+   referenciar as custom properties. */
+@import "./styles/tokens.css";
+@import "./styles/base.css";
 
 /* Tema claro por padrão; escuro via classe .dark no <html> (toggle do topbar). */
 @custom-variant dark (&:where(.dark, .dark *));
