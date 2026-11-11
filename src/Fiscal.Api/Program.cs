@@ -2,6 +2,7 @@ using System.Threading.RateLimiting;
 using Fiscal.Adapters.Unimake;
 using Fiscal.Api.Authentication;
 using Fiscal.Api.Infrastructure;
+using Fiscal.Api.Services;
 using Fiscal.Core.Entities;
 using Fiscal.Core.Interfaces;
 using Fiscal.Core.Services;
@@ -107,6 +108,12 @@ else
 builder.Services.AddSingleton<ValidadorConsistenciaFiscal>();
 builder.Services.AddSingleton<ValidadorImpostosV2>();
 builder.Services.AddSingleton<ValidadorNfseDps>();
+
+// Validação do payload de emissão/reenvio compartilhada entre o endpoint do
+// integrador e o do painel: uma regra só, para o admin não aceitar o que o
+// integrador recusaria.
+builder.Services.AddSingleton<ValidadorEmissao>();
+builder.Services.AddScoped<ServicoReenvioDocumento>();
 
 // --- PDF (DANFE/DANFCe via QuestPDF) ---
 builder.Services.AddSingleton<IGeradorPdf, GeradorPdfQuestPdf>();

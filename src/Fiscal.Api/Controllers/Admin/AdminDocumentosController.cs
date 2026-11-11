@@ -1,3 +1,5 @@
+using Fiscal.Api.Infrastructure;
+using Fiscal.Api.Services;
 using Fiscal.Core;
 using Fiscal.Core.Contracts;
 using Fiscal.Core.Entities;
@@ -27,19 +29,22 @@ public class AdminDocumentosController : ControllerBase
     private readonly IRepositorioAuditoria _auditoria;
     private readonly IBackgroundJobClient _jobs;
     private readonly IGeradorPdf _geradorPdf;
+    private readonly ServicoReenvioDocumento _servicoReenvio;
 
     public AdminDocumentosController(
         FiscalDbContext db,
         IRepositorioEventoFiscal eventoRepo,
         IRepositorioAuditoria auditoria,
         IBackgroundJobClient jobs,
-        IGeradorPdf geradorPdf)
+        IGeradorPdf geradorPdf,
+        ServicoReenvioDocumento servicoReenvio)
     {
         _db = db;
         _eventoRepo = eventoRepo;
         _auditoria = auditoria;
         _jobs = jobs;
         _geradorPdf = geradorPdf;
+        _servicoReenvio = servicoReenvio;
     }
 
     public record AdminDocListItem(
@@ -228,6 +233,38 @@ public class AdminDocumentosController : ControllerBase
     }
 
     public record AdminEventoRequest(string? Justificativa, string? Correcao);
+
+    /// <summary>
+    /// Reenvia um documento REJEITADA/DENEGADA/ERRO_INTERNO com o payload
+    /// corrigido. Mantém o <b>mesmo número</b>: a rejeição não consumiu
+    /// numeração na SEFAZ. Compartilha a validação e a regra com o endpoint
+    /// do integrador — o painel não pode aceitar payload que o integrador
+    /// recusaria.
+    /// </summary>
+    [HttpPost("{id:guid}/reenviar")]
+    public async Task<IActionResult> Reenviar(
+        Guid id,
+        [FromBody] EmissaoRequest req,
+        CancellationToken ct)
+    {
+        var doc = await _db.DocumentosFiscais.FirstOrDefaultAsync(d => d.Id == id, ct);
+        if (doc is null) return NotFound();
+
+        var resultado = await _servicoReenvio.ReenviarAsync(doc, req, apiKeyId: null, ct);
+        if (!resultado.Ok)
+            return Problem(statusCode: resultado.Status, title: resultado.Titulo, detail: resultado.Detalhe);
+
+        var atualizado = resultado.Documento!;
+        return Accepted($"/v1/admin/documentos-fiscais/{atualizado.Id}", new
+        {
+            atualizado.Id,
+            status = atualizado.Status.ToString(),
+            atualizado.Numero,
+            atualizado.Serie,
+            atualizado.AtualizadoEm,
+            links = new { consulta = $"/v1/admin/documentos-fiscais/{atualizado.Id}" }
+        });
+    }
 
     /// <summary>
     /// Cancelamento via painel (mesmas regras do endpoint de tenant: exige
