@@ -51,7 +51,7 @@ jobs:
         run: dotnet build --no-restore --configuration Release
 
       - name: Test
-        run: dotnet test --no-build --configuration Release --logger trx --collect-coverage
+        run: dotnet test --no-build --configuration Release --logger trx
 
       - name: Format check
         run: dotnet format --verify-no-changes --no-restore
