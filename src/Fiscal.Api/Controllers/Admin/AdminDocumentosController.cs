@@ -1,3 +1,4 @@
+using Fiscal.Core;
 using Fiscal.Core.Contracts;
 using Fiscal.Core.Entities;
 using Fiscal.Core.Enums;
@@ -25,17 +26,20 @@ public class AdminDocumentosController : ControllerBase
     private readonly IRepositorioEventoFiscal _eventoRepo;
     private readonly IRepositorioAuditoria _auditoria;
     private readonly IBackgroundJobClient _jobs;
+    private readonly IGeradorPdf _geradorPdf;
 
     public AdminDocumentosController(
         FiscalDbContext db,
         IRepositorioEventoFiscal eventoRepo,
         IRepositorioAuditoria auditoria,
-        IBackgroundJobClient jobs)
+        IBackgroundJobClient jobs,
+        IGeradorPdf geradorPdf)
     {
         _db = db;
         _eventoRepo = eventoRepo;
         _auditoria = auditoria;
         _jobs = jobs;
+        _geradorPdf = geradorPdf;
     }
 
     public record AdminDocListItem(
@@ -141,6 +145,86 @@ public class AdminDocumentosController : ControllerBase
             doc.CriadoEm,
             doc.AtualizadoEm
         });
+    }
+
+    /// <summary>
+    /// DANFE/DANFCe/DANFSe do documento, pelo painel.
+    ///
+    /// Só existe PDF para AUTORIZADA/CANCELADA — a SEFAZ não autorizou os
+    /// demais. 409 (mesma regra do endpoint de tenant): a UI usa o código
+    /// para desabilitar o botão com o motivo, em vez de baixar um arquivo
+    /// fiscal inválido.
+    /// </summary>
+    [HttpGet("{id:guid}/pdf")]
+    public async Task<IActionResult> Pdf(Guid id, CancellationToken ct)
+    {
+        var doc = await _db.DocumentosFiscais.AsNoTracking()
+            .Include(d => d.Tenant)
+            .FirstOrDefaultAsync(d => d.Id == id, ct);
+        if (doc is null) return NotFound();
+
+        if (doc.Status is not (StatusDocumento.AUTORIZADA or StatusDocumento.CANCELADA))
+            return Problem(
+                statusCode: 409,
+                title: "PDF disponível apenas para documentos AUTORIZADA ou CANCELADA.",
+                detail: $"Status atual: {doc.Status}.");
+
+        if (doc.Tenant is null) return NotFound();
+
+        var bytes = doc.Modelo switch
+        {
+            65 => await _geradorPdf.GerarDanfceAsync(doc, doc.Tenant, ct),
+            ModelosDocumento.NFSeNacional => await _geradorPdf.GerarDanfseAsync(doc, doc.Tenant, ct),
+            _ => await _geradorPdf.GerarDanfeAsync(doc, doc.Tenant, ct),
+        };
+
+        return File(bytes, "application/pdf", $"danfe-{doc.Id:N}.pdf");
+    }
+
+    /// <summary>
+    /// Eventos fiscais do documento (cancelamento, CC-e) com o estado de
+    /// cada um. O XML de retorno não vai cru na listagem — só o indicador
+    /// <c>xmlDisponivel</c>, porque o payload é grande e a maioria dos usos
+    /// nem precisa dele.
+    /// </summary>
+    [HttpGet("{id:guid}/eventos")]
+    public async Task<IActionResult> Eventos(Guid id, CancellationToken ct)
+    {
+        if (!await _db.DocumentosFiscais.AnyAsync(d => d.Id == id, ct))
+            return NotFound();
+
+        // Sem ordenação por DateTimeOffset no SQLite (não traduz): ordena em
+        // memória sobre uma projeção pequena — mesmo padrão do dashboard.
+        var eventos = await _db.EventosFiscais.AsNoTracking()
+            .Where(e => e.DocumentoId == id)
+            .Select(e => new
+            {
+                e.Id,
+                e.TipoEvento,
+                e.Status,
+                e.MotivoStatus,
+                e.Protocolo,
+                e.Tentativas,
+                e.ProximaTentativaEm,
+                e.CriadoEm,
+                TemXml = e.XmlRetorno != null,
+            })
+            .ToListAsync(ct);
+
+        return Ok(eventos
+            .OrderByDescending(e => e.CriadoEm)
+            .Select(e => new
+            {
+                e.Id,
+                tipo = e.TipoEvento,
+                e.Status,
+                motivo = e.MotivoStatus,
+                e.Protocolo,
+                e.Tentativas,
+                e.ProximaTentativaEm,
+                e.CriadoEm,
+                xmlDisponivel = e.TemXml,
+            }));
     }
 
     public record AdminEventoRequest(string? Justificativa, string? Correcao);
