@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
 import { api } from '../lib/api'
-import { PageLoading, PageHeader, StatCard, Card, Badge } from '../components/ui'
+import { PageLoading, PageHeader, StatCard, Card, Badge } from '../components/ui-antigo'
 import { STATUS_LABEL } from '../lib/utils'
 
 // Mapa estático — Tailwind v4 não gera classes construídas em runtime.

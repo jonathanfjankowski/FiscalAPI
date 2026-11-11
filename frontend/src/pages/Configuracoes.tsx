@@ -2,7 +2,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
 import { KeyRound, TriangleAlert } from 'lucide-react'
 import { api, type BootstrapKeyRotacionada } from '../lib/api'
-import { Badge, Button, Card, ConfirmDialog, Modal, PageHeader, PageLoading } from '../components/ui'
+import { Badge, Button, Card, ConfirmDialog, Modal, PageHeader, PageLoading } from '../components/ui-antigo'
 import { useToast } from '../components/toast'
 import { copiar, formatarData } from '../lib/utils'
 

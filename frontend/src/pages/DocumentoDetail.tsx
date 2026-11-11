@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Copy } from 'lucide-react'
 import { api } from '../lib/api'
-import { Button, Card, Field, Modal, PageHeader, PageLoading, StatusBadge, Textarea } from '../components/ui'
+import { Button, Card, Field, Modal, PageHeader, PageLoading, StatusBadge, Textarea } from '../components/ui-antigo'
 import { useToast } from '../components/toast'
 import { copiar, formatarData, formatarXml, STATUS_TRANSITORIOS } from '../lib/utils'
 

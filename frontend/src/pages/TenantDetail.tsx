@@ -6,7 +6,7 @@ import { api, type ApiKeyCriada, type WebhookEntrega } from '../lib/api'
 import {
   Badge, Button, Card, ConfirmDialog, Field, Input, Modal, PageHeader, PageLoading, Select,
   StatusBadge, Table, Tabs, Td, Th, Toggle,
-} from '../components/ui'
+} from '../components/ui-antigo'
 import { useToast } from '../components/toast'
 import { copiar, formatarCnpj, formatarData, formatarDataCurta } from '../lib/utils'
 import { TenantFormModal } from './Tenants'

@@ -1,6 +1,6 @@
 import { useState, type FormEvent } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { Button, Card, Field, Input } from '../components/ui'
+import { Button, Card, Field, Input } from '../components/ui-antigo'
 import { useToast } from '../components/toast'
 import { useAuth } from '../hooks/useAuth'
 import { ApiError } from '../lib/api'

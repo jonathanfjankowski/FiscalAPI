@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { api, type Tenant, type TenantInput } from '../lib/api'
 import {
   Badge, Button, Card, EmptyState, Field, Input, Modal, PageHeader, PageLoading, Select, Table, Td, Th,
-} from '../components/ui'
+} from '../components/ui-antigo'
 import { useToast } from '../components/toast'
 import { apenasDigitos, formatarCnpj, formatarData } from '../lib/utils'
 
@@ -69,7 +69,10 @@ export function TenantFormModal({
         await api.updateTenant(inicial.id, body)
         return inicial.id
       }
-      return api.createTenant(body)
+      const resp = await api.createTenant(body)
+      // Sem `criarApiKey` a API devolve só o id; com, devolve o objeto
+      // (empresa + chave criada na mesma transação).
+      return typeof resp === 'string' ? resp : resp.tenant.id
     },
     onSuccess: (id) => {
       qc.invalidateQueries({ queryKey: ['tenants'] })

@@ -4,7 +4,7 @@ import { Link } from 'react-router-dom'
 import { api, type EmissaoResponse } from '../lib/api'
 import {
   Badge, Button, Card, Field, Input, PageHeader, Select, StatusBadge, Textarea,
-} from '../components/ui'
+} from '../components/ui-antigo'
 import { useToast } from '../components/toast'
 import { formatarData, formatarDecimal, STATUS_COLOR, STATUS_TERMINAIS } from '../lib/utils'
 

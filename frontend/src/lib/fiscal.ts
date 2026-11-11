@@ -112,6 +112,25 @@ export const STATUS_COLOR: Record<string, string> = {
   FALHA_EMISSAO: 'text-rejeitado bg-rejeitado-soft border-rejeitado/25',
 }
 
+/**
+ * Cor do ponto de status — a representação compacta (usada no trilho e em
+ * listas densas, onde a pílula de texto pesaria). Só três famílias
+ * semânticas + neutro.
+ */
+export const STATUS_PONTO: Record<string, string> = {
+  PENDENTE: 'bg-carimbo',
+  PROCESSANDO: 'bg-carimbo',
+  AUTORIZADA: 'bg-aprovado',
+  REJEITADA: 'bg-rejeitado',
+  CONTINGENCIA: 'bg-contingencia',
+  CANCELAMENTO_PENDENTE: 'bg-contingencia',
+  CANCELADA: 'bg-neutro',
+  ERRO_CANCELAMENTO: 'bg-rejeitado',
+  DENEGADA: 'bg-rejeitado',
+  ERRO_INTERNO: 'bg-rejeitado',
+  FALHA_EMISSAO: 'bg-rejeitado',
+}
+
 /** Terminais: o documento não muda mais de estado sozinho. */
 export const STATUS_TERMINAIS: readonly string[] = [
   'AUTORIZADA',

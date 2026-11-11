@@ -1,7 +1,7 @@
 import { useQuery } from '@tanstack/react-query'
 import { Link, useSearchParams } from 'react-router-dom'
 import { api } from '../lib/api'
-import { Badge, Card, PageHeader, PageLoading, Select, Table, Td, Th } from '../components/ui'
+import { Badge, Card, PageHeader, PageLoading, Select, Table, Td, Th } from '../components/ui-antigo'
 import { formatarData, STATUS_COLOR, STATUS_LABEL, STATUS_TRANSITORIOS } from '../lib/utils'
 
 const STATUSES = Object.keys(STATUS_LABEL)
