@@ -1,54 +1,87 @@
+import { useMemo } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link, useSearchParams } from 'react-router-dom'
-import { api } from '../lib/api'
-import { Badge, Card, PageHeader, PageLoading, Select, Table, Td, Th } from '../components/ui-antigo'
-import { formatarData, STATUS_COLOR, STATUS_LABEL, STATUS_TRANSITORIOS } from '../lib/utils'
+import { Link } from 'react-router-dom'
+import { ArrowDownUp, Search, X } from 'lucide-react'
+import { api, ApiError } from '../lib/api'
+import { useEmpresaContexto } from '../hooks/useEmpresaContexto'
+import { useFiltrosUrl } from '../hooks/useFiltrosUrl'
+import { STATUS_LABEL, STATUS_TRANSITORIOS } from '../lib/fiscal'
+import { formatarData } from '../lib/format'
+import { cn } from '../lib/utils'
+import {
+  AmbienteBadge,
+  Button,
+  EmptyState,
+  ErrorState,
+  Input,
+  PageLoading,
+  Select,
+  StatusDot,
+  Table,
+  Td,
+  Th,
+} from '../components/ui'
+import { PageHeader } from '../components/ui/estados'
+import { Paginacao } from '../components/ui/paginacao'
+import { ChaveAcesso } from '../components/fiscal'
 
-const STATUSES = Object.keys(STATUS_LABEL)
+// ==========================================================================
+// Documentos fiscais.
+//
+// Tudo na URL: filtro, busca, ordenação, página. O contexto de empresa vem
+// do topo (?empresa=) e é o mesmo das outras telas.
+//
+// A distinção erro × vazio é o ponto que a versão anterior errava: quando a
+// API caía, a tela dizia "nenhum documento com os filtros atuais" — o
+// operador acreditava ter filtrado errado, quando a API estava fora.
+// ==========================================================================
+
+const CHAVES_FILTRO = ['status', 'modelo', 'de', 'ate', 'q', 'ordenarPor', 'ordem', 'pageSize'] as const
+
+const STATUS_OPCOES = Object.keys(STATUS_LABEL)
+
+/** Rótulo curto do modelo para a coluna. */
+function rotuloModelo(tipo: string): string {
+  if (tipo === 'NFE') return 'NF-e 55'
+  if (tipo === 'NFCE') return 'NFC-e 65'
+  if (tipo === 'NFSE') return 'NFS-e'
+  return tipo
+}
 
 export default function Documentos() {
-  const [params, setParams] = useSearchParams()
-  // ?page=abc não pode virar NaN (quebrava a request).
-  const page = Math.max(1, Number.parseInt(params.get('page') ?? '1', 10) || 1)
-  const pageSize = 50
+  const { filtroTenant } = useEmpresaContexto()
+  const { valores, pagina, definir, definirPagina, limpar, algumAtivo } = useFiltrosUrl(CHAVES_FILTRO)
 
-  const filtros = {
-    tenantId: params.get('tenantId') ?? '',
-    status: params.get('status') ?? '',
-    modelo: params.get('modelo') ?? '',
-    de: params.get('de') ?? '',
-    ate: params.get('ate') ?? '',
-  }
+  const pageSize = Number.parseInt(valores.pageSize || '50', 10) || 50
+  const ordenarPor = valores.ordenarPor || 'criadoEm'
+  const ordem = (valores.ordem || 'desc') as 'asc' | 'desc'
 
-  const { data: tenants } = useQuery({ queryKey: ['tenants'], queryFn: api.listTenants })
-  const { data, isLoading, isFetching } = useQuery({
-    queryKey: ['documentos', filtros, page],
-    queryFn: () =>
-      api.listDocumentos({
-        tenantId: filtros.tenantId || undefined,
-        status: filtros.status || undefined,
-        modelo: filtros.modelo || undefined,
-        // Ambas interpretadas no fuso local ('de' vinha como UTC e 'ate' como
-        // local — em UTC-3 o filtro "de" pegava docs do dia anterior).
-        de: filtros.de ? new Date(filtros.de + 'T00:00:00').toISOString() : undefined,
-        ate: filtros.ate ? new Date(filtros.ate + 'T23:59:59').toISOString() : undefined,
-        page,
-        pageSize,
-      }),
-    // Auto-refresh enquanto houver documento em trânsito na fila.
+  const filtros = useMemo(
+    () => ({
+      tenantId: filtroTenant,
+      status: valores.status || undefined,
+      modelo: valores.modelo || undefined,
+      // O fuso do navegador: 'de' vinha como UTC e pegava o dia anterior em
+      // UTC-3 — monta com hora local explícita.
+      de: valores.de ? new Date(valores.de + 'T00:00:00').toISOString() : undefined,
+      ate: valores.ate ? new Date(valores.ate + 'T23:59:59').toISOString() : undefined,
+      q: valores.q || undefined,
+      ordenarPor,
+      ordem,
+      page: pagina,
+      pageSize,
+    }),
+    [filtroTenant, valores, ordenarPor, ordem, pagina, pageSize],
+  )
+
+  const { data, isLoading, isFetching, isError, error, refetch } = useQuery({
+    queryKey: ['documentos', filtros],
+    queryFn: () => api.listDocumentos(filtros),
+    // Só auto-atualiza enquanto houver documento em trânsito — pollar uma
+    // lista toda terminal é desperdício.
     refetchInterval: (query) =>
       query.state.data?.itens.some((d) => STATUS_TRANSITORIOS.includes(d.status)) ? 5000 : false,
   })
-
-  const setFiltro = (chave: string, valor: string) => {
-    const next = new URLSearchParams(params)
-    if (valor) next.set(chave, valor)
-    else next.delete(chave)
-    // Trocar filtro volta pra página 1 — mas trocar a PÁGINA (chave 'page')
-    // não pode apagar ela mesma (bug: era impossível sair da página 1).
-    if (chave !== 'page') next.delete('page')
-    setParams(next)
-  }
 
   const totalPaginas = data ? Math.max(1, Math.ceil(data.total / pageSize)) : 1
 
@@ -56,145 +89,202 @@ export default function Documentos() {
     <>
       <PageHeader
         titulo="Documentos fiscais"
-        descricao="Todos os documentos de todas as empresas"
+        descricao="NF-e, NFC-e e NFS-e de todas as empresas — o contexto do topo filtra."
         acoes={
           isFetching && !isLoading ? (
-            <span className="text-[11px] text-zinc-500">atualizando…</span>
+            <span className="text-[11px] text-ink-faint">atualizando…</span>
           ) : undefined
         }
       />
 
-      <Card className="mb-4 p-4">
-        <div className="grid grid-cols-2 gap-3 lg:grid-cols-5">
-          <Select value={filtros.tenantId} onChange={(e) => setFiltro('tenantId', e.target.value)}>
-            <option value="">Todas as empresas</option>
-            {(tenants ?? []).map((t) => (
-              <option key={t.id} value={t.id}>
-                {t.razaoSocial}
-              </option>
-            ))}
-          </Select>
-          <Select value={filtros.status} onChange={(e) => setFiltro('status', e.target.value)}>
+      {/* ---------- Filtros ---------- */}
+      <div className="mb-4 rounded-lg border border-line bg-surface p-3">
+        <div className="flex flex-wrap items-center gap-2">
+          <div className="relative min-w-56 flex-1">
+            <Search className="pointer-events-none absolute top-1/2 left-2.5 h-3.5 w-3.5 -translate-y-1/2 text-ink-faint" aria-hidden />
+            <Input
+              value={valores.q}
+              onChange={(e) => definir('q', e.target.value)}
+              placeholder="Chave de acesso, número ou empresa…"
+              aria-label="Buscar documentos"
+              className="h-8 pl-8"
+            />
+          </div>
+
+          <Select
+            value={valores.status}
+            onChange={(e) => definir('status', e.target.value)}
+            aria-label="Filtrar por status"
+            className="h-8 w-44"
+          >
             <option value="">Todos os status</option>
-            {STATUSES.map((s) => (
+            {STATUS_OPCOES.map((s) => (
               <option key={s} value={s}>
                 {STATUS_LABEL[s]}
               </option>
             ))}
           </Select>
-          <Select value={filtros.modelo} onChange={(e) => setFiltro('modelo', e.target.value)}>
-            <option value="">Modelos 55 e 65</option>
+
+          <Select
+            value={valores.modelo}
+            onChange={(e) => definir('modelo', e.target.value)}
+            aria-label="Filtrar por modelo"
+            className="h-8 w-36"
+          >
+            <option value="">Todos os modelos</option>
             <option value="55">NF-e (55)</option>
             <option value="65">NFC-e (65)</option>
+            <option value="115">NFS-e (115)</option>
           </Select>
-          <input
-            type="date"
-            value={filtros.de}
-            onChange={(e) => setFiltro('de', e.target.value)}
-            className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
-          />
-          <input
-            type="date"
-            value={filtros.ate}
-            onChange={(e) => setFiltro('ate', e.target.value)}
-            className="rounded-md border border-zinc-300 bg-white px-3 py-1.5 text-sm text-zinc-800 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-200"
-          />
-        </div>
-      </Card>
 
-      <Card>
+          <div className="flex items-center gap-1.5">
+            <Input
+              type="date"
+              value={valores.de}
+              onChange={(e) => definir('de', e.target.value)}
+              aria-label="Data inicial"
+              className="h-8 w-36"
+            />
+            <span className="text-xs text-ink-faint">até</span>
+            <Input
+              type="date"
+              value={valores.ate}
+              onChange={(e) => definir('ate', e.target.value)}
+              aria-label="Data final"
+              className="h-8 w-36"
+            />
+          </div>
+
+          <Button
+            variant="ghost"
+            size="sm"
+            onClick={() => {
+              // Alterna direção; campo padrão é criadoEm.
+              definir('ordem', ordem === 'desc' ? 'asc' : 'desc')
+            }}
+            title={`Ordenar por data de criação (${ordem === 'desc' ? 'mais recente' : 'mais antigo'} primeiro)`}
+          >
+            <ArrowDownUp className="h-3.5 w-3.5" aria-hidden />
+            {ordem === 'desc' ? 'Recentes' : 'Antigos'}
+          </Button>
+
+          {algumAtivo && (
+            <Button variant="ghost" size="sm" onClick={limpar}>
+              <X className="h-3.5 w-3.5" aria-hidden />
+              Limpar
+            </Button>
+          )}
+        </div>
+      </div>
+
+      {/* ---------- Lista ---------- */}
+      <div className="rounded-lg border border-line bg-surface">
         {isLoading ? (
-          <PageLoading />
+          <PageLoading mensagem="Carregando documentos…" />
+        ) : isError ? (
+          <div className="p-4">
+            <ErrorState
+              titulo="Não foi possível carregar os documentos"
+              detalhe={
+                error instanceof ApiError
+                  ? (error.detail ?? error.message)
+                  : 'Verifique se a API está rodando.'
+              }
+              aoTentarNovamente={() => refetch()}
+            />
+          </div>
         ) : !data || data.itens.length === 0 ? (
-          <p className="py-12 text-center text-xs text-zinc-500">
-            Nenhum documento com os filtros atuais. Emita um pelo Playground.
-          </p>
+          <EmptyState
+            titulo={algumAtivo || filtroTenant ? 'Nenhum documento com estes filtros' : 'Nenhum documento emitido'}
+            descricao={
+              algumAtivo || filtroTenant
+                ? 'Ajuste os filtros ou limpe para ver todos.'
+                : 'Emita um pelo Playground para começar.'
+            }
+            acao={
+              algumAtivo ? (
+                <Button onClick={limpar}>Limpar filtros</Button>
+              ) : (
+                <Button asChild variant="primary">
+                  <Link to="/playground">Abrir Playground</Link>
+                </Button>
+              )
+            }
+          />
         ) : (
           <>
-            <Table>
+            <Table label="Documentos fiscais">
               <thead>
                 <tr>
-                  <Th>Número</Th>
-                  <Th>Tipo</Th>
+                  <Th className="w-32">Número</Th>
+                  <Th className="w-24">Modelo</Th>
                   <Th>Empresa</Th>
-                  <Th>Status</Th>
-                  <Th>Chave de acesso</Th>
-                  <Th>Ambiente</Th>
-                  <Th>Criado em</Th>
+                  <Th className="w-44">Situação</Th>
+                  <Th className="w-56">Chave</Th>
+                  <Th className="w-32">Ambiente</Th>
+                  <Th className="w-36">Criado em</Th>
                 </tr>
               </thead>
               <tbody>
                 {data.itens.map((d) => (
-                  <tr key={d.id} className="transition-colors hover:bg-zinc-50 dark:hover:bg-zinc-800/30">
+                  <tr key={d.id} className="transition-colors hover:bg-surface-sunken/60">
                     <Td>
                       <Link
                         to={`/documentos/${d.id}`}
-                        className="font-mono text-xs font-medium text-blue-700 hover:text-blue-600 dark:text-blue-300 dark:hover:text-blue-200"
+                        className="font-mono text-xs font-medium text-carimbo tabular hover:underline"
                       >
-                        {d.serie !== null ? `${d.serie}/${String(d.numero ?? 0).padStart(9, '0')}` : '—'}
+                        {d.serie !== null
+                          ? `${d.serie}/${String(d.numero ?? 0).padStart(9, '0')}`
+                          : '—'}
                       </Link>
                     </Td>
-                    <Td>
-                      <Badge
-                        className={
-                          d.tipo === 'NFE'
-                            ? 'border-indigo-200 bg-indigo-50 text-indigo-700 dark:border-indigo-500/30 dark:bg-indigo-500/10 dark:text-indigo-300'
-                            : 'border-violet-200 bg-violet-50 text-violet-700 dark:border-violet-500/30 dark:bg-violet-500/10 dark:text-violet-300'
-                        }
-                      >
-                        {d.tipo === 'NFE' ? 'NF-e 55' : d.tipo === 'NFCE' ? 'NFC-e 65' : d.tipo}
-                      </Badge>
+                    <Td className="text-xs text-ink-muted">{rotuloModelo(d.tipo)}</Td>
+                    <Td className="max-w-56 truncate text-xs" title={d.tenantRazaoSocial}>
+                      {d.tenantRazaoSocial}
                     </Td>
-                    <Td className="max-w-48 truncate text-xs">{d.tenantRazaoSocial}</Td>
                     <Td>
-                      <Badge className={STATUS_COLOR[d.status]}>{STATUS_LABEL[d.status] ?? d.status}</Badge>
+                      <StatusDot status={d.status} withLabel />
                       {d.motivoStatus && d.status === 'REJEITADA' && (
-                        <p className="mt-0.5 max-w-64 truncate text-[11px] text-red-500/90 dark:text-red-400/80" title={d.motivoStatus}>
+                        <p
+                          className="mt-0.5 max-w-52 truncate text-[11px] text-rejeitado"
+                          title={d.motivoStatus}
+                        >
                           {d.motivoStatus}
                         </p>
                       )}
                     </Td>
-                    <Td className="font-mono text-[11px] text-zinc-500">{d.chaveAcesso ?? '—'}</Td>
                     <Td>
-                      <Badge
-                        className={
-                          d.ambiente === 'producao'
-                            ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300'
-                            : 'border-sky-200 bg-sky-50 text-sky-700 dark:border-sky-500/30 dark:bg-sky-500/10 dark:text-sky-300'
-                        }
-                      >
-                        {d.ambiente}
-                      </Badge>
+                      <ChaveAcesso chave={d.chaveAcesso} compacta />
                     </Td>
-                    <Td className="text-xs text-zinc-500">{formatarData(d.criadoEm)}</Td>
+                    <Td>
+                      <AmbienteBadge ambiente={d.ambiente} />
+                    </Td>
+                    <Td className="text-xs text-ink-muted tabular">{formatarData(d.criadoEm)}</Td>
                   </tr>
                 ))}
               </tbody>
             </Table>
-            <div className="flex items-center justify-between px-4 py-3 text-xs text-zinc-500">
-              <span>
-                {data.total} documento(s) · página {page} de {totalPaginas}
-              </span>
-              <div className="flex gap-2">
-                <button
-                  disabled={page <= 1}
-                  onClick={() => setFiltro('page', String(page - 1))}
-                  className="rounded-md border border-zinc-300 px-2.5 py-1 disabled:opacity-40 hover:enabled:border-zinc-400 dark:border-zinc-700 dark:hover:enabled:border-zinc-500"
-                >
-                  Anterior
-                </button>
-                <button
-                  disabled={page >= totalPaginas}
-                  onClick={() => setFiltro('page', String(page + 1))}
-                  className="rounded-md border border-zinc-300 px-2.5 py-1 disabled:opacity-40 hover:enabled:border-zinc-400 dark:border-zinc-700 dark:hover:enabled:border-zinc-500"
-                >
-                  Próxima
-                </button>
-              </div>
+
+            <div className="border-t border-line">
+              <Paginacao
+                total={data.total}
+                pagina={pagina}
+                pageSize={pageSize}
+                aoMudarPagina={definirPagina}
+                aoMudarTamanho={(n) => {
+                  definir('pageSize', String(n))
+                }}
+              />
             </div>
           </>
         )}
-      </Card>
+      </div>
+
+      <p className={cn('mt-3 text-[11px] text-ink-faint', !data?.itens.length && 'hidden')}>
+        {data?.itens.some((d) => STATUS_TRANSITORIOS.includes(d.status))
+          ? 'Há documentos em trânsito — a lista se atualiza a cada 5s.'
+          : `Página ${pagina} de ${totalPaginas}.`}
+      </p>
     </>
   )
 }
