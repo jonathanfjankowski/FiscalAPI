@@ -84,6 +84,10 @@ public static class MapperEnviNFe
         if (req.Destinatario is not null)
             nfe.InfNFeField.Dest = MapearDest(req.Destinatario, ufEmit);
 
+        // infCpl — informações complementares de interesse do fisco/contribuinte
+        if (!string.IsNullOrWhiteSpace(req.InformacoesComplementares))
+            nfe.InfNFeField.InfAdic = new InfAdic { InfCpl = req.InformacoesComplementares };
+
         if (respTec is not null)
             nfe.InfNFeField.InfRespTec = new InfRespTec
             {
