@@ -1,12 +1,12 @@
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
-import { ArrowDownUp, Search, X } from 'lucide-react'
+import { Link, useNavigate } from 'react-router-dom'
+import { ArrowDownUp, Check, Copy, Search, X } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useEmpresaContexto } from '../hooks/useEmpresaContexto'
 import { useFiltrosUrl } from '../hooks/useFiltrosUrl'
 import { STATUS_LABEL, STATUS_TRANSITORIOS } from '../lib/fiscal'
-import { formatarData } from '../lib/format'
+import { copiar, formatarCnpj, formatarData } from '../lib/format'
 import { cn } from '../lib/utils'
 import {
   AmbienteBadge,
@@ -40,16 +40,36 @@ const CHAVES_FILTRO = ['status', 'modelo', 'de', 'ate', 'q', 'ordenarPor', 'orde
 
 const STATUS_OPCOES = Object.keys(STATUS_LABEL)
 
-/** Rótulo curto do modelo para a coluna. */
-function rotuloModelo(tipo: string): string {
-  if (tipo === 'NFE') return 'NF-e 55'
-  if (tipo === 'NFCE') return 'NFC-e 65'
-  if (tipo === 'NFSE') return 'NFS-e'
-  return tipo
+/**
+ * Selo do modelo. O código fiscal (55/65/115) vai em mono ao lado do nome:
+ * é o que o operador e o contador usam para distinguir o documento, e some
+ * se ficar só o nome por extenso.
+ */
+function SeloModelo({ tipo }: { tipo: string }) {
+  const par =
+    tipo === 'NFE' ? ['NF-e', '55']
+    : tipo === 'NFCE' ? ['NFC-e', '65']
+    : tipo === 'NFSE' ? ['NFS-e', '115']
+    : [tipo, '']
+
+  return (
+    <span className="inline-flex shrink-0 items-center gap-1 rounded border border-line-strong bg-surface-sunken px-1.5 py-0.5 text-[10px] font-medium text-ink-muted">
+      {par[0]}
+      {par[1] && <span className="font-mono text-ink-faint tabular">{par[1]}</span>}
+    </span>
+  )
 }
 
 export default function Documentos() {
-  const { filtroTenant } = useEmpresaContexto()
+  const navigate = useNavigate()
+  const { filtroTenant, definirEmpresa } = useEmpresaContexto()
+  const [copiado, setCopiado] = useState<string | null>(null)
+
+  // CNPJ/UF do emitente na linha: a razão social sozinha não distingue
+  // matriz de filial. Vem do cache de ['tenants'] que o seletor do topo já
+  // mantém — sem requisição extra.
+  const { data: tenants } = useQuery({ queryKey: ['tenants'], queryFn: api.listTenants, staleTime: 60_000 })
+  const porId = useMemo(() => new Map((tenants ?? []).map((t) => [t.id, t])), [tenants])
   const { valores, pagina, definir, definirPagina, limpar, algumAtivo } = useFiltrosUrl(CHAVES_FILTRO)
 
   const pageSize = Number.parseInt(valores.pageSize || '50', 10) || 50
@@ -216,31 +236,86 @@ export default function Documentos() {
             <Table label="Documentos fiscais">
               <thead>
                 <tr>
-                  <Th className="w-32">Número</Th>
-                  <Th className="w-24">Modelo</Th>
-                  <Th>Empresa</Th>
+                  <Th className="w-64">Documento</Th>
+                  <Th className="min-w-56">Empresa</Th>
                   <Th className="w-44">Situação</Th>
-                  <Th className="w-56">Chave</Th>
+                  <Th className="w-40">Chave</Th>
                   <Th className="w-32">Ambiente</Th>
                   <Th className="w-36">Criado em</Th>
                 </tr>
               </thead>
               <tbody>
-                {data.itens.map((d) => (
-                  <tr key={d.id} className="transition-colors hover:bg-surface-sunken/60">
+                {data.itens.map((d) => {
+                  const numero =
+                    d.serie !== null ? `${d.serie}/${String(d.numero ?? 0).padStart(9, '0')}` : null
+                  const emitente = porId.get(d.tenantId)
+
+                  return (
+                  <tr
+                    key={d.id}
+                    // A linha inteira abre o documento: o alvo grande é mais
+                    // rápido de acertar que o link de 12px do número.
+                    onClick={() => navigate(`/documentos/${d.id}`)}
+                    className="group cursor-pointer transition-colors hover:bg-surface-sunken/60"
+                  >
                     <Td>
-                      <Link
-                        to={`/documentos/${d.id}`}
-                        className="font-mono text-xs font-medium text-carimbo tabular hover:underline"
-                      >
-                        {d.serie !== null
-                          ? `${d.serie}/${String(d.numero ?? 0).padStart(9, '0')}`
-                          : '—'}
-                      </Link>
+                      <div className="flex items-center gap-2">
+                        {numero ? (
+                          <Link
+                            to={`/documentos/${d.id}`}
+                            onClick={(e) => e.stopPropagation()}
+                            className="font-mono text-[15px] leading-none font-semibold text-ink tabular transition-colors group-hover:text-carimbo hover:underline"
+                            title={`Abrir ${numero}`}
+                          >
+                            {numero}
+                          </Link>
+                        ) : (
+                          <span className="font-mono text-[15px] text-ink-faint">sem número</span>
+                        )}
+                        <SeloModelo tipo={d.tipo} />
+                        {numero && (
+                          <button
+                            type="button"
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              if (await copiar(numero)) {
+                                setCopiado(d.id)
+                                setTimeout(() => setCopiado((c) => (c === d.id ? null : c)), 1800)
+                              }
+                            }}
+                            aria-label={`Copiar número ${numero}`}
+                            title="Copiar número"
+                            className="rounded p-1 text-ink-faint opacity-0 transition-opacity group-hover:opacity-100 hover:bg-surface hover:text-ink focus-visible:opacity-100"
+                          >
+                            {copiado === d.id ? (
+                              <Check className="h-3 w-3 text-aprovado" aria-hidden />
+                            ) : (
+                              <Copy className="h-3 w-3" aria-hidden />
+                            )}
+                          </button>
+                        )}
+                      </div>
                     </Td>
-                    <Td className="text-xs text-ink-muted">{rotuloModelo(d.tipo)}</Td>
-                    <Td className="max-w-56 truncate text-xs" title={d.tenantRazaoSocial}>
-                      {d.tenantRazaoSocial}
+                    <Td>
+                      {/* Clicar na empresa troca o contexto do painel para ela —
+                          é o caminho de um clique para "só os documentos desta". */}
+                      <button
+                        type="button"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          definirEmpresa(d.tenantId)
+                        }}
+                        title={`Filtrar o painel por ${d.tenantRazaoSocial}`}
+                        className="block max-w-full truncate text-left text-[13px] font-medium text-ink transition-colors hover:text-carimbo hover:underline"
+                      >
+                        {d.tenantRazaoSocial}
+                      </button>
+                      <p className="mt-0.5 flex items-center gap-1.5 font-mono text-[10px] text-ink-faint tabular">
+                        {emitente && <span>{formatarCnpj(emitente.cnpj)}</span>}
+                        {emitente && <span aria-hidden>·</span>}
+                        {emitente ? <span>{emitente.uf}</span> : null}
+                        {!emitente && <span className="font-sans">—</span>}
+                      </p>
                     </Td>
                     <Td>
                       <StatusDot status={d.status} withLabel />
@@ -261,7 +336,8 @@ export default function Documentos() {
                     </Td>
                     <Td className="text-xs text-ink-muted tabular">{formatarData(d.criadoEm)}</Td>
                   </tr>
-                ))}
+                  )
+                })}
               </tbody>
             </Table>
 

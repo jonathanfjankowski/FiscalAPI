@@ -153,6 +153,24 @@ desfecho — a única animação do produto, que respeita `prefers-reduced-motio
 `aria-*`; skip link, `aria-live` nos toasts, foco visível, navegação por
 teclado, responsivo até 360px (rail vira barra inferior).
 
+**Navegação e layout.** O rail é expansível (60px ↔ 232px, preferência
+persistida) e o conteúdo ocupa **toda** a largura disponível — um console de
+operação é lido em monitor largo. Na listagem de documentos, **número e
+empresa são os elementos dominantes**: número em 15px semibold com o selo do
+modelo (NF-e 55 / NFC-e 65 / NFS-e 115) ao lado, empresa com CNPJ e UF abaixo.
+A numeração é por (empresa, modelo, série, ambiente), então o número sozinho
+é ambíguo — cinco documentos podem ser `1/000000001`. A linha inteira abre o
+detalhe, o número tem copiar, e clicar na empresa troca o contexto do painel.
+
+**Tráfego HTTP (`/trafego`).** Inspetor de requests/responses do painel: método,
+rota, status, duração, tamanho, headers e corpos, com busca, filtros, pausa,
+exportação JSON e "copiar cURL". Buffer de 300 chamadas em memória; corpos
+acima de 64 KB são truncados. **Segredos são redigidos antes de entrar no
+buffer** — `Authorization`, senha, CSC, webhook secret, chave e token — com
+14 testes unitários travando a redação (inclusive em objetos aninhados e
+arrays). Nada é persistido nem enviado ao backend. O item do menu mostra o
+contador de falhas.
+
 **Bugs corrigidos no caminho** (todos pré-existentes):
 - `cscId` não era exposto no response **nem gravado na criação** do tenant —
   o CSC informado era silenciosamente descartado.
@@ -169,7 +187,7 @@ teclado, responsivo até 360px (rail vira barra inferior).
 - A paginação da auditoria carregava a tabela inteira em memória também em
   Postgres; agora `Skip/Take` vão para o SQL.
 
-**Testes:** 325 no backend (140 Core + 185 Api) e 29 no frontend (Vitest,
+**Testes:** 325 no backend (140 Core + 185 Api) e 43 no frontend (Vitest,
 lógica pura de `lib/`). Inclui `TraducaoNpgsqlTests`, que compila as queries
 dos endpoints admin contra o provider **Npgsql** sem conectar — a suíte de
 integração roda em SQLite e é estruturalmente cega para erros de tradução

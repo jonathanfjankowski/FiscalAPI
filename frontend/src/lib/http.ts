@@ -9,6 +9,8 @@
 // endpoints vivem em lib/endpoints/* e os tipos em lib/types.ts.
 // ==========================================================================
 
+import { registrarChamada } from './trafego'
+
 export interface AuthInfo {
   token: string
   expiraEm: string
@@ -84,20 +86,46 @@ export async function request<T>(path: string, opts: RequestOptions = {}): Promi
   if (opts.idempotencyKey) headers['Idempotency-Key'] = opts.idempotencyKey
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json'
 
+  const metodo = opts.method ?? (opts.body !== undefined || opts.formData ? 'POST' : 'GET')
+  const corpoJson = opts.body !== undefined ? JSON.stringify(opts.body) : undefined
+
+  // Registro de tráfego: o inspetor mostra a chamada crua. FormData não é
+  // serializável (upload de .pfx) — registra só o marcador.
+  const registro = registrarChamada({
+    metodo,
+    rota: path,
+    headers,
+    corpo: corpoJson ?? (opts.formData ? '[multipart/form-data]' : null),
+    origem: opts.apiKey ? 'tenant' : 'admin',
+  })
+
   let resp: Response
   try {
     resp = await fetch(API_BASE + path, {
-      method: opts.method ?? (opts.body !== undefined || opts.formData ? 'POST' : 'GET'),
+      method: metodo,
       headers,
-      body: opts.formData ?? (opts.body !== undefined ? JSON.stringify(opts.body) : undefined),
+      body: opts.formData ?? corpoJson,
     })
   } catch {
+    registro.finalizar({ status: null, ok: false, erro: 'Falha de rede — a API não respondeu.' })
     throw new ApiError(0, 'Não foi possível conectar à API.', 'Verifique se a API está rodando.')
   }
 
-  if (resp.status === 204) return undefined as T
+  const headersResp = Object.fromEntries(resp.headers.entries())
+
+  if (resp.status === 204) {
+    registro.finalizar({ status: 204, ok: true, responseHeaders: headersResp })
+    return undefined as T
+  }
 
   const text = await resp.text()
+  registro.finalizar({
+    status: resp.status,
+    ok: resp.ok,
+    responseHeaders: headersResp,
+    corpo: text,
+  })
+
   let data: unknown = null
   try {
     data = text ? JSON.parse(text) : null
@@ -132,31 +160,53 @@ export async function requestBlob(path: string, opts: RequestOptions = {}): Prom
   else if (auth) headers['Authorization'] = `Bearer ${auth.token}`
   if (opts.body !== undefined) headers['Content-Type'] = 'application/json'
 
+  const metodo = opts.method ?? (opts.body !== undefined ? 'POST' : 'GET')
+  const corpoJson = opts.body !== undefined ? JSON.stringify(opts.body) : undefined
+
+  const registro = registrarChamada({
+    metodo,
+    rota: path,
+    headers,
+    corpo: corpoJson,
+    origem: opts.apiKey ? 'tenant' : 'admin',
+  })
+
   let resp: Response
   try {
-    resp = await fetch(API_BASE + path, {
-      method: opts.method ?? (opts.body !== undefined ? 'POST' : 'GET'),
-      headers,
-      body: opts.body !== undefined ? JSON.stringify(opts.body) : undefined,
-    })
+    resp = await fetch(API_BASE + path, { method: metodo, headers, body: corpoJson })
   } catch {
+    registro.finalizar({ status: null, ok: false, erro: 'Falha de rede — a API não respondeu.' })
     throw new ApiError(0, 'Não foi possível conectar à API.', 'Verifique se a API está rodando.')
   }
 
+  const headersResp = Object.fromEntries(resp.headers.entries())
+
   if (!resp.ok) {
+    // O corpo do erro é problem+json (RFC 7807) mesmo numa rota de arquivo.
+    const textoErro = await resp.text().catch(() => '')
+    registro.finalizar({
+      status: resp.status, ok: false, responseHeaders: headersResp, corpo: textoErro,
+    })
     if (resp.status === 401 && auth && !opts.apiKey) {
       clearAuth()
       window.dispatchEvent(new CustomEvent(UNAUTHORIZED_EVENT))
     }
-    // O corpo do erro é problem+json (RFC 7807) mesmo numa rota de arquivo.
     let problem: { title?: string; detail?: string } | null = null
     try {
-      problem = (await resp.json()) as { title?: string; detail?: string }
+      problem = JSON.parse(textoErro) as { title?: string; detail?: string }
     } catch {
       problem = null
     }
     throw new ApiError(resp.status, problem?.title ?? `Erro ${resp.status}`, problem?.detail)
   }
 
-  return await resp.blob()
+  const blob = await resp.blob()
+  // Binário não vai para o registro — só o tamanho e o content-type.
+  registro.finalizar({
+    status: resp.status,
+    ok: true,
+    responseHeaders: headersResp,
+    corpo: `[binário ${blob.type || 'desconhecido'}, ${blob.size} bytes]`,
+  })
+  return blob
 }

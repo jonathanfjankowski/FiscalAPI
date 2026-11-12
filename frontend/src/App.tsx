@@ -11,6 +11,7 @@ import Playground from './pages/Playground'
 import Configuracoes from './pages/Configuracoes'
 import NotasRecebidas from './pages/NotasRecebidas'
 import Auditoria from './pages/Auditoria'
+import Trafego from './pages/Trafego'
 import type { ReactNode } from 'react'
 
 function RequireAuth({ children }: { children: ReactNode }) {
@@ -43,6 +44,7 @@ export default function App() {
         <Route path="/documentos/:id" element={<DocumentoDetalhe />} />
         <Route path="/notas-recebidas" element={<NotasRecebidas />} />
         <Route path="/auditoria" element={<Auditoria />} />
+        <Route path="/trafego" element={<Trafego />} />
         <Route path="/playground" element={<Playground />} />
         <Route path="/configuracoes" element={<Configuracoes />} />
       </Route>

@@ -1,21 +1,31 @@
 import { Outlet } from 'react-router-dom'
 import { TooltipProvider } from '../ui'
+import { useSidebar } from '../../hooks/useSidebar'
 import { Sidebar } from './Sidebar'
 import { Topbar } from './Topbar'
 
 // ==========================================================================
 // Shell do painel.
 //
-// Rail fixo à esquerda + barra de comando + conteúdo. O conteúdo é separado
-// por hairlines, não por cards flutuantes: num console denso, a moldura
-// compete com o dado.
+// Rail fixo à esquerda + barra de comando + conteúdo. O conteúdo usa TODA a
+// largura disponível: um console de operação é lido em monitor largo, e
+// limitar a 88rem deixava uma faixa vazia à direita enquanto a tabela de
+// documentos rolava na horizontal.
+//
+// A largura do rail vem por variável CSS para que o padding só valha a
+// partir de `sm` — no mobile a navegação é inferior e não há o que reservar.
 // ==========================================================================
 
 export function AppShell() {
+  const { largura } = useSidebar()
+
   return (
     <TooltipProvider>
-      <div className="min-h-screen bg-paper">
-        {/* Skip link: quem navega por teclado não precisa passar pelos 7
+      <div
+        className="min-h-screen bg-paper"
+        style={{ '--largura-rail': `${largura}px` } as React.CSSProperties}
+      >
+        {/* Skip link: quem navega por teclado não precisa passar pelos 8
             itens do rail em toda página. */}
         <a
           href="#conteudo"
@@ -24,10 +34,10 @@ export function AppShell() {
           Ir para o conteúdo
         </a>
         <Sidebar />
-        {/* pb-16 no mobile abre espaço para a barra de navegação inferior. */}
-        <div className="pb-16 sm:pb-0 sm:pl-15">
+        {/* pb-16 no mobile abre espaço para a barra inferior. */}
+        <div className="pb-16 transition-[padding] duration-200 sm:pb-0 sm:pl-[var(--largura-rail)]">
           <Topbar />
-          <main id="conteudo" tabIndex={-1} className="mx-auto max-w-[88rem] px-4 py-5 focus:outline-none sm:px-6 sm:py-6">
+          <main id="conteudo" tabIndex={-1} className="px-4 py-5 focus:outline-none sm:px-6 sm:py-6">
             <Outlet />
           </main>
         </div>
