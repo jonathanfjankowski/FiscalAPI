@@ -1,12 +1,37 @@
-import { useMemo, useEffect, useRef, useState } from 'react'
-import { useQuery } from '@tanstack/react-query'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { useMutation, useQuery } from '@tanstack/react-query'
 import { Link } from 'react-router-dom'
-import { api, type EmissaoResponse } from '../lib/api'
+import { Copy, Eye, KeyRound, Play, RefreshCw, Terminal } from 'lucide-react'
+import { api, ApiError, type EmissaoResponse } from '../lib/api'
+import { STATUS_TERMINAIS } from '../lib/fiscal'
+import { copiar, formatarDecimal } from '../lib/format'
+import { cn } from '../lib/utils'
 import {
-  Badge, Button, Card, Field, Input, PageHeader, Select, StatusBadge, Textarea,
-} from '../components/ui-antigo'
-import { useToast } from '../components/toast'
-import { formatarData, formatarDecimal, STATUS_COLOR, STATUS_TERMINAIS } from '../lib/utils'
+  Button,
+  Dialog,
+  Field,
+  Input,
+  Select,
+  StatusBadge,
+  Textarea,
+  useToast,
+} from '../components/ui'
+import { PageHeader } from '../components/ui/estados'
+import { SegredoUnico } from '../components/ui/segredo'
+import { Timeline, TrilhoStatus, type Transicao } from '../components/fiscal'
+
+// ==========================================================================
+// Playground — o caminho real do integrador.
+//
+// Split-pane: requisição à esquerda, resposta à direita. Usa API key de
+// tenant (não o JWT do operador), então exercita exatamente o que o ERP
+// faz: header ApiKey + Idempotency-Key.
+//
+// O preview do DANFE não transmite nada — é o que o integrador chama antes
+// de emitir, para o contribuinte conferir o documento.
+// ==========================================================================
+
+const KEY_STORAGE = 'fiscal.playground.apikey'
 
 interface ItemForm {
   codigo: string
@@ -25,20 +50,17 @@ const ITEM_PADRAO: ItemForm = {
   cfop: '5102',
   quantidade: 1,
   valorUnitario: 100,
-  aliquota: 1.65,
+  aliquota: 18,
 }
 
-const KEY_STORAGE = 'fiscal.playground.apikey'
+const totalItem = (i: ItemForm) => Math.round(i.quantidade * i.valorUnitario * 100) / 100
 
-function totalItem(i: ItemForm): number {
-  return Math.round(i.quantidade * i.valorUnitario * 100) / 100
-}
-
-function montarJson(ambiente: string, serie: number, itens: ItemForm[], destCnpj: string, destNome: string, natureza: string) {
+function montarPayload(
+  ambiente: string, serie: number, itens: ItemForm[],
+  destCnpj: string, destNome: string, natureza: string,
+) {
   const itensJson = itens.map((i) => {
     const total = totalItem(i)
-    const base = total
-    const valorImposto = Math.round(((base * i.aliquota) / 100) * 100) / 100
     return {
       codigo: i.codigo,
       descricao: i.descricao,
@@ -47,11 +69,17 @@ function montarJson(ambiente: string, serie: number, itens: ItemForm[], destCnpj
       quantidade: i.quantidade,
       valorUnitario: i.valorUnitario,
       valorTotal: total,
-      impostos: [{ cst: '01', baseCalculo: base, aliquota: i.aliquota, valor: valorImposto }],
+      impostos: [
+        {
+          cst: '00',
+          baseCalculo: total,
+          aliquota: i.aliquota,
+          valor: Math.round(((total * i.aliquota) / 100) * 100) / 100,
+        },
+      ],
     }
   })
-  const valorProdutos = Math.round(itensJson.reduce((acc, i) => acc + i.valorTotal, 0) * 100) / 100
-
+  const valorProdutos = Math.round(itensJson.reduce((a, i) => a + i.valorTotal, 0) * 100) / 100
   return {
     ambiente,
     serie,
@@ -63,20 +91,14 @@ function montarJson(ambiente: string, serie: number, itens: ItemForm[], destCnpj
   }
 }
 
-interface HistoricoItem {
-  id: string
-  modelo: string
-  status: string
-  em: string
-  json: string
-}
+type Modelo = 'nfe' | 'nfce' | 'nfse'
 
 export default function Playground() {
   const toast = useToast()
   const { data: tenants } = useQuery({ queryKey: ['tenants'], queryFn: api.listTenants })
 
   const [tenantId, setTenantId] = useState('')
-  const [modelo, setModelo] = useState<'nfe' | 'nfce'>('nfe')
+  const [modelo, setModelo] = useState<Modelo>('nfe')
   const [ambiente, setAmbiente] = useState('homologacao')
   const [serie, setSerie] = useState(1)
   const [apiKey, setApiKey] = useState(() => sessionStorage.getItem(KEY_STORAGE) ?? '')
@@ -88,48 +110,84 @@ export default function Playground() {
   const [itens, setItens] = useState<ItemForm[]>([{ ...ITEM_PADRAO }])
 
   const jsonGerado = useMemo(
-    () => JSON.stringify(montarJson(ambiente, serie, itens, destCnpj, destNome, natureza), null, 2),
+    () => JSON.stringify(montarPayload(ambiente, serie, itens, destCnpj, destNome, natureza), null, 2),
     [ambiente, serie, itens, destCnpj, destNome, natureza],
   )
   const [jsonCru, setJsonCru] = useState('')
+  const [erroJson, setErroJson] = useState<string | null>(null)
 
-  const [emitindo, setEmitindo] = useState(false)
+  const [idempotencyKey, setIdempotencyKey] = useState<string>(() => crypto.randomUUID())
   const [seguindo, setSeguindo] = useState<EmissaoResponse | null>(null)
-  // Token do acompanhamento ativo: emissão nova invalida o loop anterior e o
-  // loop aborta se o componente desmontou (antes, loops ficavam rodando em
-  // paralelo e brigavam pelo mesmo estado).
+  const [transicoes, setTransicoes] = useState<Transicao[]>([])
+  const [respostaBruta, setRespostaBruta] = useState<string | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [chaveGerada, setChaveGerada] = useState<{ chave: string; aviso: string } | null>(null)
+
+  // Token do acompanhamento: emissão nova invalida o loop anterior, e o loop
+  // aborta se o componente desmontou.
   const seguirToken = useRef(0)
-  const seguirAtivo = useRef(true)
+  const ativo = useRef(true)
   useEffect(() => {
-    seguirAtivo.current = true
+    ativo.current = true
     return () => {
-      seguirAtivo.current = false
+      ativo.current = false
     }
   }, [])
-  const [transicoes, setTransicoes] = useState<{ status: string; em: string }[]>([])
-  const [historico, setHistorico] = useState<HistoricoItem[]>([])
 
-  const totalNota = itens.reduce((acc, i) => acc + totalItem(i), 0)
+  const totalNota = itens.reduce((a, i) => a + totalItem(i), 0)
 
-  const salvarKey = (valor: string) => {
-    setApiKey(valor)
-    sessionStorage.setItem(KEY_STORAGE, valor)
+  const salvarKey = (v: string) => {
+    setApiKey(v)
+    sessionStorage.setItem(KEY_STORAGE, v)
   }
 
-  async function emitir() {
-    const key = apiKey.trim()
-    if (!key) {
-      toast({ tipo: 'erro', titulo: 'Informe a API key do tenant', detalhe: 'Gere uma na aba API Keys do tenant.' })
-      return
-    }
-    setEmitindo(true)
-    setSeguindo(null)
-    setTransicoes([])
-    try {
-      const body = modo === 'json' ? JSON.parse(jsonCru) : montarJson(ambiente, serie, itens, destCnpj, destNome, natureza)
-      const idem = crypto.randomUUID()
-      const resp = await api.emitir(modelo, key, body, idem)
+  const mutGerarKey = useMutation({
+    mutationFn: () => api.createApiKey(tenantId, { descricao: 'Playground', ambiente: 'homologacao' }),
+    onSuccess: (k) => {
+      salvarKey(k.chave)
+      setChaveGerada({ chave: k.chave, aviso: k.aviso })
+    },
+    onError: (e) => toast({ tipo: 'erro', titulo: 'Falha ao gerar chave', detalhe: e.message }),
+  })
 
+  const mutPreview = useMutation({
+    mutationFn: async () => {
+      const payload = modo === 'json' ? JSON.parse(jsonCru) : montarPayload(ambiente, serie, itens, destCnpj, destNome, natureza)
+      return api.previewPdf(apiKey.trim(), modelo === 'nfce' ? 'NFCE' : 'NFE', payload)
+    },
+    onSuccess: (blob) => {
+      if (previewUrl) URL.revokeObjectURL(previewUrl)
+      setPreviewUrl(URL.createObjectURL(blob))
+    },
+    onError: (e) =>
+      toast({
+        tipo: 'erro',
+        titulo: 'Falha na pré-visualização',
+        detalhe: e instanceof ApiError ? (e.detail ?? e.message) : e.message,
+      }),
+  })
+
+  const mutEmitir = useMutation({
+    mutationFn: async () => {
+      const key = apiKey.trim()
+      if (!key) throw new Error('Informe a API key do tenant.')
+      let body: unknown
+      if (modo === 'json') {
+        try {
+          body = JSON.parse(jsonCru)
+          setErroJson(null)
+        } catch (e) {
+          // Erro de sintaxe é do campo — não vira "emissão rejeitada".
+          setErroJson(e instanceof Error ? e.message : 'JSON inválido')
+          throw new Error('JSON inválido')
+        }
+      } else {
+        body = montarPayload(ambiente, serie, itens, destCnpj, destNome, natureza)
+      }
+      return api.emitir(modelo, key, body, idempotencyKey)
+    },
+    onSuccess: (resp) => {
+      setRespostaBruta(JSON.stringify(resp, null, 2))
       const inicial: EmissaoResponse = {
         id: resp.id,
         tipo: modelo.toUpperCase(),
@@ -148,66 +206,80 @@ export default function Playground() {
       setSeguindo(inicial)
       setTransicoes([{ status: resp.status, em: new Date().toISOString() }])
 
-      const entrada: HistoricoItem = {
-        id: resp.id,
-        modelo,
-        status: resp.status,
-        em: new Date().toISOString(),
-        json: JSON.stringify(body, null, 2),
-      }
-      setHistorico((h) => [entrada, ...h].slice(0, 20))
-
       if (!STATUS_TERMINAIS.includes(resp.status)) {
         seguirToken.current += 1
-        const token = seguirToken.current
-        void acompanhar(resp.id, key, [resp.status], token)
+        void acompanhar(resp.id, apiKey.trim(), [resp.status], seguirToken.current)
       }
-    } catch (err) {
-      toast({ tipo: 'erro', titulo: 'Emissão rejeitada', detalhe: err instanceof Error ? err.message : String(err) })
-    } finally {
-      setEmitindo(false)
-    }
-  }
+    },
+    onError: (e) => {
+      if (e.message === 'JSON inválido') return
+      const msg = e instanceof ApiError ? (e.detail ?? e.message) : e.message
+      setRespostaBruta(msg)
+      toast({ tipo: 'erro', titulo: 'Emissão recusada', detalhe: msg })
+    },
+  })
 
   async function acompanhar(id: string, key: string, vistos: string[], token: number) {
     for (let i = 0; i < 45; i++) {
       await new Promise((r) => setTimeout(r, 2000))
-      if (!seguirAtivo.current || seguirToken.current !== token) return
+      if (!ativo.current || seguirToken.current !== token) return
       try {
         const doc = await api.consultarComoTenant(id, key)
         setSeguindo(doc)
+        setRespostaBruta(JSON.stringify(doc, null, 2))
         if (doc.status !== vistos[vistos.length - 1]) {
           vistos = [...vistos, doc.status]
-          setTransicoes((t) => [...t, { status: doc.status, em: new Date().toISOString() }])
+          setTransicoes((t) => [...t, { status: doc.status, em: new Date().toISOString(), motivo: doc.motivoStatus }])
         }
-        if (STATUS_TERMINAIS.includes(doc.status)) {
-          setHistorico((h) => h.map((x) => (x.id === id ? { ...x, status: doc.status } : x)))
-          return
-        }
+        if (STATUS_TERMINAIS.includes(doc.status)) return
       } catch {
         // falha de polling: tenta de novo no próximo ciclo
       }
     }
   }
 
-  const setItem = (idx: number, campo: keyof ItemForm, valor: string | number) =>
-    setItens((arr) => arr.map((it, i) => (i === idx ? { ...it, [campo]: campo === 'codigo' || campo === 'descricao' || campo === 'ncm' || campo === 'cfop' ? valor : Number(valor) || 0 } : it)))
+  const curl = useMemo(() => {
+    const corpo = modo === 'json' ? jsonCru : jsonGerado
+    const base = window.location.origin
+    return [
+      `curl -X POST "${base}/v1/documentos-fiscais/${modelo}" \\`,
+      `  -H "Authorization: ApiKey ${apiKey || '<SUA_API_KEY>'}" \\`,
+      `  -H "Idempotency-Key: ${idempotencyKey}" \\`,
+      `  -H "Content-Type: application/json" \\`,
+      `  -d '${corpo.replace(/\n\s*/g, ' ')}'`,
+    ].join('\n')
+  }, [modelo, apiKey, idempotencyKey, modo, jsonCru, jsonGerado])
+
+  const setItem = (idx: number, campo: keyof ItemForm, valor: string) =>
+    setItens((arr) =>
+      arr.map((it, i) =>
+        i === idx
+          ? {
+              ...it,
+              [campo]:
+                campo === 'codigo' || campo === 'descricao' || campo === 'ncm' || campo === 'cfop'
+                  ? valor
+                  : Number(valor) || 0,
+            }
+          : it,
+      ),
+    )
 
   return (
     <>
       <PageHeader
         titulo="Playground"
-        descricao="Emita documentos de teste pelo caminho real da API (API key do tenant + Idempotency-Key)"
+        descricao="Emite pelo caminho real do integrador: API key de tenant + Idempotency-Key."
       />
 
-      <div className="grid items-start gap-4 lg:grid-cols-[1fr_380px]">
+      <div className="grid items-start gap-4 xl:grid-cols-[1fr_24rem]">
+        {/* ---------- Requisição ---------- */}
         <div className="space-y-4">
-          {/* Configuração */}
-          <Card className="p-5">
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-200">Configuração</h2>
-            <div className="mt-3 grid grid-cols-2 gap-3 lg:grid-cols-4">
-              <Field label="Tenant">
-                <Select value={tenantId} onChange={(e) => setTenantId(e.target.value)}>
+          <section className="rounded-lg border border-line bg-surface p-4">
+            <h2 className="mb-3 text-xs font-semibold text-ink-muted">Configuração</h2>
+            <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+              <Field label="Empresa" htmlFor="pg-tenant">
+                <Select id="pg-tenant" value={tenantId} onChange={(e) => setTenantId(e.target.value)}>
                   <option value="">— selecione —</option>
                   {(tenants ?? []).map((t) => (
                     <option key={t.id} value={t.id}>
@@ -216,33 +288,33 @@ export default function Playground() {
                   ))}
                 </Select>
               </Field>
-              <Field label="Modelo">
-                <Select value={modelo} onChange={(e) => setModelo(e.target.value as 'nfe' | 'nfce')}>
+              <Field label="Modelo" htmlFor="pg-modelo">
+                <Select id="pg-modelo" value={modelo} onChange={(e) => setModelo(e.target.value as Modelo)}>
                   <option value="nfe">NF-e (55)</option>
                   <option value="nfce">NFC-e (65)</option>
+                  <option value="nfse">NFS-e (DPS)</option>
                 </Select>
               </Field>
-              <Field label="Ambiente">
-                <Select value={ambiente} onChange={(e) => setAmbiente(e.target.value)}>
+              <Field label="Ambiente" htmlFor="pg-amb">
+                <Select id="pg-amb" value={ambiente} onChange={(e) => setAmbiente(e.target.value)}>
                   <option value="homologacao">Homologação</option>
                   <option value="producao">Produção</option>
                 </Select>
               </Field>
-              <Field label="Série">
-                <Input type="number" min={1} max={999} value={serie} onChange={(e) => setSerie(Number(e.target.value) || 1)} />
+              <Field label="Série" htmlFor="pg-serie">
+                <Input id="pg-serie" type="number" min={1} max={999} value={serie} onChange={(e) => setSerie(Number(e.target.value) || 1)} />
               </Field>
             </div>
+
             <Field
               label="API key do tenant"
+              htmlFor="pg-key"
               className="mt-3"
-              hint={
-                tenantId
-                  ? 'Gere/copie na aba API Keys do tenant. Fica só na sessão deste navegador.'
-                  : 'Selecione um tenant acima para atalho de geração.'
-              }
+              hint="Fica só na sessão deste navegador. Nunca vai para a URL."
             >
               <div className="flex gap-2">
                 <Input
+                  id="pg-key"
                   type="password"
                   value={apiKey}
                   onChange={(e) => salvarKey(e.target.value)}
@@ -250,89 +322,112 @@ export default function Playground() {
                   className="font-mono"
                   autoComplete="off"
                 />
-                {tenantId && (
-                  <Link to={`/tenants/${tenantId}`} tabIndex={-1}>
-                    <Button type="button">Gerar key</Button>
-                  </Link>
-                )}
+                <Button
+                  onClick={() => mutGerarKey.mutate()}
+                  loading={mutGerarKey.isPending}
+                  disabled={!tenantId}
+                  title={tenantId ? 'Gerar chave de homologação para esta empresa' : 'Selecione a empresa'}
+                >
+                  <KeyRound className="h-3.5 w-3.5" aria-hidden />
+                  Gerar
+                </Button>
               </div>
             </Field>
-          </Card>
 
-          {/* Conteúdo da emissão */}
-          <Card className="p-5">
-            <div className="flex items-center justify-between">
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-200">Documento</h2>
-              <div className="flex rounded-md border border-zinc-300 p-0.5 text-xs dark:border-zinc-700">
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <Field label="Idempotency-Key" htmlFor="pg-idem" className="min-w-72 flex-1">
+                <Input id="pg-idem" value={idempotencyKey} onChange={(e) => setIdempotencyKey(e.target.value)} className="font-mono text-xs" />
+              </Field>
+              <Button
+                className="mt-5"
+                size="sm"
+                onClick={() => setIdempotencyKey(crypto.randomUUID())}
+                title="Gerar nova chave (reusar a mesma demonstra idempotência)"
+              >
+                <RefreshCw className="h-3.5 w-3.5" aria-hidden />
+                Nova
+              </Button>
+            </div>
+          </section>
+
+          <section className="rounded-lg border border-line bg-surface p-4">
+            <div className="mb-3 flex items-center justify-between">
+              <h2 className="text-xs font-semibold text-ink-muted">Documento</h2>
+              <div className="flex rounded border border-line p-0.5 text-xs">
                 {(['form', 'json'] as const).map((m) => (
                   <button
                     key={m}
+                    type="button"
                     onClick={() => {
                       if (m === 'json') setJsonCru(jsonGerado)
                       setModo(m)
                     }}
-                    className={`rounded-md px-3 py-1 transition-colors ${
-                      modo === m ? 'bg-zinc-100 font-medium text-zinc-900 dark:bg-zinc-700 dark:text-zinc-100' : 'text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300'
-                    }`}
+                    className={cn(
+                      'rounded px-2.5 py-1 transition-colors',
+                      modo === m ? 'bg-carimbo-soft font-medium text-carimbo' : 'text-ink-muted hover:text-ink',
+                    )}
                   >
-                    {m === 'form' ? 'Formulário' : 'JSON cru'}
+                    {m === 'form' ? 'Formulário' : 'JSON'}
                   </button>
                 ))}
               </div>
             </div>
 
             {modo === 'form' ? (
-              <div className="mt-4 space-y-4">
+              <div className="space-y-3">
                 <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-                  <Field label="Destinatário CNPJ/CPF">
-                    <Input value={destCnpj} onChange={(e) => setDestCnpj(e.target.value)} className="font-mono" />
+                  <Field label="CNPJ/CPF do destinatário" htmlFor="pg-cnpj">
+                    <Input id="pg-cnpj" value={destCnpj} onChange={(e) => setDestCnpj(e.target.value)} className="font-mono" />
                   </Field>
-                  <Field label="Nome do destinatário" className="col-span-2">
-                    <Input value={destNome} onChange={(e) => setDestNome(e.target.value)} />
+                  <Field label="Nome do destinatário" htmlFor="pg-nome" className="col-span-2">
+                    <Input id="pg-nome" value={destNome} onChange={(e) => setDestNome(e.target.value)} />
                   </Field>
-                  <Field label="Natureza da operação">
-                    <Input value={natureza} onChange={(e) => setNatureza(e.target.value)} />
+                  <Field label="Natureza da operação" htmlFor="pg-nat">
+                    <Input id="pg-nat" value={natureza} onChange={(e) => setNatureza(e.target.value)} />
                   </Field>
                 </div>
 
                 <div>
                   <div className="mb-2 flex items-center justify-between">
-                    <span className="text-xs font-medium text-zinc-400">Itens</span>
-                    <Button type="button" onClick={() => setItens((arr) => [...arr, { ...ITEM_PADRAO, codigo: `SKU${arr.length + 1}` }])}>
+                    <span className="text-xs text-ink-muted">Itens</span>
+                    <Button size="sm" onClick={() => setItens((a) => [...a, { ...ITEM_PADRAO, codigo: `SKU${a.length + 1}` }])}>
                       + Item
                     </Button>
                   </div>
                   <div className="space-y-2">
                     {itens.map((item, idx) => (
-                      <div key={idx} className="grid grid-cols-12 items-end gap-2 rounded-md border border-zinc-200 p-3 dark:border-zinc-800">
-                        <Field label="Código" className="col-span-2">
-                          <Input value={item.codigo} onChange={(e) => setItem(idx, 'codigo', e.target.value)} />
+                      <div key={idx} className="grid grid-cols-12 items-end gap-2 rounded border border-line p-2.5">
+                        <Field label="Código" htmlFor={`cod-${idx}`} className="col-span-2">
+                          <Input id={`cod-${idx}`} value={item.codigo} onChange={(e) => setItem(idx, 'codigo', e.target.value)} />
                         </Field>
-                        <Field label="Descrição" className="col-span-4">
-                          <Input value={item.descricao} onChange={(e) => setItem(idx, 'descricao', e.target.value)} />
+                        <Field label="Descrição" htmlFor={`desc-${idx}`} className="col-span-4">
+                          <Input id={`desc-${idx}`} value={item.descricao} onChange={(e) => setItem(idx, 'descricao', e.target.value)} />
                         </Field>
-                        <Field label="NCM" className="col-span-2">
-                          <Input value={item.ncm} onChange={(e) => setItem(idx, 'ncm', e.target.value)} />
+                        <Field label="NCM" htmlFor={`ncm-${idx}`} className="col-span-2">
+                          <Input id={`ncm-${idx}`} value={item.ncm} onChange={(e) => setItem(idx, 'ncm', e.target.value)} className="font-mono" />
                         </Field>
-                        <Field label="CFOP" className="col-span-1">
-                          <Input value={item.cfop} onChange={(e) => setItem(idx, 'cfop', e.target.value)} />
+                        <Field label="CFOP" htmlFor={`cfop-${idx}`} className="col-span-1">
+                          <Input id={`cfop-${idx}`} value={item.cfop} onChange={(e) => setItem(idx, 'cfop', e.target.value)} className="font-mono" />
                         </Field>
-                        <Field label="Qtd" className="col-span-1">
-                          <Input type="number" min={0} step="any" value={item.quantidade} onChange={(e) => setItem(idx, 'quantidade', e.target.value)} />
+                        <Field label="Qtd" htmlFor={`qtd-${idx}`} className="col-span-1">
+                          <Input id={`qtd-${idx}`} type="number" min={0} step="any" value={item.quantidade} onChange={(e) => setItem(idx, 'quantidade', e.target.value)} />
                         </Field>
-                        <Field label="Vlr unit." className="col-span-1">
-                          <Input type="number" min={0} step="any" value={item.valorUnitario} onChange={(e) => setItem(idx, 'valorUnitario', e.target.value)} />
+                        <Field label="Vlr unit." htmlFor={`vu-${idx}`} className="col-span-1">
+                          <Input id={`vu-${idx}`} type="number" min={0} step="any" value={item.valorUnitario} onChange={(e) => setItem(idx, 'valorUnitario', e.target.value)} />
                         </Field>
-                        <Field label="ICMS %" className="col-span-1">
-                          <Input type="number" min={0} step="any" value={item.aliquota} onChange={(e) => setItem(idx, 'aliquota', e.target.value)} />
+                        <Field label="ICMS %" htmlFor={`icms-${idx}`} className="col-span-1">
+                          <Input id={`icms-${idx}`} type="number" min={0} step="any" value={item.aliquota} onChange={(e) => setItem(idx, 'aliquota', e.target.value)} />
                         </Field>
-                        <div className="col-span-12 flex items-center justify-between text-[11px] text-zinc-500">
-                          <span>
-                            Total do item: <span className="text-zinc-700 dark:text-zinc-300">{formatarDecimal(totalItem(item))}</span> ·
-                            ICMS: <span className="text-zinc-700 dark:text-zinc-300">{formatarDecimal(Math.round(((totalItem(item) * item.aliquota) / 100) * 100) / 100)}</span>
+                        <div className="col-span-12 flex items-center justify-between text-[11px] text-ink-muted">
+                          <span className="tabular">
+                            Total: <span className="text-ink">{formatarDecimal(totalItem(item))}</span>
                           </span>
                           {itens.length > 1 && (
-                            <button className="text-red-400 hover:text-red-300" onClick={() => setItens((arr) => arr.filter((_, i) => i !== idx))}>
+                            <button
+                              type="button"
+                              className="text-rejeitado hover:underline"
+                              onClick={() => setItens((a) => a.filter((_, i) => i !== idx))}
+                            >
                               remover
                             </button>
                           )}
@@ -340,107 +435,155 @@ export default function Playground() {
                       </div>
                     ))}
                   </div>
-                  <p className="mt-3 text-right text-sm text-zinc-400">
-                    Total da nota: <span className="font-semibold text-emerald-600 dark:text-emerald-300">{formatarDecimal(totalNota)}</span>
+                  <p className="mt-2 text-right text-[13px] text-ink-muted tabular">
+                    Total da nota: <span className="font-semibold text-ink">{formatarDecimal(totalNota)}</span>
                   </p>
                 </div>
               </div>
             ) : (
-              <div className="mt-4">
+              <Field label="Payload (JSON)" htmlFor="pg-json" error={erroJson ?? undefined}>
                 <Textarea
-                  rows={18}
+                  id="pg-json"
+                  rows={16}
+                  mono
                   value={jsonCru}
-                  onChange={(e) => setJsonCru(e.target.value)}
+                  onChange={(e) => {
+                    setJsonCru(e.target.value)
+                    setErroJson(null)
+                  }}
                   spellCheck={false}
                 />
-                <button className="mt-2 text-[11px] text-zinc-500 hover:text-zinc-800 dark:hover:text-zinc-300" onClick={() => setJsonCru(jsonGerado)}>
-                  restaurar JSON gerado pelo formulário
-                </button>
-              </div>
+              </Field>
             )}
 
-            <div className="mt-5 flex items-center justify-between border-t border-zinc-200 pt-4 dark:border-zinc-800">
-              <p className="text-[11px] text-zinc-600">
-                Idempotency-Key (uuid) gerada automaticamente a cada envio.
-              </p>
-              <Button variant="primary" loading={emitindo} onClick={emitir}>
-                ▶ Emitir {modelo.toUpperCase()}
+            <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-line pt-3">
+              <Button
+                variant="primary"
+                loading={mutEmitir.isPending}
+                onClick={() => mutEmitir.mutate()}
+                disabled={!apiKey.trim()}
+              >
+                <Play className="h-3.5 w-3.5" aria-hidden />
+                Emitir {modelo.toUpperCase()}
+              </Button>
+              <Button
+                loading={mutPreview.isPending}
+                onClick={() => mutPreview.mutate()}
+                disabled={!apiKey.trim() || modelo === 'nfse'}
+                title={modelo === 'nfse' ? 'Preview disponível para NF-e e NFC-e' : 'Ver o DANFE sem transmitir'}
+              >
+                <Eye className="h-3.5 w-3.5" aria-hidden />
+                Pré-visualizar DANFE
+              </Button>
+              <Button
+                variant="ghost"
+                onClick={async () => {
+                  if (await copiar(curl)) toast({ tipo: 'sucesso', titulo: 'cURL copiado' })
+                }}
+              >
+                <Terminal className="h-3.5 w-3.5" aria-hidden />
+                Copiar cURL
               </Button>
             </div>
-          </Card>
+          </section>
         </div>
 
-        {/* Acompanhamento */}
+        {/* ---------- Resposta ---------- */}
         <div className="space-y-4">
-          <Card className="p-5">
-            <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-200">Acompanhamento</h2>
+          <section className="rounded-lg border border-line bg-surface p-4">
+            <h2 className="mb-3 text-xs font-semibold text-ink-muted">Acompanhamento</h2>
             {!seguindo ? (
-              <p className="py-8 text-center text-xs text-zinc-600">
-                Emita um documento para acompanhar
-                <br />
-                o status em tempo real aqui.
+              <p className="py-8 text-center text-xs text-ink-faint">
+                Emita um documento para acompanhar o status aqui.
               </p>
             ) : (
-              <div className="mt-3 space-y-4">
-                <div className="flex items-center gap-2">
+              <div className="space-y-4">
+                <div className="flex items-center justify-between gap-2">
                   <StatusBadge status={seguindo.status} />
-                  <code className="truncate text-[10px] text-zinc-500">{seguindo.id}</code>
+                  <code className="truncate font-mono text-[10px] text-ink-faint">{seguindo.id.slice(0, 8)}…</code>
                 </div>
 
-                <ol className="space-y-0">
-                  {transicoes.map((t, i) => (
-                    <li key={i} className="relative flex gap-3 pb-3 pl-1">
-                      {i < transicoes.length - 1 && (
-                        <span className="absolute top-3.5 left-[7px] h-full w-px bg-zinc-300 dark:bg-zinc-700" />
-                      )}
-                      <span
-                        className={`mt-1 h-3.5 w-3.5 shrink-0 rounded-full border-2 ${
-                          STATUS_COLOR[t.status] ?? 'border-zinc-600 bg-zinc-700'
-                        } bg-white dark:bg-zinc-950`}
-                      />
-                      <div>
-                        <p className="text-xs font-medium text-zinc-800 dark:text-zinc-200">{t.status}</p>
-                        <p className="text-[10px] text-zinc-500">{formatarData(t.em)}</p>
-                      </div>
-                    </li>
-                  ))}
-                </ol>
+                <TrilhoStatus status={seguindo.status} />
 
-                {(seguindo.chaveAcesso || seguindo.numero !== null) && (
-                  <div className="rounded-md border border-emerald-200 bg-emerald-50 p-3 text-xs text-emerald-800 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-200">
+                {seguindo.chaveAcesso && (
+                  <div className="rounded border border-aprovado/30 bg-aprovado-soft/50 p-2.5 text-xs">
                     {seguindo.numero !== null && (
-                      <p>
-                        Número <strong>{seguindo.serie}/{String(seguindo.numero).padStart(9, '0')}</strong>
+                      <p className="text-ink">
+                        Número{' '}
+                        <strong className="tabular">
+                          {seguindo.serie}/{String(seguindo.numero).padStart(9, '0')}
+                        </strong>
                       </p>
                     )}
-                    {seguindo.chaveAcesso && <p className="mt-1 font-mono break-all">{seguindo.chaveAcesso}</p>}
+                    <p className="mt-1 font-mono text-[10px] break-all text-ink-muted">{seguindo.chaveAcesso}</p>
                   </div>
                 )}
 
-                <Link to={`/documentos/${seguindo.id}`}>
-                  <Button className="w-full">Abrir no visualizador de documentos</Button>
-                </Link>
+                <Timeline transicoes={transicoes} />
+
+                <Button asChild className="w-full">
+                  <Link to={`/documentos/${seguindo.id}`}>Abrir no detalhe</Link>
+                </Button>
               </div>
             )}
-          </Card>
+          </section>
 
-          {historico.length > 0 && (
-            <Card className="p-5">
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-200">Emissões desta sessão</h2>
-              <div className="mt-3 space-y-1.5">
-                {historico.map((h) => (
-                  <div key={h.id} className="flex items-center justify-between gap-2 text-xs">
-                    <Link to={`/documentos/${h.id}`} className="truncate font-mono text-[10px] text-zinc-500 hover:text-blue-600 dark:text-zinc-400 dark:hover:text-blue-300">
-                      {h.modelo.toUpperCase()} · {h.id.slice(0, 8)}…
-                    </Link>
-                    <Badge className={STATUS_COLOR[h.status]}>{h.status}</Badge>
-                  </div>
-                ))}
+          {respostaBruta && (
+            <section className="rounded-lg border border-line bg-surface">
+              <div className="flex items-center justify-between border-b border-line px-3 py-1.5">
+                <h2 className="text-xs font-semibold text-ink-muted">Resposta</h2>
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  onClick={async () => {
+                    if (await copiar(respostaBruta)) toast({ tipo: 'sucesso', titulo: 'Resposta copiada' })
+                  }}
+                  aria-label="Copiar resposta"
+                >
+                  <Copy className="h-3.5 w-3.5" aria-hidden />
+                </Button>
               </div>
-            </Card>
+              <pre className="max-h-72 overflow-auto p-3 font-mono text-[10px] leading-relaxed text-ink-muted">
+                {respostaBruta}
+              </pre>
+            </section>
           )}
         </div>
       </div>
+
+      {/* ---------- Preview do DANFE ---------- */}
+      <Dialog
+        open={!!previewUrl}
+        onClose={() => {
+          if (previewUrl) URL.revokeObjectURL(previewUrl)
+          setPreviewUrl(null)
+        }}
+        titulo="Pré-visualização do DANFE"
+        descricao="Nada foi transmitido, nenhum número foi reservado."
+        largura="xl"
+      >
+        {previewUrl && (
+          <object data={previewUrl} type="application/pdf" className="h-[70vh] w-full rounded border border-line">
+            <p className="p-4 text-xs text-ink-muted">
+              Não foi possível exibir o PDF inline.{' '}
+              <a href={previewUrl} download className="text-carimbo underline">
+                Baixar
+              </a>
+            </p>
+          </object>
+        )}
+      </Dialog>
+
+      {/* ---------- Chave gerada ---------- */}
+      <Dialog
+        open={!!chaveGerada}
+        onClose={() => setChaveGerada(null)}
+        titulo="Chave de teste gerada"
+        descricao="Já preenchida no campo. Guarde-a se for usar fora desta sessão."
+        rodape={<Button variant="primary" onClick={() => setChaveGerada(null)}>Fechar</Button>}
+      >
+        {chaveGerada && <SegredoUnico valor={chaveGerada.chave} aviso={chaveGerada.aviso} />}
+      </Dialog>
     </>
   )
 }
