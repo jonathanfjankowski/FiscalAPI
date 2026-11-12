@@ -331,11 +331,24 @@ public class AdminTenantsController : ControllerBase
         if (req.Sandbox is not null) tenant.Sandbox = req.Sandbox.Value;
         if (req.Csc is not null)
         {
+            // O par CSC/IdCSC é atômico: o CSC é o segredo e o IdCSC o identifica
+            // na SEFAZ. Trocar um sem o outro deixa a NFC-e com par inconsistente
+            // (rejeição na emissão real). O POST já valida o par; o PUT precisa
+            // da mesma regra — e sem o guarda, `req.CscId!` estourava com 500.
+            if (string.IsNullOrWhiteSpace(req.CscId))
+                return Problem(statusCode: 422, title: "Informe cscId junto com o csc.");
+
             tenant.CscCriptografado = await _certStore.CifrarTextoAsync(req.Csc, ct);
-            tenant.CscId = req.CscId!.Trim();
+            tenant.CscId = req.CscId.Trim();
         }
         else if (req.CscId is not null)
         {
+            // Só o identificador, sem o segredo: só faz sentido se já há um CSC
+            // gravado (correção de digitação do Id).
+            if (tenant.CscCriptografado is null)
+                return Problem(statusCode: 422, title: "Informe o csc junto com o cscId.",
+                    detail: "Não há CSC gravado para esta empresa — envie os dois campos.");
+
             tenant.CscId = req.CscId.Trim();
         }
         if (req.Ativo is not null) tenant.Ativo = req.Ativo.Value;

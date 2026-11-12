@@ -174,14 +174,16 @@ public class RepositorioAuditoria : IRepositorioAuditoria
         // No SQLite (suíte de testes) a busca textual com ToUpperInvariant não
         // traduz e o ORDER BY sobre DateTimeOffset lança. Nesse provider o
         // conjunto é materializado e filtrado/ordenado/paginado em memória —
-        // o volume da suíte é pequeno por definição. Em Postgres tudo roda no
-        // banco, com o filtro e a ordenação empurrados para o SQL.
+        // o volume da suíte é pequeno por definição.
+        //
+        // Em Postgres TUDO roda no banco, inclusive Skip/Take: a auditoria é
+        // append-only e cresce para sempre, então carregar a tabela inteira
+        // para paginar em memória não é opção.
         var sqlite = _db.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite";
 
-        List<Auditoria> todos;
         if (sqlite)
         {
-            todos = await query.ToListAsync(ct);
+            var todos = await query.ToListAsync(ct);
             if (!string.IsNullOrWhiteSpace(acao))
             {
                 var termo = acao.Trim();
@@ -193,24 +195,27 @@ public class RepositorioAuditoria : IRepositorioAuditoria
                 .OrderByDescending(a => a.CriadoEm)
                 .ThenByDescending(a => a.Id)
                 .ToList();
-        }
-        else
-        {
-            if (!string.IsNullOrWhiteSpace(acao))
-            {
-                // Busca parcial: o operador digita "CERTIFICADO" e vê todas as
-                // ações daquele assunto.
-                var termo = acao.Trim().ToUpperInvariant();
-                query = query.Where(a => a.Acao.Contains(termo));
-            }
-            todos = await query
-                .OrderByDescending(a => a.CriadoEm)
-                .ThenByDescending(a => a.Id)
-                .ToListAsync(ct);
+
+            var totalMemoria = todos.Count;
+            var paginaMemoria = todos.Skip((pagina - 1) * tamanhoPagina).Take(tamanhoPagina).ToList();
+            return (totalMemoria, paginaMemoria);
         }
 
-        var total = todos.Count;
-        var itens = todos.Skip((pagina - 1) * tamanhoPagina).Take(tamanhoPagina).ToList();
+        if (!string.IsNullOrWhiteSpace(acao))
+        {
+            // Busca parcial: o operador digita "CERTIFICADO" e vê todas as
+            // ações daquele assunto.
+            var termo = acao.Trim().ToUpperInvariant();
+            query = query.Where(a => a.Acao.Contains(termo));
+        }
+
+        var total = await query.CountAsync(ct);
+        var itens = await query
+            .OrderByDescending(a => a.CriadoEm)
+            .ThenByDescending(a => a.Id)
+            .Skip((pagina - 1) * tamanhoPagina)
+            .Take(tamanhoPagina)
+            .ToListAsync(ct);
 
         return (total, itens);
     }

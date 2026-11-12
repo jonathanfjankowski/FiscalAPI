@@ -101,6 +101,8 @@ public class AdminNotasRecebidasController : ControllerBase
         List<AdminNotaItem> itens;
         if (_db.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
         {
+            // SQLite não traduz ORDER BY sobre DateTimeOffset. Materializa,
+            // ordena e pagina em memória — só a suíte usa SQLite.
             var todos = await projecao.ToListAsync(ct);
             itens = todos
                 .OrderByDescending(n => n.RecebidaEm)
@@ -111,11 +113,29 @@ public class AdminNotasRecebidasController : ControllerBase
         }
         else
         {
-            itens = await projecao
+            // Postgres: ordenar TEM que ser sobre as colunas da ENTIDADE, antes
+            // da projeção para record — o EF não traduz OrderBy sobre um record
+            // nomeado construído (lança "could not be translated" e a página
+            // inteira morre em 500). Ver TraducaoNpgsqlTests.
+            itens = await query
                 .OrderByDescending(n => n.RecebidaEm)
                 .ThenByDescending(n => n.Id)
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
+                .Select(n => new AdminNotaItem(
+                    n.Id,
+                    n.TenantId,
+                    n.Tenant!.RazaoSocial,
+                    n.Chave,
+                    n.Nsu,
+                    n.Ambiente == (short)Ambiente.Producao ? "producao" : "homologacao",
+                    n.CnpjEmitente,
+                    n.NomeEmitente,
+                    n.Valor,
+                    n.EmitidaEm,
+                    n.ManifestacaoAtual,
+                    n.TipoSchema,
+                    n.RecebidaEm))
                 .ToListAsync(ct);
         }
 

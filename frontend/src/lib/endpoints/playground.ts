@@ -10,7 +10,10 @@ export const playground = {
    */
   emitir: (modelo: ModeloEmissao, apiKey: string, body: unknown, idempotencyKey: string) =>
     request<EmissaoResponse | { id: string; status: string; links?: { consulta?: string } }>(
-      `/v1/documentos-fiscais/${modelo}`,
+      // NFS-e usa a rota DPS (transmissão real, layout 1.01). A rota legada
+      // `/nfse` aceita EmissaoRequest e só funciona em sandbox — fora dele o
+      // mapper lança e o documento morre em ERRO_INTERNO.
+      modelo === 'nfse' ? '/v1/documentos-fiscais/nfse/dps' : `/v1/documentos-fiscais/${modelo}`,
       { body, apiKey, idempotencyKey },
     ),
 

@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Fiscal.Core.Enums;
 using Fiscal.Core.Interfaces;
 using Fiscal.Persistence;
@@ -5,6 +6,7 @@ using Microsoft.AspNetCore.Authentication.JwtBearer;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Caching.Distributed;
 
 namespace Fiscal.Api.Controllers;
 
@@ -24,6 +26,7 @@ public class AdminStatusServicoController : ControllerBase
     private readonly IEnumerable<IConsultaStatusServico> _consultas;
     private readonly IRepositorioCertificado _certRepo;
     private readonly ICertificadoStore _certStore;
+    private readonly IDistributedCache _cache;
     private readonly ILogger<AdminStatusServicoController> _logger;
 
     public AdminStatusServicoController(
@@ -31,12 +34,14 @@ public class AdminStatusServicoController : ControllerBase
         IEnumerable<IConsultaStatusServico> consultas,
         IRepositorioCertificado certRepo,
         ICertificadoStore certStore,
+        IDistributedCache cache,
         ILogger<AdminStatusServicoController> logger)
     {
         _db = db;
         _consultas = consultas;
         _certRepo = certRepo;
         _certStore = certStore;
+        _cache = cache;
         _logger = logger;
     }
 
@@ -60,6 +65,17 @@ public class AdminStatusServicoController : ControllerBase
             _ => (Ambiente)tenant.AmbientePadrao,
         };
 
+        // Cache de 60s, mesma chave e mesmo TTL do endpoint de tenant: o
+        // topbar consulta a cada seleção de empresa e, sem cache, cada
+        // operador martelaria a SEFAZ com SOAP (risco de throttling).
+        var cacheKey = $"status-servico:{tenant.Id}:{modelo}:{ambienteEfetivo}";
+        var emCache = await _cache.GetStringAsync(cacheKey, ct);
+        if (emCache is not null)
+        {
+            var cached = JsonSerializer.Deserialize<StatusServico>(emCache)!;
+            return Ok(ParaResponse(cached, doCache: true));
+        }
+
         // Sandbox por tenant: o mock responde sem certificado e sem SEFAZ.
         var consulta = tenant.Sandbox
             ? _consultas.FirstOrDefault(c => c is Fiscal.Adapters.Unimake.ConsultaStatusServicoMock)
@@ -76,14 +92,12 @@ public class AdminStatusServicoController : ControllerBase
         try
         {
             var status = await consulta.ConsultarAsync(tenant, modelo, x509, ambienteEfetivo, ct);
-            return Ok(new
-            {
-                cStat = status.CStat,
-                xMotivo = status.XMotivo,
-                tMed = status.TMed,
-                consultadoEm = status.ConsultadoEm,
-                doCache = false,
-            });
+            await _cache.SetStringAsync(cacheKey, JsonSerializer.Serialize(status),
+                new DistributedCacheEntryOptions
+                {
+                    AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(60)
+                }, ct);
+            return Ok(ParaResponse(status, doCache: false));
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -95,4 +109,13 @@ public class AdminStatusServicoController : ControllerBase
                 detail: "A SEFAZ não respondeu à consulta de status. Tente novamente em instantes.");
         }
     }
+
+    private static object ParaResponse(StatusServico s, bool doCache) => new
+    {
+        cStat = s.CStat,
+        xMotivo = s.XMotivo,
+        tMed = s.TMed,
+        consultadoEm = s.ConsultadoEm,
+        doCache,
+    };
 }

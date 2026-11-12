@@ -128,13 +128,15 @@ toda a capacidade da API — incluindo o que só existia no backend:
 - **DANFE em PDF** (`GET /v1/admin/documentos-fiscais/{id}/pdf`) — antes só XML cru.
 - **Pré-visualização do DANFE sem transmitir** (Playground, `POST /preview-pdf`).
 - **Reenvio com payload corrigido** mantendo o número (`POST /{id}/reenviar`).
-- **Inutilização de faixa** (`POST /v1/admin/inutilizacoes`).
+- **Inutilização de faixa** (`POST /v1/admin/inutilizacoes`), com modal na aba
+  de dados da empresa.
 - **Eventos do documento** com protocolo e motivo (`GET /{id}/eventos`).
 - **Notas recebidas (DFe) e manifestação do destinatário** — seção inteira nova.
 - **Status do serviço SEFAZ** por UF, na barra de comando.
 - **Trilha de auditoria** (`GET /v1/admin/auditoria`) — a tabela era gravada em
   ~77 pontos e nunca lida.
-- **NFS-e (DPS)** no Playground; ativar/desativar certificado; desativar empresa.
+- **NFS-e (DPS)** no Playground (rota `nfse/dps`, payload `NfseDpsRequest`);
+  ativar/desativar certificado; editar dados fiscais; reativar empresa.
 
 **UX.** Contexto de empresa na URL (`?empresa=`) compartilhado entre telas;
 filtros, ordenação, paginação e abas também na URL (deep-linkável, sobrevive a
@@ -161,9 +163,17 @@ teclado, responsivo até 360px (rail vira barra inferior).
 - O reset de CSS fora de `@layer` matava **todo** o espaçamento do Tailwind v4.
 - `dotnet test` na raiz rodava **zero** testes (a `.slnx` não listava os
   projetos de teste) — o CI estava verde sem verificar nada.
+- `OrderBy` sobre record projetado não traduz no Npgsql (500 em produção);
+  a suíte SQLite não pegava. Corrigido nos dois controllers e travado por teste.
+- O par CSC/IdCSC não era validado no `PUT` — enviar só o `csc` dava 500.
+- A paginação da auditoria carregava a tabela inteira em memória também em
+  Postgres; agora `Skip/Take` vão para o SQL.
 
-**Testes:** 311 no backend (140 Core + 171 Api) e 29 no frontend (Vitest,
-lógica pura de `lib/`). O CI roda build + testes + format + lint + build/test
+**Testes:** 325 no backend (140 Core + 185 Api) e 29 no frontend (Vitest,
+lógica pura de `lib/`). Inclui `TraducaoNpgsqlTests`, que compila as queries
+dos endpoints admin contra o provider **Npgsql** sem conectar — a suíte de
+integração roda em SQLite e é estruturalmente cega para erros de tradução
+que só aparecem em Postgres. O CI roda build + testes + format + lint + build/test
 do frontend.
 
 ### Histórico (out/2026)

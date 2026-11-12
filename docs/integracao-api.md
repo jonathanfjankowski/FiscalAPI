@@ -1037,7 +1037,7 @@ da API key), e o ambiente é derivado de `Tenant.AmbientePadrao`.
 | `GET` | `/v1/admin/documentos-fiscais/{id}` | Detalhe, incluindo `payloadEntrada` (base do reenvio) |
 | `GET` | `/v1/admin/documentos-fiscais/{id}/pdf` | **DANFE/DANFCe/DANFSe.** `409` se o status não for `AUTORIZADA`/`CANCELADA` |
 | `GET` | `/v1/admin/documentos-fiscais/{id}/eventos` | Eventos do documento (cancelamento, CC-e) com `status`, `motivo`, `protocolo`, `tentativas`, `xmlDisponivel` |
-| `POST` | `/v1/admin/documentos-fiscais/{id}/reenviar` | Reenvio com payload corrigido — **mantém o número**. `409` se não for `REJEITADA`/`DENEGADA`/`ERRO_INTERNO` |
+| `POST` | `/v1/admin/documentos-fiscais/{id}/reenviar` | Reenvio com payload corrigido — **mantém o número**. `409` se não for `REJEITADA`/`DENEGADA`/`ERRO_INTERNO`/`FALHA_EMISSAO`. Não se aplica a NFS-e (payload DPS) |
 | `POST` | `/v1/admin/documentos-fiscais/{id}/cancelamento` | Cancelamento (exige `AUTORIZADA`, modelo 55/65) |
 | `POST` | `/v1/admin/documentos-fiscais/{id}/carta-correcao` | CC-e (só modelo 55) |
 | `POST` | `/v1/admin/inutilizacoes` | Inutiliza faixa. Body: `tenantId`, `modelo`, `serie`, `numeroInicial`, `numeroFinal`, `justificativa` (15–1000). Ambiente derivado do tenant |
@@ -1053,6 +1053,12 @@ da API key), e o ambiente é derivado de `Tenant.AmbientePadrao`.
 Rotas administrativas de empresa, API keys, certificados e chave master já
 existiam e seguem inalteradas (`/v1/admin/tenants`, `…/api-keys`,
 `…/certificados`, `/v1/admin/bootstrap-key`).
+
+> **Idempotência.** Os POSTs admin de evento (cancelamento, CC-e, reenvio,
+> inutilização, manifestação) aceitam `Idempotency-Key`. O painel gera uma
+> chave por abertura de modal — um retry da mesma submissão é idempotente.
+> Sem o header a API gera uma chave, o que **desliga** a idempotência para
+> aquele request: envie sempre.
 
 > **Auditoria é append-only.** A tabela `auditoria` tem trigger que impede
 > `UPDATE` e `DELETE` (migration `EnforceAuditoriaAppendOnly`). O endpoint é
@@ -1074,7 +1080,7 @@ existiam e seguem inalteradas (`/v1/admin/tenants`, `…/api-keys`,
 | `ERRO_CANCELAMENTO` | **sim** | O evento de cancelamento foi rejeitado ou esgotou as tentativas — veja `motivoStatus` |
 | `DENEGADA` | **sim** | Uso denegado pela SEFAZ (não circula, mas o número foi consumido) |
 | `ERRO_INTERNO` | **sim** | Falha não recuperável do lado da API — veja `motivoStatus` |
-| `FALHA_EMISSAO` | **sim** | Esgotou `MaxTentativas` em contingência (SEFAZ inacessível). Não reprocessa sozinho — exige reenvio ou replay manual |
+| `FALHA_EMISSAO` | **sim** | Esgotou `MaxTentativas` em contingência (SEFAZ inacessível). Não reprocessa sozinho — use `POST /{id}/reenviar` (o número nunca foi consumido) |
 
 > **Reenvio × reemissão.** Em `REJEITADA`/`DENEGADA`/`ERRO_INTERNO` use
 > `POST /v1/documentos-fiscais/{id}/reenviar` com o payload corrigido: o

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Download, FileText, RefreshCw, ScrollText, XCircle } from 'lucide-react'
@@ -89,8 +89,11 @@ export default function DocumentoDetalhe() {
   const autorizada = doc.status === 'AUTORIZADA'
   const podeCancelar = autorizada && (doc.modelo === 55 || doc.modelo === 65)
   const podeCce = autorizada && doc.modelo === 55
-  const podeReenviar = ['REJEITADA', 'DENEGADA', 'ERRO_INTERNO'].includes(doc.status)
-  const podeSubstituir = autorizada && doc.tipo === 'NFSE'
+  // NFS-e usa payload DPS, que não binda em EmissaoRequest — o reenvio
+  // sempre falharia com 400. Não oferecer a ação.
+  const podeReenviar =
+    ['REJEITADA', 'DENEGADA', 'ERRO_INTERNO', 'FALHA_EMISSAO'].includes(doc.status) &&
+    doc.tipo !== 'NFSE'
   const podePdf = autorizada || doc.status === 'CANCELADA'
 
   const titulo =
@@ -216,11 +219,6 @@ export default function DocumentoDetalhe() {
           </Button>
         )}
 
-        {podeSubstituir && (
-          <Button onClick={() => toast({ tipo: 'info', titulo: 'Substituição de NFS-e', detalhe: 'Use POST /v1/documentos-fiscais/{id}/substituicao via API do integrador.' })}>
-            Substituir NFS-e
-          </Button>
-        )}
       </div>
 
       {/* ---------- Linha do tempo e eventos ---------- */}
@@ -346,8 +344,11 @@ function ModalCancelar({
 }: { open: boolean; onClose: () => void; documentoId: string; aoConcluir: () => void }) {
   const toast = useToast()
   const [justificativa, setJustificativa] = useState('')
+  // Uma chave por abertura do modal: um retry da mesma submissão é idempotente;
+  // abrir de novo é uma intenção nova.
+  const [idem] = useState(() => crypto.randomUUID())
   const mut = useMutation({
-    mutationFn: () => api.cancelarDocumento(documentoId, justificativa.trim()),
+    mutationFn: () => api.cancelarDocumento(documentoId, justificativa.trim(), idem),
     onSuccess: () => {
       toast({ tipo: 'sucesso', titulo: 'Cancelamento solicitado' })
       setJustificativa('')
@@ -401,8 +402,9 @@ function ModalCce({
 }: { open: boolean; onClose: () => void; documentoId: string; aoConcluir: () => void }) {
   const toast = useToast()
   const [correcao, setCorrecao] = useState('')
+  const [idem] = useState(() => crypto.randomUUID())
   const mut = useMutation({
-    mutationFn: () => api.cartaCorrecao(documentoId, correcao.trim()),
+    mutationFn: () => api.cartaCorrecao(documentoId, correcao.trim(), idem),
     onSuccess: () => {
       toast({ tipo: 'sucesso', titulo: 'Carta de correção solicitada' })
       setCorrecao('')
@@ -461,14 +463,24 @@ function ModalReenviar({
   aoConcluir: () => void
 }) {
   const toast = useToast()
-  const [json, setJson] = useState(() => {
+  const formatar = (bruto: string) => {
     try {
-      return JSON.stringify(JSON.parse(payloadOriginal), null, 2)
+      return JSON.stringify(JSON.parse(bruto), null, 2)
     } catch {
-      return payloadOriginal
+      return bruto
     }
-  })
+  }
+  const [json, setJson] = useState(() => formatar(payloadOriginal))
   const [erroSintaxe, setErroSintaxe] = useState<string | null>(null)
+  const [idem] = useState(() => crypto.randomUUID())
+
+  // Navegar entre documentos (/documentos/A -> /documentos/B) não remonta a
+  // página: sem isto, o editor do documento B mostraria o payload do A — e
+  // reenviar B com os itens de A é erro fiscal grave.
+  useEffect(() => {
+    setJson(formatar(payloadOriginal))
+    setErroSintaxe(null)
+  }, [payloadOriginal, documentoId])
 
   const mut = useMutation({
     mutationFn: async () => {
@@ -482,7 +494,7 @@ function ModalReenviar({
         setErroSintaxe(e instanceof Error ? e.message : 'JSON inválido')
         throw new Error('JSON inválido')
       }
-      return api.reenviarDocumento(documentoId, payload)
+      return api.reenviarDocumento(documentoId, payload, idem)
     },
     onSuccess: (r) => {
       toast({

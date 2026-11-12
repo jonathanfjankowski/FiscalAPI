@@ -48,7 +48,8 @@ public class ServicoReenvioDocumento
         int Status,
         string Titulo,
         string? Detalhe = null,
-        Core.Entities.DocumentoFiscal? Documento = null)
+        Core.Entities.DocumentoFiscal? Documento = null,
+        string? Campo = null)
     {
         public bool Ok => Status == 0;
         public static Resultado Sucesso(Core.Entities.DocumentoFiscal doc) => new(0, "", Documento: doc);
@@ -62,19 +63,21 @@ public class ServicoReenvioDocumento
         Core.Entities.DocumentoFiscal doc,
         EmissaoRequest req,
         Guid? apiKeyId,
+        System.Net.IPAddress? ipOrigem,
         CancellationToken ct)
     {
         if (doc.Status is not (StatusDocumento.REJEITADA or StatusDocumento.DENEGADA
-            or StatusDocumento.ERRO_INTERNO))
+            or StatusDocumento.ERRO_INTERNO or StatusDocumento.FALHA_EMISSAO))
         {
             return new Resultado(409, "Documento não aceita reenvio",
-                $"Status atual: {doc.Status}. Só documentos REJEITADA, DENEGADA ou ERRO_INTERNO " +
-                "podem ser corrigidos e reenviados — autorizada é cancelada, nunca reenviada.");
+                $"Status atual: {doc.Status}. Só documentos REJEITADA, DENEGADA, ERRO_INTERNO " +
+                "ou FALHA_EMISSAO podem ser corrigidos e reenviados — autorizada é cancelada, " +
+                "nunca reenviada.");
         }
 
         var validacao = _validadorEmissao.Validar(req, nfce: doc.Modelo == 65);
         if (!validacao.Ok)
-            return new Resultado(validacao.Status, validacao.Titulo, validacao.Detalhe);
+            return new Resultado(validacao.Status, validacao.Titulo, validacao.Detalhe, Campo: validacao.Campo);
 
         // Ambiente da request tem que bater com o do documento: um documento
         // emitido em produção não pode ser reenviado em homologação.
@@ -104,6 +107,7 @@ public class ServicoReenvioDocumento
             ApiKeyId = apiKeyId,
             RecursoId = doc.Id,
             Acao = "DOCUMENTO_REENVIADO",
+            IpOrigem = ipOrigem,
             Detalhe = $"{{\"numero\":{doc.Numero},\"serie\":{doc.Serie}}}"
         }, ct);
         await _db.SaveChangesAsync(ct);

@@ -1,9 +1,9 @@
 import { useRef, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams, useSearchParams } from 'react-router-dom'
-import { ArrowLeft, Plus, Power, PowerOff, RefreshCw, Upload } from 'lucide-react'
-import { api, ApiError, type Tenant } from '../lib/api'
-import { formatarCnpj, formatarData, formatarDataCurta } from '../lib/format'
+import { ArrowLeft, Ban, Pencil, Plus, Power, PowerOff, RefreshCw, Upload } from 'lucide-react'
+import { api, ApiError, type Tenant, type TenantInput } from '../lib/api'
+import { apenasDigitos, formatarCnpj, formatarData, formatarDataCurta } from '../lib/format'
 import { cn } from '../lib/utils'
 import {
   AmbienteBadge,
@@ -22,6 +22,7 @@ import {
   Table,
   Tabs,
   Td,
+  Textarea,
   Th,
   useToast,
 } from '../components/ui'
@@ -121,6 +122,21 @@ export default function EmpresaDetalhe() {
 // ---------- Dados fiscais ----------
 
 function AbaDados({ tenant }: { tenant: Tenant }) {
+  const [editar, setEditar] = useState(false)
+  const [inutilizar, setInutilizar] = useState(false)
+  const qc = useQueryClient()
+  const toast = useToast()
+
+  const mutAtivo = useMutation({
+    mutationFn: (ativo: boolean) => api.updateTenant(tenant.id, { ativo }),
+    onSuccess: (_, ativo) => {
+      qc.invalidateQueries({ queryKey: ['tenant', tenant.id] })
+      qc.invalidateQueries({ queryKey: ['tenants'] })
+      toast({ tipo: 'sucesso', titulo: ativo ? 'Empresa reativada' : 'Empresa desativada' })
+    },
+    onError: (e) => toast({ tipo: 'erro', titulo: 'Falha ao alterar situação', detalhe: e.message }),
+  })
+
   const linhas: [string, string][] = [
     ['CNPJ', formatarCnpj(tenant.cnpj)],
     ['Inscrição estadual', tenant.inscricaoEstadual ?? '—'],
@@ -136,16 +152,273 @@ function AbaDados({ tenant }: { tenant: Tenant }) {
   ]
 
   return (
-    <div className="max-w-2xl rounded-lg border border-line bg-surface">
-      <dl className="divide-y divide-line">
-        {linhas.map(([rotulo, valor]) => (
-          <div key={rotulo} className="flex items-baseline justify-between gap-4 px-4 py-2.5">
-            <dt className="shrink-0 text-[11px] text-ink-muted">{rotulo}</dt>
-            <dd className="text-right text-[13px] text-ink">{valor}</dd>
+    <>
+      <div className="max-w-2xl rounded-lg border border-line bg-surface">
+        <div className="flex items-center justify-between gap-2 border-b border-line px-4 py-2.5">
+          <h2 className="text-[13px] font-semibold text-ink">Dados do emitente</h2>
+          <Button size="sm" onClick={() => setEditar(true)}>
+            <Pencil className="h-3.5 w-3.5" aria-hidden />
+            Editar
+          </Button>
+        </div>
+        <dl className="divide-y divide-line">
+          {linhas.map(([rotulo, valor]) => (
+            <div key={rotulo} className="flex items-baseline justify-between gap-4 px-4 py-2.5">
+              <dt className="shrink-0 text-[11px] text-ink-muted">{rotulo}</dt>
+              <dd className="text-right text-[13px] text-ink">{valor}</dd>
+            </div>
+          ))}
+        </dl>
+        <div className="flex items-center justify-between gap-4 border-t border-line px-4 py-3">
+          <div>
+            <p className="text-[13px] text-ink">Empresa ativa</p>
+            <p className="text-[11px] text-ink-muted">
+              Inativa, a empresa deixa de emitir. Dados e chaves são preservados.
+            </p>
           </div>
-        ))}
-      </dl>
-    </div>
+          <Switch
+            checked={tenant.ativo}
+            onChange={(v) => mutAtivo.mutate(v)}
+            label="Empresa ativa"
+            disabled={mutAtivo.isPending}
+          />
+        </div>
+      </div>
+
+      <div className="mt-4 max-w-2xl rounded-lg border border-line bg-surface p-4">
+        <div className="flex items-start justify-between gap-4">
+          <div>
+            <h2 className="text-[13px] font-semibold text-ink">Inutilizar faixa de numeração</h2>
+            <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+              Libera números que nunca foram transmitidos à SEFAZ (ex.: uma faixa
+              pulada por erro de configuração). Não confundir com reenvio: o reenvio
+              corrige o payload de um documento existente e mantém o número.
+            </p>
+          </div>
+          <Button onClick={() => setInutilizar(true)}>
+            <Ban className="h-3.5 w-3.5" aria-hidden />
+            Inutilizar
+          </Button>
+        </div>
+      </div>
+
+      {editar && <EditarEmpresaModal tenant={tenant} onClose={() => setEditar(false)} />}
+      {inutilizar && <InutilizarModal tenant={tenant} onClose={() => setInutilizar(false)} />}
+    </>
+  )
+}
+
+function InutilizarModal({ tenant, onClose }: { tenant: Tenant; onClose: () => void }) {
+  const toast = useToast()
+  const [modelo, setModelo] = useState<55 | 65>(55)
+  const [serie, setSerie] = useState(1)
+  const [de, setDe] = useState('')
+  const [ate, setAte] = useState('')
+  const [justificativa, setJustificativa] = useState('')
+  const [idem] = useState(() => crypto.randomUUID())
+
+  const deN = Number(de)
+  const ateN = Number(ate)
+  const faixaOk = de !== '' && ate !== '' && deN >= 1 && ateN >= deN
+  const justOk = justificativa.trim().length >= 15 && justificativa.trim().length <= 1000
+
+  const mut = useMutation({
+    mutationFn: () =>
+      api.inutilizar(
+        {
+          tenantId: tenant.id,
+          modelo,
+          serie,
+          numeroInicial: deN,
+          numeroFinal: ateN,
+          justificativa: justificativa.trim(),
+        },
+        idem,
+      ),
+    onSuccess: (r) => {
+      toast({
+        tipo: 'sucesso',
+        titulo: 'Inutilização solicitada',
+        detalhe: `Faixa ${deN}–${ateN} · evento ${r.eventoId.slice(0, 8)}…`,
+      })
+      onClose()
+    },
+    onError: (e) =>
+      toast({
+        tipo: 'erro',
+        titulo: 'Falha na inutilização',
+        detalhe: e instanceof ApiError ? (e.detail ?? e.message) : e.message,
+      }),
+  })
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      titulo="Inutilizar faixa de numeração"
+      descricao={`Ambiente: ${tenant.ambientePadrao === 'producao' ? 'Produção' : 'Homologação'} (derivado da empresa). A SEFAZ registra a faixa como inutilizada.`}
+      rodape={
+        <>
+          <Button onClick={onClose}>Cancelar</Button>
+          <Button
+            variant="danger"
+            loading={mut.isPending}
+            disabled={!faixaOk || !justOk}
+            onClick={() => mut.mutate()}
+          >
+            Inutilizar faixa
+          </Button>
+        </>
+      }
+    >
+      <div className="space-y-3">
+        <div className="grid grid-cols-2 gap-3">
+          <Field label="Modelo" htmlFor="in-mod">
+            <Select id="in-mod" value={modelo} onChange={(e) => setModelo(Number(e.target.value) as 55 | 65)}>
+              <option value={55}>NF-e (55)</option>
+              <option value={65}>NFC-e (65)</option>
+            </Select>
+          </Field>
+          <Field label="Série" htmlFor="in-serie">
+            <Input id="in-serie" type="number" min={1} value={serie} onChange={(e) => setSerie(Number(e.target.value) || 1)} />
+          </Field>
+          <Field label="Número inicial" htmlFor="in-de">
+            <Input id="in-de" type="number" min={1} value={de} onChange={(e) => setDe(e.target.value)} className="font-mono" />
+          </Field>
+          <Field label="Número final" htmlFor="in-ate" error={de !== '' && ate !== '' && ateN < deN ? 'Deve ser ≥ o inicial' : undefined}>
+            <Input id="in-ate" type="number" min={1} value={ate} onChange={(e) => setAte(e.target.value)} className="font-mono" />
+          </Field>
+        </div>
+        <Field
+          label="Justificativa"
+          htmlFor="in-just"
+          required
+          hint={`De 15 a 1000 caracteres — vai para a SEFAZ. (${justificativa.trim().length})`}
+        >
+          <Textarea
+            id="in-just"
+            rows={3}
+            value={justificativa}
+            onChange={(e) => setJustificativa(e.target.value)}
+            placeholder="Ex.: faixa pulada por erro de configuração de série"
+          />
+        </Field>
+      </div>
+    </Dialog>
+  )
+}
+
+function EditarEmpresaModal({ tenant, onClose }: { tenant: Tenant; onClose: () => void }) {
+  const qc = useQueryClient()
+  const toast = useToast()
+  const [form, setForm] = useState<TenantInput>({
+    cnpj: tenant.cnpj,
+    razaoSocial: tenant.razaoSocial,
+    uf: tenant.uf,
+    codigoMunicipioIbge: tenant.codigoMunicipioIbge ?? '',
+    regimeTributario: tenant.regimeTributario,
+    ambientePadrao: tenant.ambientePadrao,
+    inscricaoEstadual: tenant.inscricaoEstadual ?? '',
+    logradouro: tenant.logradouro ?? '',
+    numero: tenant.numero ?? '',
+    complemento: tenant.complemento ?? '',
+    bairro: tenant.bairro ?? '',
+    cep: tenant.cep ?? '',
+    nomeMunicipio: tenant.nomeMunicipio ?? '',
+  })
+  const [erro, setErro] = useState<string | null>(null)
+
+  const mut = useMutation({
+    mutationFn: () =>
+      api.updateTenant(tenant.id, {
+        ...form,
+        cnpj: apenasDigitos(form.cnpj),
+        cep: apenasDigitos(form.cep ?? ''),
+      }),
+    onSuccess: () => {
+      qc.invalidateQueries({ queryKey: ['tenant', tenant.id] })
+      qc.invalidateQueries({ queryKey: ['tenants'] })
+      toast({ tipo: 'sucesso', titulo: 'Empresa atualizada' })
+      onClose()
+    },
+    onError: (e) => setErro(e instanceof ApiError ? (e.detail ?? e.message) : e.message),
+  })
+
+  const set = (campo: keyof TenantInput, valor: string | number) =>
+    setForm((f) => ({ ...f, [campo]: valor }))
+
+  function submeter(e: React.FormEvent) {
+    e.preventDefault()
+    setErro(null)
+    if (apenasDigitos(form.cnpj).length !== 14) return setErro('CNPJ deve ter 14 dígitos.')
+    if (!form.razaoSocial.trim()) return setErro('Razão social é obrigatória.')
+    if (form.uf.trim().length !== 2) return setErro('UF deve ter 2 letras.')
+    mut.mutate()
+  }
+
+  return (
+    <Dialog
+      open
+      onClose={onClose}
+      titulo="Editar dados fiscais"
+      largura="lg"
+      rodape={
+        <>
+          {erro && <p className="mr-auto text-xs text-rejeitado">{erro}</p>}
+          <Button onClick={onClose}>Cancelar</Button>
+          <Button variant="primary" loading={mut.isPending} onClick={() => mut.mutate()}>
+            Salvar
+          </Button>
+        </>
+      }
+    >
+      <form onSubmit={submeter} className="grid grid-cols-2 gap-3">
+        <Field label="CNPJ" htmlFor="ed-cnpj" required>
+          <Input id="ed-cnpj" value={form.cnpj} onChange={(e) => set('cnpj', e.target.value)} className="font-mono" />
+        </Field>
+        <Field label="Inscrição estadual" htmlFor="ed-ie">
+          <Input id="ed-ie" value={form.inscricaoEstadual ?? ''} onChange={(e) => set('inscricaoEstadual', e.target.value)} />
+        </Field>
+        <Field label="Razão social" htmlFor="ed-razao" required className="col-span-2">
+          <Input id="ed-razao" value={form.razaoSocial} onChange={(e) => set('razaoSocial', e.target.value)} />
+        </Field>
+        <Field label="UF" htmlFor="ed-uf" required>
+          <Input id="ed-uf" value={form.uf} onChange={(e) => set('uf', e.target.value.toUpperCase())} maxLength={2} />
+        </Field>
+        <Field label="Código IBGE" htmlFor="ed-ibge">
+          <Input id="ed-ibge" value={form.codigoMunicipioIbge ?? ''} onChange={(e) => set('codigoMunicipioIbge', apenasDigitos(e.target.value))} maxLength={7} className="font-mono" />
+        </Field>
+        <Field label="Município" htmlFor="ed-mun">
+          <Input id="ed-mun" value={form.nomeMunicipio ?? ''} onChange={(e) => set('nomeMunicipio', e.target.value)} />
+        </Field>
+        <Field label="Regime tributário" htmlFor="ed-reg">
+          <Select id="ed-reg" value={form.regimeTributario} onChange={(e) => set('regimeTributario', Number(e.target.value))}>
+            <option value={1}>1 — Simples Nacional</option>
+            <option value={2}>2 — Simples (excesso sublimite)</option>
+            <option value={3}>3 — Regime Normal</option>
+            <option value={4}>4 — MEI</option>
+          </Select>
+        </Field>
+        <Field label="Logradouro" htmlFor="ed-log">
+          <Input id="ed-log" value={form.logradouro ?? ''} onChange={(e) => set('logradouro', e.target.value)} />
+        </Field>
+        <Field label="Número" htmlFor="ed-num">
+          <Input id="ed-num" value={form.numero ?? ''} onChange={(e) => set('numero', e.target.value)} />
+        </Field>
+        <Field label="Bairro" htmlFor="ed-bai">
+          <Input id="ed-bai" value={form.bairro ?? ''} onChange={(e) => set('bairro', e.target.value)} />
+        </Field>
+        <Field label="CEP" htmlFor="ed-cep">
+          <Input id="ed-cep" value={form.cep ?? ''} onChange={(e) => set('cep', e.target.value)} maxLength={9} className="font-mono" />
+        </Field>
+        <Field label="Ambiente padrão" htmlFor="ed-amb" className="col-span-2">
+          <Select id="ed-amb" value={form.ambientePadrao} onChange={(e) => set('ambientePadrao', e.target.value)}>
+            <option value="homologacao">Homologação</option>
+            <option value="producao">Produção</option>
+          </Select>
+        </Field>
+      </form>
+    </Dialog>
   )
 }
 

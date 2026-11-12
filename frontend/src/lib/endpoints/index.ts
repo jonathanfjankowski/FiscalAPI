@@ -53,6 +53,8 @@ export const api = {
   cancelarDocumento: documentos.cancelarDocumento,
   cartaCorrecao: documentos.cartaCorrecao,
   reenviarDocumento: documentos.reenviarDocumento,
+  inutilizar: documentos.inutilizar,
+  obterInutilizacao: documentos.obterInutilizacao,
 
   // ---------- Notas recebidas (DFe) ----------
   listNotasRecebidas: notas.listNotasRecebidas,

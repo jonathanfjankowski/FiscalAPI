@@ -186,7 +186,6 @@ export interface InutilizacaoInput {
   numeroInicial: number
   numeroFinal: number
   justificativa: string
-  ambiente: string
 }
 
 /** Estado de uma inutilização. */

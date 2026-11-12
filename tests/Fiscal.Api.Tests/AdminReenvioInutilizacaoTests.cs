@@ -365,4 +365,82 @@ public class AdminReenvioInutilizacaoTests : IClassFixture<AdminIntegracaoTests.
         var evento = await db2.EventosFiscais.FindAsync(eventoId);
         evento!.DadosEvento.Should().Contain("\"Ambiente\":\"producao\"");
     }
+
+    /// <summary>
+    /// FALHA_EMISSAO esgotou as tentativas em contingência — o número nunca foi
+    /// consumido na SEFAZ, então o reenvio é a saída. Sem isso o documento era
+    /// um beco sem saída pelo painel (a doc mandava reenviar e a API dava 409).
+    /// </summary>
+    [Fact]
+    public async Task Reenvio_de_falha_emissao_e_aceito()
+    {
+        var (docId, _, numeroOriginal) = await CriarDocumentoAsync(StatusDocumento.FALHA_EMISSAO);
+        var client = await AdminAsync();
+
+        var resp = await client.PostAsJsonAsync(
+            $"/v1/admin/documentos-fiscais/{docId}/reenviar",
+            JsonDocument.Parse(PayloadNfe).RootElement);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("numero").GetInt64().Should().Be(numeroOriginal);
+    }
+
+    /// <summary>
+    /// A trilha de auditoria do reenvio precisa do IP de origem. O TestServer
+    /// não tem RemoteIpAddress, então o serviço é exercitado direto com um IP
+    /// conhecido — é o contrato dele que importa.
+    /// </summary>
+    [Fact]
+    public async Task Reenvio_registra_ip_de_origem_na_auditoria()
+    {
+        var (docId, _, _) = await CriarDocumentoAsync(StatusDocumento.REJEITADA);
+        var ip = System.Net.IPAddress.Parse("203.0.113.42");
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
+            var servico = scope.ServiceProvider
+                .GetRequiredService<Fiscal.Api.Services.ServicoReenvioDocumento>();
+            var doc = await db.DocumentosFiscais.FindAsync(docId);
+            var req = System.Text.Json.JsonSerializer.Deserialize<Fiscal.Core.Contracts.EmissaoRequest>(
+                PayloadNfe, new System.Text.Json.JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+
+            var resultado = await servico.ReenviarAsync(doc!, req, apiKeyId: null, ip, CancellationToken.None);
+            resultado.Ok.Should().BeTrue();
+        }
+
+        using var scope2 = _factory.Services.CreateScope();
+        var db2 = scope2.ServiceProvider.GetRequiredService<FiscalDbContext>();
+        // Sem OrderBy sobre DateTimeOffset (não traduz no SQLite — regra do repo).
+        var registro = db2.Auditoria
+            .Where(a => a.RecursoId == docId && a.Acao == "DOCUMENTO_REENVIADO")
+            .ToList()
+            .OrderByDescending(a => a.CriadoEm)
+            .FirstOrDefault();
+
+        registro.Should().NotBeNull();
+        registro!.IpOrigem.Should().Be(ip);
+    }
+
+    /// <summary>
+    /// O contrato de erro promete a extensão `campo` nos 422 de aritmética
+    /// (docs/integracao-api.md). O refactor do reenvio não pode perdê-la.
+    /// </summary>
+    [Fact]
+    public async Task Reenvio_com_aritmetica_invalida_devolve_extensao_campo()
+    {
+        var (docId, _, _) = await CriarDocumentoAsync(StatusDocumento.REJEITADA);
+        var client = await AdminAsync();
+
+        var payloadRuim = PayloadNfe.Replace("\"valorNota\": 100", "\"valorNota\": 200");
+        var resp = await client.PostAsJsonAsync(
+            $"/v1/admin/documentos-fiscais/{docId}/reenviar",
+            JsonDocument.Parse(payloadRuim).RootElement);
+
+        resp.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+        var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
+        body.TryGetProperty("campo", out var campo).Should().BeTrue();
+        campo.GetString().Should().NotBeNullOrEmpty();
+    }
 }

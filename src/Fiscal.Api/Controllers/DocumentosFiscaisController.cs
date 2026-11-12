@@ -86,10 +86,10 @@ public class DocumentosFiscaisController : ControllerBase
         // serviço compartilhado com o painel — o admin não pode aceitar um
         // payload que o integrador recusaria.
         var resultado = await _servicoReenvio.ReenviarAsync(
-            doc, req, HttpContext.GetApiKeyId(), ct);
+            doc, req, HttpContext.GetApiKeyId(), HttpContext.Connection.RemoteIpAddress, ct);
 
         if (!resultado.Ok)
-            return Problem(statusCode: resultado.Status, title: resultado.Titulo, detail: resultado.Detalhe);
+            return ProblemaReenvio(resultado);
 
         var atualizado = resultado.Documento!;
         return Accepted($"/v1/documentos-fiscais/{atualizado.Id}", new
@@ -105,6 +105,16 @@ public class DocumentosFiscaisController : ControllerBase
             }
         });
     }
+
+    /// <summary>
+    /// Converte o resultado do reenvio em ProblemDetails, preservando a
+    /// extensão <c>campo</c> que o contrato de erro promete (docs/integracao-api.md).
+    /// </summary>
+    private IActionResult ProblemaReenvio(ServicoReenvioDocumento.Resultado r) =>
+        r.Campo is null
+            ? Problem(statusCode: r.Status, title: r.Titulo, detail: r.Detalhe)
+            : Problem(statusCode: r.Status, title: r.Titulo, detail: r.Detalhe,
+                extensions: new Dictionary<string, object?> { ["campo"] = r.Campo });
 
     /// <summary>NFS-e padrão Nacional (DPS). Rota legada (EmissaoRequest) — funciona só em sandbox; transmissão real via POST nfse/dps.</summary>
     [HttpPost("nfse")]

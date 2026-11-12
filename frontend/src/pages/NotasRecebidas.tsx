@@ -187,12 +187,13 @@ function ModalManifestar({
   const toast = useToast()
   const [tipo, setTipo] = useState('210210')
   const [justificativa, setJustificativa] = useState('')
+  const [idem] = useState(() => crypto.randomUUID())
 
   const exige = MANIFESTACOES[tipo]?.exigeJustificativa ?? false
   const justificativaOk = !exige || (justificativa.trim().length >= 15 && justificativa.trim().length <= 1000)
 
   const mut = useMutation({
-    mutationFn: () => api.manifestar(notaId, tipo, exige ? justificativa.trim() : undefined),
+    mutationFn: () => api.manifestar(notaId, tipo, exige ? justificativa.trim() : undefined, idem),
     onSuccess: () => {
       toast({ tipo: 'sucesso', titulo: 'Manifestação solicitada', detalhe: MANIFESTACOES[tipo]?.nome })
       qc.invalidateQueries({ queryKey: ['notas-recebidas'] })

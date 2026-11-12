@@ -93,6 +93,33 @@ function montarPayload(
 
 type Modelo = 'nfe' | 'nfce' | 'nfse'
 
+/**
+ * Payload do DPS da NFS-e Nacional (layout 1.01) — contrato DISTINTO do
+ * EmissaoRequest de NF-e/NFC-e. A rota é POST /v1/documentos-fiscais/nfse/dps.
+ */
+function montarDps(
+  ambiente: string, serie: number,
+  destCnpj: string, destNome: string,
+  descricaoServico: string, valorServico: number, aliquotaIssqn: number,
+  codigoTributarioNacional: string,
+) {
+  return {
+    ambiente,
+    serie,
+    tomador: { cnpjCpf: destCnpj, nome: destNome },
+    servico: {
+      codigoTributarioNacional,
+      descricaoServico,
+    },
+    valores: {
+      valorServicos: valorServico,
+      tributacaoIssqn: 1,
+      retencaoIssqn: 1,
+      aliquotaIssqn,
+    },
+  }
+}
+
 export default function Playground() {
   const toast = useToast()
   const { data: tenants } = useQuery({ queryKey: ['tenants'], queryFn: api.listTenants })
@@ -107,11 +134,22 @@ export default function Playground() {
   const [destCnpj, setDestCnpj] = useState('12345678000199')
   const [destNome, setDestNome] = useState('Destinatário Teste LTDA')
   const [natureza, setNatureza] = useState('Venda de teste')
+  const [descServico, setDescServico] = useState('Serviço de teste')
+  const [valorServico, setValorServico] = useState(100)
+  const [aliquotaIssqn, setAliquotaIssqn] = useState(5)
+  const [cTribNac, setCTribNac] = useState('010101')
   const [itens, setItens] = useState<ItemForm[]>([{ ...ITEM_PADRAO }])
 
   const jsonGerado = useMemo(
-    () => JSON.stringify(montarPayload(ambiente, serie, itens, destCnpj, destNome, natureza), null, 2),
-    [ambiente, serie, itens, destCnpj, destNome, natureza],
+    () =>
+      JSON.stringify(
+        modelo === 'nfse'
+          ? montarDps(ambiente, serie, destCnpj, destNome, descServico, valorServico, aliquotaIssqn, cTribNac)
+          : montarPayload(ambiente, serie, itens, destCnpj, destNome, natureza),
+        null,
+        2,
+      ),
+    [modelo, ambiente, serie, itens, destCnpj, destNome, natureza, descServico, valorServico, aliquotaIssqn, cTribNac],
   )
   const [jsonCru, setJsonCru] = useState('')
   const [erroJson, setErroJson] = useState<string | null>(null)
@@ -152,7 +190,7 @@ export default function Playground() {
 
   const mutPreview = useMutation({
     mutationFn: async () => {
-      const payload = modo === 'json' ? JSON.parse(jsonCru) : montarPayload(ambiente, serie, itens, destCnpj, destNome, natureza)
+      const payload = modo === 'json' ? JSON.parse(jsonCru) : JSON.parse(jsonGerado)
       return api.previewPdf(apiKey.trim(), modelo === 'nfce' ? 'NFCE' : 'NFE', payload)
     },
     onSuccess: (blob) => {
@@ -182,7 +220,7 @@ export default function Playground() {
           throw new Error('JSON inválido')
         }
       } else {
-        body = montarPayload(ambiente, serie, itens, destCnpj, destNome, natureza)
+        body = JSON.parse(jsonGerado)
       }
       return api.emitir(modelo, key, body, idempotencyKey)
     },
@@ -387,7 +425,24 @@ export default function Playground() {
                   </Field>
                 </div>
 
-                <div>
+                {modelo === 'nfse' && (
+                  <div className="grid grid-cols-2 gap-3 rounded border border-line p-3 lg:grid-cols-4">
+                    <Field label="Código tributário nacional" htmlFor="pg-ctrib" className="col-span-2" hint="cTribNac — 6 dígitos (LC 116)">
+                      <Input id="pg-ctrib" value={cTribNac} onChange={(e) => setCTribNac(e.target.value)} maxLength={6} className="font-mono" />
+                    </Field>
+                    <Field label="Valor do serviço" htmlFor="pg-vserv">
+                      <Input id="pg-vserv" type="number" min={0} step="any" value={valorServico} onChange={(e) => setValorServico(Number(e.target.value) || 0)} />
+                    </Field>
+                    <Field label="Alíquota ISSQN %" htmlFor="pg-iss">
+                      <Input id="pg-iss" type="number" min={0} max={100} step="any" value={aliquotaIssqn} onChange={(e) => setAliquotaIssqn(Number(e.target.value) || 0)} />
+                    </Field>
+                    <Field label="Descrição do serviço" htmlFor="pg-dserv" className="col-span-2 lg:col-span-4">
+                      <Input id="pg-dserv" value={descServico} onChange={(e) => setDescServico(e.target.value)} />
+                    </Field>
+                  </div>
+                )}
+
+                <div className={cn(modelo === 'nfse' && 'hidden')}>
                   <div className="mb-2 flex items-center justify-between">
                     <span className="text-xs text-ink-muted">Itens</span>
                     <Button size="sm" onClick={() => setItens((a) => [...a, { ...ITEM_PADRAO, codigo: `SKU${a.length + 1}` }])}>

@@ -5,6 +5,8 @@ import type {
   DocListResp,
   DocumentoEvento,
   EventoResp,
+  InutilizacaoInput,
+  InutilizacaoResp,
   ReenvioResp,
 } from '../types'
 
@@ -70,6 +72,18 @@ export const documentos = {
       body: payload,
       idempotencyKey,
     }),
+
+  /**
+   * Inutiliza uma faixa de numeração que nunca foi transmitida à SEFAZ.
+   * Operação DISTINTA do reenvio: reenvio corrige o payload do mesmo
+   * documento; inutilização libera números. O ambiente é derivado do tenant.
+   */
+  inutilizar: (body: InutilizacaoInput, idempotencyKey?: string) =>
+    request<InutilizacaoResp>('/v1/admin/inutilizacoes', { body, idempotencyKey }),
+
+  /** Estado de uma inutilização. */
+  obterInutilizacao: (eventoId: string) =>
+    request<InutilizacaoResp>(`/v1/admin/inutilizacoes/${eventoId}`),
 }
 
 /** Itens de uma listagem de documentos (atalho tipado). */

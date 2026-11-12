@@ -338,9 +338,15 @@ public class AdminDocumentosController : ControllerBase
         var doc = await _db.DocumentosFiscais.FirstOrDefaultAsync(d => d.Id == id, ct);
         if (doc is null) return NotFound();
 
-        var resultado = await _servicoReenvio.ReenviarAsync(doc, req, apiKeyId: null, ct);
+        var resultado = await _servicoReenvio.ReenviarAsync(
+            doc, req, apiKeyId: null, HttpContext.Connection.RemoteIpAddress, ct);
         if (!resultado.Ok)
-            return Problem(statusCode: resultado.Status, title: resultado.Titulo, detail: resultado.Detalhe);
+        {
+            return resultado.Campo is null
+                ? Problem(statusCode: resultado.Status, title: resultado.Titulo, detail: resultado.Detalhe)
+                : Problem(statusCode: resultado.Status, title: resultado.Titulo, detail: resultado.Detalhe,
+                    extensions: new Dictionary<string, object?> { ["campo"] = resultado.Campo });
+        }
 
         var atualizado = resultado.Documento!;
         return Accepted($"/v1/admin/documentos-fiscais/{atualizado.Id}", new
