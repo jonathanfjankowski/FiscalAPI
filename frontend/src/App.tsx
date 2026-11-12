@@ -2,7 +2,7 @@ import { Navigate, Route, Routes } from 'react-router-dom'
 import { AppShell } from './components/layout/AppShell'
 import { useAuth } from './hooks/useAuth'
 import Login from './pages/Login'
-import Dashboard from './pages/Dashboard'
+import VisaoGeral from './pages/VisaoGeral'
 import Empresas from './pages/Empresas'
 import EmpresaDetalhe from './pages/EmpresaDetalhe'
 import Documentos from './pages/Documentos'
@@ -33,7 +33,7 @@ export default function App() {
           </RequireAuth>
         }
       >
-        <Route path="/" element={<Dashboard />} />
+        <Route path="/" element={<VisaoGeral />} />
         <Route path="/empresas" element={<Empresas />} />
         <Route path="/empresas/:id" element={<EmpresaDetalhe />} />
         {/* Alias mantido: links antigos usavam /tenants. */}

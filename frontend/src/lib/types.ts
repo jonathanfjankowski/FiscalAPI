@@ -122,6 +122,9 @@ export interface DocListItem {
   motivoStatus: string | null
   criadoEm: string
   atualizadoEm: string
+  /** Presente na fila do dashboard (não na listagem paginada). */
+  tentativas?: number
+  proximaTentativaEm?: string | null
 }
 
 export interface DocListResp {
