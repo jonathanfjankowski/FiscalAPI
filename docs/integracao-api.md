@@ -1020,6 +1020,44 @@ O `422` por aritmética vem com a extensão `campo` apontando o local exato:
 
 ---
 
+## Rotas administrativas (painel)
+
+As rotas `/v1/admin/*` autenticam com **JWT de operador** (`POST /v1/admin/auth/login`),
+não com API key de tenant. São cross-tenant: o operador enxerga todas as
+empresas. Existem para o painel de operação — o integrador usa as rotas
+`/v1/*` documentadas acima.
+
+Espelham a semântica das rotas de tenant (mesmas validações, mesmos códigos
+de erro), com duas diferenças: o tenant vem do recurso ou de query/body (não
+da API key), e o ambiente é derivado de `Tenant.AmbientePadrao`.
+
+| Método | Rota | Função |
+|---|---|---|
+| `GET` | `/v1/admin/documentos-fiscais` | Listagem cross-tenant. Filtros: `tenantId`, `status`, `modelo`, `de`, `ate`, **`q`** (chave/número/razão social), **`ordenarPor`** (`criadoEm`\|`atualizadoEm`\|`numero`\|`serie`), **`ordem`** (`asc`\|`desc`), `page`, `pageSize` (máx 200) |
+| `GET` | `/v1/admin/documentos-fiscais/{id}` | Detalhe, incluindo `payloadEntrada` (base do reenvio) |
+| `GET` | `/v1/admin/documentos-fiscais/{id}/pdf` | **DANFE/DANFCe/DANFSe.** `409` se o status não for `AUTORIZADA`/`CANCELADA` |
+| `GET` | `/v1/admin/documentos-fiscais/{id}/eventos` | Eventos do documento (cancelamento, CC-e) com `status`, `motivo`, `protocolo`, `tentativas`, `xmlDisponivel` |
+| `POST` | `/v1/admin/documentos-fiscais/{id}/reenviar` | Reenvio com payload corrigido — **mantém o número**. `409` se não for `REJEITADA`/`DENEGADA`/`ERRO_INTERNO` |
+| `POST` | `/v1/admin/documentos-fiscais/{id}/cancelamento` | Cancelamento (exige `AUTORIZADA`, modelo 55/65) |
+| `POST` | `/v1/admin/documentos-fiscais/{id}/carta-correcao` | CC-e (só modelo 55) |
+| `POST` | `/v1/admin/inutilizacoes` | Inutiliza faixa. Body: `tenantId`, `modelo`, `serie`, `numeroInicial`, `numeroFinal`, `justificativa` (15–1000). Ambiente derivado do tenant |
+| `GET` | `/v1/admin/inutilizacoes/{id}` | Estado da inutilização |
+| `GET` | `/v1/admin/notas-recebidas` | Distribuição DFe cross-tenant (`tenantId`, `page`, `pageSize`) |
+| `GET` | `/v1/admin/notas-recebidas/{id}` | Detalhe da nota recebida |
+| `GET` | `/v1/admin/notas-recebidas/{id}/xml-completo` | procNFe. `409` se só o resumo foi sincronizado |
+| `POST` | `/v1/admin/notas-recebidas/{id}/manifestacao` | Manifestação do destinatário (210200/210210/210220/210240) |
+| `GET` | `/v1/admin/status-servico?tenantId=` | Status do serviço SEFAZ da UF da empresa (`modelo`, `ambiente` opcionais) |
+| `GET` | `/v1/admin/auditoria` | **Trilha de auditoria, somente leitura.** Filtros: `tenantId`, `acao` (parcial), `recursoId`, `de`, `ate`, `page`, `pageSize`. A tabela é append-only por trigger |
+| `GET` | `/v1/admin/dashboard` | Contagens + listas de atenção: `fila`, `certificadosVencendo`, `webhooksEmFalha`, `rejeicoesRecentes` |
+
+Rotas administrativas de empresa, API keys, certificados e chave master já
+existiam e seguem inalteradas (`/v1/admin/tenants`, `…/api-keys`,
+`…/certificados`, `/v1/admin/bootstrap-key`).
+
+> **Auditoria é append-only.** A tabela `auditoria` tem trigger que impede
+> `UPDATE` e `DELETE` (migration `EnforceAuditoriaAppendOnly`). O endpoint é
+> somente leitura — a escrita acontece nos pontos de ação.
+
 ## Status de documentos e enumerações
 
 ### `StatusDocumento`
@@ -1029,15 +1067,21 @@ O `422` por aritmética vem com a extensão `campo` apontando o local exato:
 | `PENDENTE` | não | Aceito, na fila de processamento |
 | `PROCESSANDO` | não | Em transmissão/consulta com a SEFAZ |
 | `AUTORIZADA` | **sim** | Autorizada pela SEFAZ — use `chaveAcesso` e XMLs |
-| `REJEITADA` | **sim** | Rejeitada — leia `motivoStatus`, corrija e reemita (novo POST, nova Idempotency-Key) |
+| `REJEITADA` | **sim** | Rejeitada — leia `motivoStatus`, corrija e **reenvie o mesmo documento** (`POST /{id}/reenviar`, mantém o número) |
 | `CONTINGENCIA` | não | Erro de transmissão transitório; retry automático em andamento |
 | `CANCELAMENTO_PENDENTE` | não | Cancelamento solicitado, aguardando conclusão |
 | `CANCELADA` | **sim** | Cancelamento confirmado |
-| `ERRO_CANCELAMENTO` | — | Reservado (ainda não produzido pela API) |
+| `ERRO_CANCELAMENTO` | **sim** | O evento de cancelamento foi rejeitado ou esgotou as tentativas — veja `motivoStatus` |
 | `DENEGADA` | **sim** | Uso denegado pela SEFAZ (não circula, mas o número foi consumido) |
 | `ERRO_INTERNO` | **sim** | Falha não recuperável do lado da API — veja `motivoStatus` |
+| `FALHA_EMISSAO` | **sim** | Esgotou `MaxTentativas` em contingência (SEFAZ inacessível). Não reprocessa sozinho — exige reenvio ou replay manual |
 
-> Em `REJEITADA`/`DENEGADA`/`ERRO_INTERNO` o número da série já foi consumido. Uma reemissão cria um documento com um **novo número**; a faixa perdida pode ser limpa com [inutilização](#post-v1inutilizacoes-).
+> **Reenvio × reemissão.** Em `REJEITADA`/`DENEGADA`/`ERRO_INTERNO` use
+> `POST /v1/documentos-fiscais/{id}/reenviar` com o payload corrigido: o
+> **mesmo número é mantido** (a rejeição não consumiu numeração na SEFAZ).
+> Um novo `POST` de emissão criaria um documento com número novo. Para
+> liberar uma faixa que nunca foi transmitida, use
+> [inutilização](#post-v1inutilizacoes-).
 
 ### Outras enumerações
 

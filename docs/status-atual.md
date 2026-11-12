@@ -115,22 +115,66 @@ As principais:
 - Homologação real exige certificado A1 válido (não existe certificado
   "de teste" separado na SEFAZ).
 
-## Painel admin (out/2026)
+## Painel admin (redesign — nov/2026)
 
-- Frontend refatorado: desktop-first, tema claro/escuro (toggle), acento azul,
-  ícones lucide-react, tabelas densas estilo ERP.
+O painel foi refeito do zero: design system próprio sobre Radix Primitives,
+tipografia IBM Plex, paleta "tinta sobre papel" com acento único (azul de
+carimbo) e três famílias semânticas de status. Direção visual de **registro
+fiscal**, não de dashboard genérico.
+
+**Cobertura da API.** Antes o painel consumia 23 das 89 rotas. Agora expõe
+toda a capacidade da API — incluindo o que só existia no backend:
+
+- **DANFE em PDF** (`GET /v1/admin/documentos-fiscais/{id}/pdf`) — antes só XML cru.
+- **Pré-visualização do DANFE sem transmitir** (Playground, `POST /preview-pdf`).
+- **Reenvio com payload corrigido** mantendo o número (`POST /{id}/reenviar`).
+- **Inutilização de faixa** (`POST /v1/admin/inutilizacoes`).
+- **Eventos do documento** com protocolo e motivo (`GET /{id}/eventos`).
+- **Notas recebidas (DFe) e manifestação do destinatário** — seção inteira nova.
+- **Status do serviço SEFAZ** por UF, na barra de comando.
+- **Trilha de auditoria** (`GET /v1/admin/auditoria`) — a tabela era gravada em
+  ~77 pontos e nunca lida.
+- **NFS-e (DPS)** no Playground; ativar/desativar certificado; desativar empresa.
+
+**UX.** Contexto de empresa na URL (`?empresa=`) compartilhado entre telas;
+filtros, ordenação, paginação e abas também na URL (deep-linkável, sobrevive a
+F5). Dashboard de **atenção primeiro** (fila de transmissão, certificados
+vencendo, webhooks em falha, rejeições com motivo) em vez de contagens.
+Erro e vazio são estados distintos — quando a API cai, a tela diz o que houve
+e oferece repetir.
+
+**Elementos de assinatura:** a chave de acesso decomposta nos 9 campos da
+SEFAZ (série, CNPJ e DV legíveis de relance) e o trilho de status com a cor do
+desfecho — a única animação do produto, que respeita `prefers-reduced-motion`.
+
+**Acessibilidade:** Radix dá focus trap, `role="dialog"`, roving tabindex e
+`aria-*`; skip link, `aria-live` nos toasts, foco visível, navegação por
+teclado, responsivo até 360px (rail vira barra inferior).
+
+**Bugs corrigidos no caminho** (todos pré-existentes):
+- `cscId` não era exposto no response **nem gravado na criação** do tenant —
+  o CSC informado era silenciosamente descartado.
+- Manifestação do destinatário podia ser repetida: `ManifestacaoAtual` guarda
+  o nome (`confirmacao`), não o código (`210200`), e a guarda comparava com o código.
+- `FALHA_EMISSAO` não existia no frontend — aparecia cru e fazia o Playground
+  pollar 90s um documento já terminal.
+- O reset de CSS fora de `@layer` matava **todo** o espaçamento do Tailwind v4.
+- `dotnet test` na raiz rodava **zero** testes (a `.slnx` não listava os
+  projetos de teste) — o CI estava verde sem verificar nada.
+
+**Testes:** 311 no backend (140 Core + 171 Api) e 29 no frontend (Vitest,
+lógica pura de `lib/`). O CI roda build + testes + format + lint + build/test
+do frontend.
+
+### Histórico (out/2026)
+
 - **Sandbox por empresa**: `Tenant.Sandbox` controla mock vs SEFAZ por tenant
   (toggle no painel, `PUT /v1/admin/tenants/{id}` com `sandbox`). Novos tenants
-  herdam de `Fiscal:ModoSandbox`. Mocks de emissor/eventos/DFe ficam sempre
-  registrados; a escolha é em runtime.
+  herdam de `Fiscal:ModoSandbox`.
 - **Chave master no banco**: o `X-Bootstrap-Key` do provisionamento do ERP
   (`POST /v1/empresas`) passou a ser validado contra `chave_bootstrap`
   (hash PBKDF2), com fallback ao config `Fiscal:BootstrapToken`. Rotação via
-  painel (`GET/POST /v1/admin/bootstrap-key[/rotacionar]`) — a chave em claro
-  aparece uma única vez.
-- Painel cobre: empresas (dados fiscais, CSC, API keys, certificados, sandbox,
-  webhooks + outbox com reenvio), documentos (cancelamento/CC-e), playground,
-  dashboard, chave master.
+  painel — a chave em claro aparece uma única vez.
 - Migration `20261006000000_TenantSandboxChaveBootstrap` (tenants.sandbox
   default true + tabela chave_bootstrap).
 

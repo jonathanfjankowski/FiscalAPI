@@ -61,3 +61,13 @@ jobs:
           cd frontend
           npm ci
           npm run lint
+
+      - name: Frontend build (tsc strict + vite)
+        run: |
+          cd frontend
+          npm run build
+
+      - name: Frontend testes (vitest)
+        run: |
+          cd frontend
+          npm run test

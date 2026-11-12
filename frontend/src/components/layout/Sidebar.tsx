@@ -32,9 +32,15 @@ export function Sidebar() {
   return (
     <nav
       aria-label="Navegação principal"
-      className="fixed inset-y-0 left-0 z-40 flex w-15 flex-col border-r border-line bg-surface"
+      className={cn(
+        // Desktop: rail fixo à esquerda. Mobile: barra inferior — o rail
+        // lateral comeria 60px de uma tela de 360px.
+        'fixed z-40 flex border-line bg-surface',
+        'inset-x-0 bottom-0 h-14 flex-row border-t',
+        'sm:inset-y-0 sm:left-0 sm:right-auto sm:h-auto sm:w-15 sm:flex-col sm:border-t-0 sm:border-r',
+      )}
     >
-      <div className="flex h-12 items-center justify-center border-b border-line">
+      <div className="hidden h-12 items-center justify-center border-b border-line sm:flex">
         <NavLink
           to="/"
           className="flex h-7 w-7 items-center justify-center rounded bg-carimbo font-mono text-xs font-semibold text-on-carimbo"
@@ -44,9 +50,9 @@ export function Sidebar() {
         </NavLink>
       </div>
 
-      <ul className="flex flex-1 flex-col gap-0.5 py-2">
+      <ul className="flex flex-1 flex-row items-center justify-around gap-0.5 px-1 sm:flex-col sm:justify-start sm:px-0 sm:py-2">
         {NAV.map((item) => (
-          <li key={item.to}>
+          <li key={item.to} className="sm:w-full">
             <NavLink
               to={item.to}
               end={'fim' in item ? item.fim : undefined}
@@ -62,19 +68,22 @@ export function Sidebar() {
             >
               {({ isActive }) => (
                 <>
-                  {/* Marca do item ativo: barra à esquerda, não fundo cheio. */}
+                  {/* Marca do item ativo: barra à esquerda no desktop,
+                      embaixo no mobile. */}
                   <span
                     className={cn(
-                      'absolute left-0 h-5 w-0.5 rounded-r',
+                      'absolute rounded',
+                      'bottom-0 left-1/2 h-0.5 w-5 -translate-x-1/2',
+                      'sm:top-1/2 sm:bottom-auto sm:left-0 sm:h-5 sm:w-0.5 sm:translate-x-0 sm:-translate-y-1/2 sm:rounded-r',
                       isActive ? 'bg-carimbo' : 'bg-transparent',
                     )}
                     aria-hidden
                   />
                   <item.icone className="h-4 w-4" aria-hidden />
                   <span className="sr-only">{item.label}</span>
-                  {/* Rótulo no hover — não ocupa espaço quando não usado. */}
+                  {/* Rótulo no hover — só no desktop, onde há espaço. */}
                   <span
-                    className="pointer-events-none absolute left-full z-50 ml-1 hidden whitespace-nowrap rounded border border-line bg-surface px-2 py-1 text-[11px] text-ink shadow-overlay group-hover:block"
+                    className="pointer-events-none absolute left-full z-50 ml-1 hidden whitespace-nowrap rounded border border-line bg-surface px-2 py-1 text-[11px] text-ink shadow-overlay sm:group-hover:block"
                     aria-hidden
                   >
                     {item.label}
