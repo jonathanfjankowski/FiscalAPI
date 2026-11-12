@@ -1,86 +1,106 @@
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { useState } from 'react'
-import { KeyRound, TriangleAlert } from 'lucide-react'
-import { api, type BootstrapKeyRotacionada } from '../lib/api'
-import { Badge, Button, Card, ConfirmDialog, Modal, PageHeader, PageLoading } from '../components/ui-antigo'
-import { useToast } from '../components/toast'
-import { copiar, formatarData } from '../lib/utils'
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
+import { KeyRound, Moon, Sun } from 'lucide-react'
+import { api } from '../lib/api'
+import { useTema } from '../hooks/useTema'
+import { formatarData } from '../lib/format'
+import {
+  Badge,
+  Button,
+  ConfirmDialog,
+  Dialog,
+  ErrorState,
+  PageLoading,
+  Switch,
+} from '../components/ui'
+import { PageHeader } from '../components/ui/estados'
+import { SegredoUnico } from '../components/ui/segredo'
+
+// ==========================================================================
+// Configurações da plataforma.
+//
+// Chave master de provisionamento (o ERP usa no POST /v1/empresas) e
+// preferências do painel. A rotação invalida a chave anterior na hora — o
+// aviso diz isso, porque o ERP para de provisionar até ser atualizado.
+// ==========================================================================
 
 export default function Configuracoes() {
   const qc = useQueryClient()
-  const toast = useToast()
+  const { tema, alternar } = useTema()
   const [confirmar, setConfirmar] = useState(false)
-  const [gerada, setGerada] = useState<BootstrapKeyRotacionada | null>(null)
+  const [gerada, setGerada] = useState<{ chave: string; aviso: string } | null>(null)
 
-  const { data: chave, isLoading } = useQuery({ queryKey: ['bootstrap-key'], queryFn: api.getBootstrapKey })
+  const { data: chave, isLoading, isError, refetch } = useQuery({
+    queryKey: ['bootstrap-key'],
+    queryFn: api.getBootstrapKey,
+  })
 
-  const rotacionarMut = useMutation({
+  const mut = useMutation({
     mutationFn: api.rotacionarBootstrapKey,
     onSuccess: (k) => {
       qc.invalidateQueries({ queryKey: ['bootstrap-key'] })
       setConfirmar(false)
-      setGerada(k)
-    },
-    onError: (e) => {
-      setConfirmar(false)
-      toast({ tipo: 'erro', titulo: 'Falha ao rotacionar', detalhe: e.message })
+      setGerada({ chave: k.chave, aviso: k.aviso })
     },
   })
 
   return (
     <>
-      <PageHeader
-        titulo="Configurações"
-        descricao="Chave master de provisionamento e preferências do painel"
-      />
+      <PageHeader titulo="Configurações" descricao="Chave de provisionamento e preferências do painel." />
 
       <div className="max-w-2xl space-y-4">
-        <Card>
-          <div className="flex items-center justify-between border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+        {/* ---------- Chave master ---------- */}
+        <section className="rounded-lg border border-line bg-surface">
+          <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
             <div className="flex items-center gap-2">
-              <KeyRound className="h-4 w-4 text-zinc-500" />
-              <h2 className="text-sm font-semibold text-zinc-900 dark:text-zinc-200">
-                Chave master (provisionamento de empresas)
-              </h2>
+              <KeyRound className="h-3.5 w-3.5 text-ink-faint" aria-hidden />
+              <h2 className="text-[13px] font-semibold text-ink">Chave master de provisionamento</h2>
             </div>
             {chave && (
               <Badge
                 className={
                   chave.configurada === false
-                    ? 'border-red-200 bg-red-50 text-red-700 dark:border-red-500/30 dark:bg-red-500/10 dark:text-red-300'
-                    : 'border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-500/30 dark:bg-emerald-500/10 dark:text-emerald-300'
+                    ? 'border-rejeitado/30 bg-rejeitado-soft text-rejeitado'
+                    : 'border-aprovado/30 bg-aprovado-soft text-aprovado'
                 }
               >
                 {chave.configurada === false ? 'Não configurada' : 'Configurada'}
               </Badge>
             )}
-          </div>
+          </header>
 
           {isLoading ? (
             <PageLoading />
+          ) : isError ? (
+            <div className="p-4">
+              <ErrorState titulo="Não foi possível carregar a chave" aoTentarNovamente={() => refetch()} />
+            </div>
           ) : (
-            <div className="px-4 py-4">
-              <p className="text-xs leading-relaxed text-zinc-500">
-                Segredo compartilhado que o ERP Okto envia no header <code className="font-mono">X-Bootstrap-Key</code>{' '}
-                ao chamar <code className="font-mono">POST /v1/empresas</code> para criar/atualizar empresas
-                automaticamente (idempotente por CNPJ, com rotação de API keys e token de webhook).
+            <div className="p-4">
+              <p className="text-xs leading-relaxed text-ink-muted">
+                Segredo que o ERP envia no header{' '}
+                <code className="font-mono text-ink">X-Bootstrap-Key</code> ao chamar{' '}
+                <code className="font-mono text-ink">POST /v1/empresas</code> para criar/atualizar
+                empresas automaticamente (idempotente por CNPJ).
               </p>
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                <div className="rounded-md border border-zinc-200 px-3 py-2.5 dark:border-zinc-800">
-                  <p className="text-[11px] font-medium text-zinc-500">Prefixo</p>
-                  <p className="mt-0.5 font-mono text-sm text-zinc-900 dark:text-zinc-100">
+
+              <dl className="mt-3 grid grid-cols-2 gap-3">
+                <div className="rounded border border-line px-3 py-2">
+                  <dt className="text-[11px] text-ink-muted">Prefixo</dt>
+                  <dd className="mt-0.5 font-mono text-[13px] text-ink">
                     {chave?.configurada === false || !chave?.prefixo ? '—' : `${chave.prefixo}…`}
-                  </p>
+                  </dd>
                 </div>
-                <div className="rounded-md border border-zinc-200 px-3 py-2.5 dark:border-zinc-800">
-                  <p className="text-[11px] font-medium text-zinc-500">Criada em</p>
-                  <p className="mt-0.5 text-sm text-zinc-900 dark:text-zinc-100">{formatarData(chave?.criadoEm)}</p>
+                <div className="rounded border border-line px-3 py-2">
+                  <dt className="text-[11px] text-ink-muted">Criada em</dt>
+                  <dd className="mt-0.5 text-[13px] text-ink tabular">{formatarData(chave?.criadoEm)}</dd>
                 </div>
-              </div>
-              <p className="mt-3 text-[11px] text-zinc-400 dark:text-zinc-500">
-                A chave completa nunca é exibida depois de criada — apenas o prefixo. Ao rotacionar, a chave
-                anterior deixa de valer imediatamente.
+              </dl>
+
+              <p className="mt-3 text-[11px] leading-relaxed text-ink-faint">
+                A chave completa nunca é exibida depois de criada — apenas o prefixo.
               </p>
+
               <div className="mt-4 flex justify-end">
                 <Button variant="primary" onClick={() => setConfirmar(true)}>
                   Rotacionar chave
@@ -88,54 +108,70 @@ export default function Configuracoes() {
               </div>
             </div>
           )}
-        </Card>
+        </section>
+
+        {/* ---------- Aparência ---------- */}
+        <section className="rounded-lg border border-line bg-surface p-4">
+          <div className="flex items-start justify-between gap-4">
+            <div>
+              <h2 className="text-[13px] font-semibold text-ink">Tema escuro</h2>
+              <p className="mt-1 text-xs text-ink-muted">
+                A preferência fica neste navegador. Sem preferência salva, segue o sistema.
+              </p>
+            </div>
+            <div className="flex items-center gap-2">
+              {tema === 'escuro' ? (
+                <Moon className="h-3.5 w-3.5 text-ink-faint" aria-hidden />
+              ) : (
+                <Sun className="h-3.5 w-3.5 text-ink-faint" aria-hidden />
+              )}
+              <Switch checked={tema === 'escuro'} onChange={alternar} label="Tema escuro" />
+            </div>
+          </div>
+        </section>
+
+        {/* ---------- Sobre ---------- */}
+        <section className="rounded-lg border border-line bg-surface p-4">
+          <h2 className="text-[13px] font-semibold text-ink">Sobre</h2>
+          <p className="mt-1 text-xs leading-relaxed text-ink-muted">
+            FiscalAPI — emissão de NF-e (55), NFC-e (65) e NFS-e Nacional (DPS). A API não
+            calcula tributos: os valores vêm prontos do ERP e a API valida estrutura e
+            aritmética.
+          </p>
+          <p className="mt-2 text-[11px] text-ink-faint">
+            Fila de jobs:{' '}
+            <a
+              href="/hangfire"
+              target="_blank"
+              rel="noreferrer"
+              className="font-mono text-carimbo hover:underline"
+            >
+              /hangfire
+            </a>{' '}
+            (autenticado com o token do painel).
+          </p>
+        </section>
       </div>
 
       <ConfirmDialog
         open={confirmar}
         onClose={() => setConfirmar(false)}
-        onConfirm={() => rotacionarMut.mutate()}
+        onConfirm={() => mut.mutate()}
         titulo="Rotacionar chave master"
         mensagem="Uma nova chave é gerada e a atual deixa de valer imediatamente — o ERP precisa ser atualizado na hora, senão o provisionamento automático para."
         confirmarLabel="Rotacionar"
         perigoso
-        loading={rotacionarMut.isPending}
+        loading={mut.isPending}
       />
 
-      <ModalChaveGerada chave={gerada} onClose={() => setGerada(null)} />
+      <Dialog
+        open={!!gerada}
+        onClose={() => setGerada(null)}
+        titulo="Nova chave master"
+        rodape={<Button variant="primary" onClick={() => setGerada(null)}>Fechar</Button>}
+      >
+        {gerada && <SegredoUnico valor={gerada.chave} aviso={gerada.aviso} />}
+      </Dialog>
     </>
-  )
-}
-
-function ModalChaveGerada({ chave, onClose }: { chave: BootstrapKeyRotacionada | null; onClose: () => void }) {
-  const toast = useToast()
-  if (!chave) return null
-  return (
-    <Modal
-      open
-      onClose={onClose}
-      titulo="Nova chave master"
-      rodape={
-        <>
-          <Button onClick={onClose}>Fechar</Button>
-          <Button
-            variant="primary"
-            onClick={async () => {
-              if (await copiar(chave.chave)) toast({ tipo: 'sucesso', titulo: 'Chave copiada' })
-            }}
-          >
-            Copiar chave
-          </Button>
-        </>
-      }
-    >
-      <p className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800 dark:border-amber-500/30 dark:bg-amber-500/10 dark:text-amber-200">
-        <TriangleAlert className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-        {chave.aviso}
-      </p>
-      <code className="mt-3 block rounded-md border border-zinc-200 bg-zinc-50 px-3 py-2.5 font-mono text-xs break-all text-blue-700 select-all dark:border-zinc-800 dark:bg-zinc-950 dark:text-blue-300">
-        {chave.chave}
-      </code>
-    </Modal>
   )
 }

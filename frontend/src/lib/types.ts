@@ -212,7 +212,8 @@ export interface NotaRecebida {
   valor: number
   emitidaEm: string
   manifestacaoAtual: string | null
-  tipoSchema: number | null
+  /** resNFe (só resumo) ou procNFe (XML completo sincronizado). */
+  tipoSchema: string
   recebidaEm: string
 }
 

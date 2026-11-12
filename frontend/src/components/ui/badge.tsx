@@ -16,14 +16,18 @@ export function Badge({
   className,
 }: {
   children: ReactNode
+  /**
+   * Quando informado, SUBSTITUI o tom neutro (não se soma a ele): duas
+   * classes de cor no mesmo atributo resolvem por ordem no CSS, não por
+   * ordem no atributo — somar deixaria o badge sempre neutro.
+   */
   className?: string
 }) {
   return (
     <span
       className={cn(
         'inline-flex items-center rounded border px-1.5 py-0.5 text-[11px] font-medium whitespace-nowrap',
-        'border-line-strong bg-surface-sunken text-ink-muted',
-        className,
+        className ?? 'border-line-strong bg-surface-sunken text-ink-muted',
       )}
     >
       {children}
