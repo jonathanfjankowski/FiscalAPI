@@ -1,5 +1,5 @@
 import { request, requestBlob } from '../http'
-import type { ApiKey, EmissaoResponse } from '../types'
+import type { EmissaoResponse } from '../types'
 
 export type ModeloEmissao = 'nfe' | 'nfce' | 'nfse'
 
@@ -19,9 +19,6 @@ export const playground = {
 
   consultarComoTenant: (id: string, apiKey: string) =>
     request<EmissaoResponse>(`/v1/documentos-fiscais/${id}`, { apiKey }),
-
-  /** Lista as API keys do tenant — valida a chave colada no Playground. */
-  validarApiKey: (apiKey: string) => request<ApiKey[]>('/v1/api-keys', { apiKey }),
 
   /**
    * Pré-visualiza o DANFE/DANFCe a partir do payload de emissão, **sem

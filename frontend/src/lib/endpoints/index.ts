@@ -58,7 +58,6 @@ export const api = {
 
   // ---------- Notas recebidas (DFe) ----------
   listNotasRecebidas: notas.listNotasRecebidas,
-  getNotaRecebida: notas.getNotaRecebida,
   xmlCompletoNota: notas.xmlCompleto,
   manifestar: notas.manifestar,
 
@@ -79,6 +78,5 @@ export const api = {
   // ---------- Playground (caminho do integrador) ----------
   emitir: playground.emitir,
   consultarComoTenant: playground.consultarComoTenant,
-  validarApiKey: playground.validarApiKey,
   previewPdf: playground.previewPdf,
 }

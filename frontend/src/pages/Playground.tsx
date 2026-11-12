@@ -190,19 +190,29 @@ export default function Playground() {
 
   const mutPreview = useMutation({
     mutationFn: async () => {
-      const payload = modo === 'json' ? JSON.parse(jsonCru) : JSON.parse(jsonGerado)
+      let payload: unknown
+      try {
+        payload = modo === 'json' ? JSON.parse(jsonCru) : JSON.parse(jsonGerado)
+        setErroJson(null)
+      } catch (e) {
+        // Erro de sintaxe pertence ao campo, nao a API: nao vira toast de falha.
+        setErroJson(e instanceof Error ? e.message : 'JSON inválido')
+        throw new Error('JSON inválido')
+      }
       return api.previewPdf(apiKey.trim(), modelo === 'nfce' ? 'NFCE' : 'NFE', payload)
     },
     onSuccess: (blob) => {
       if (previewUrl) URL.revokeObjectURL(previewUrl)
       setPreviewUrl(URL.createObjectURL(blob))
     },
-    onError: (e) =>
+    onError: (e) => {
+      if (e.message === 'JSON inválido') return
       toast({
         tipo: 'erro',
         titulo: 'Falha na pré-visualização',
         detalhe: e instanceof ApiError ? (e.detail ?? e.message) : e.message,
-      }),
+      })
+    },
   })
 
   const mutEmitir = useMutation({
@@ -284,7 +294,9 @@ export default function Playground() {
       `  -H "Authorization: ApiKey ${apiKey || '<SUA_API_KEY>'}" \\`,
       `  -H "Idempotency-Key: ${idempotencyKey}" \\`,
       `  -H "Content-Type: application/json" \\`,
-      `  -d '${corpo.replace(/\n\s*/g, ' ')}'`,
+      // Aspas simples no corpo (ex.: razao social "O'Brien") quebrariam o
+      // quoting do shell: fecha a aspa, escapa, reabre.
+      `  -d '${corpo.replace(/\n\s*/g, ' ').replace(/'/g, `'\\''`)}'`,
     ].join('\n')
   }, [modelo, apiKey, idempotencyKey, modo, jsonCru, jsonGerado])
 

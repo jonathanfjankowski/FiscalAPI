@@ -162,6 +162,14 @@ A numeração é por (empresa, modelo, série, ambiente), então o número sozin
 é ambíguo — cinco documentos podem ser `1/000000001`. A linha inteira abre o
 detalhe, o número tem copiar, e clicar na empresa troca o contexto do painel.
 
+**Semântica de status por domínio.** Documento, evento fiscal e entrega de
+webhook são máquinas de estado diferentes: `PROCESSADO`/`REJEITADO` são do
+evento, `ENTREGUE`/`FALHA` da entrega. Cada uma tem rótulo e cor próprios —
+antes "Falha" de webhook aparecia cinza, indistinguível de uma pendente.
+Manifestação também: só *confirmada* é verde; *desconhecida* e *não realizada*
+são alerta e contestação, e o botão de manifestar fica desabilitado em estado
+final (a SEFAZ não aceita outra).
+
 **Tráfego HTTP (`/trafego`).** Inspetor de requests/responses do painel: método,
 rota, status, duração, tamanho, headers e corpos, com busca, filtros, pausa,
 exportação JSON e "copiar cURL". Buffer de 300 chamadas em memória; corpos
@@ -186,8 +194,18 @@ contador de falhas.
 - O par CSC/IdCSC não era validado no `PUT` — enviar só o `csc` dava 500.
 - A paginação da auditoria carregava a tabela inteira em memória também em
   Postgres; agora `Skip/Take` vão para o SQL.
+- O navegador preenchia **URL e secret de webhook com as credenciais do
+  operador** (campo texto + password é lido como formulário de login). A URL
+  do webhook virava o e-mail do operador. `autoComplete` desligado nos campos
+  de webhook, CSC e senha do .pfx.
 
-**Testes:** 325 no backend (140 Core + 185 Api) e 43 no frontend (Vitest,
+**Desempenho.** Rotas em `lazy` + `Suspense`: o bundle inicial caiu de 504 KB
+para 282 KB, e cada página carrega sob demanda. Busca com atraso de 300 ms
+(uma requisição por palavra, não por tecla). O dashboard agrega no SQL em
+Postgres — era a landing page pollando a cada 15 s e materializando a tabela
+de documentos inteira.
+
+**Testes:** 336 no backend (140 Core + 196 Api) e 50 no frontend (Vitest,
 lógica pura de `lib/`). Inclui `TraducaoNpgsqlTests`, que compila as queries
 dos endpoints admin contra o provider **Npgsql** sem conectar — a suíte de
 integração roda em SQLite e é estruturalmente cega para erros de tradução

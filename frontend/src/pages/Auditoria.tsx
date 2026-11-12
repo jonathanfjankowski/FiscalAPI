@@ -2,7 +2,8 @@ import { useQuery } from '@tanstack/react-query'
 import { api, ApiError } from '../lib/api'
 import { useEmpresaContexto } from '../hooks/useEmpresaContexto'
 import { useFiltrosUrl } from '../hooks/useFiltrosUrl'
-import { formatarData } from '../lib/format'
+import { useValorAdiado } from '../hooks/useValorAdiado'
+import { copiar, formatarData } from '../lib/format'
 import {
   Badge,
   Button,
@@ -13,6 +14,7 @@ import {
   Table,
   Td,
   Th,
+  useToast,
 } from '../components/ui'
 import { PageHeader } from '../components/ui/estados'
 import { Paginacao } from '../components/ui/paginacao'
@@ -42,17 +44,20 @@ function corAcao(acao: string): string | undefined {
 }
 
 export default function Auditoria() {
+  const toast = useToast()
   const { filtroTenant } = useEmpresaContexto()
   const { valores, pagina, definir, definirPagina, limpar, algumAtivo } = useFiltrosUrl(CHAVES)
   const pageSize = Number.parseInt(valores.pageSize || '50', 10) || 50
+  const acaoAdiada = useValorAdiado(valores.acao)
+  const recursoAdiado = useValorAdiado(valores.recursoId)
 
   const { data, isLoading, isError, error, refetch } = useQuery({
-    queryKey: ['auditoria', filtroTenant, valores, pagina, pageSize],
+    queryKey: ['auditoria', filtroTenant, valores, acaoAdiada, recursoAdiado, pagina, pageSize],
     queryFn: () =>
       api.listarAuditoria({
         tenantId: filtroTenant,
-        acao: valores.acao || undefined,
-        recursoId: valores.recursoId || undefined,
+        acao: acaoAdiada || undefined,
+        recursoId: recursoAdiado || undefined,
         de: valores.de ? new Date(valores.de + 'T00:00:00').toISOString() : undefined,
         ate: valores.ate ? new Date(valores.ate + 'T23:59:59').toISOString() : undefined,
         page: pagina,
@@ -78,7 +83,7 @@ export default function Auditoria() {
         <Input
           value={valores.recursoId}
           onChange={(e) => definir('recursoId', e.target.value)}
-          placeholder="ID do recurso…"
+          placeholder="ID do recurso (aceita prefixo)…"
           aria-label="Filtrar por recurso"
           className="h-8 w-72 font-mono text-xs"
         />
@@ -133,8 +138,21 @@ export default function Auditoria() {
                     <Td className="max-w-48 truncate text-xs" title={a.tenantRazaoSocial ?? undefined}>
                       {a.tenantRazaoSocial ?? <span className="text-ink-faint">—</span>}
                     </Td>
-                    <Td className="font-mono text-[10px] text-ink-faint" title={a.recursoId ?? undefined}>
-                      {a.recursoId ? `${a.recursoId.slice(0, 8)}…` : '—'}
+                    <Td>
+                      {a.recursoId ? (
+                        <button
+                          type="button"
+                          onClick={async () => {
+                            if (await copiar(a.recursoId!)) toast({ tipo: 'sucesso', titulo: 'ID copiado' })
+                          }}
+                          title={`${a.recursoId} — clique para copiar`}
+                          className="font-mono text-[10px] text-ink-muted tabular hover:text-carimbo hover:underline"
+                        >
+                          {a.recursoId.slice(0, 8)}…
+                        </button>
+                      ) : (
+                        <span className="text-[10px] text-ink-faint">—</span>
+                      )}
                     </Td>
                     <Td className="font-mono text-[11px] text-ink-muted tabular">{a.ipOrigem ?? '—'}</Td>
                     <Td className="max-w-72 truncate font-mono text-[10px] text-ink-faint" title={a.detalhe ?? undefined}>

@@ -1,6 +1,6 @@
 import { useNavigate } from 'react-router-dom'
 import { LogOut, Moon, Sun } from 'lucide-react'
-import { useAuth } from '../../hooks/useAuth'
+import { useAuth } from '../../lib/authContext'
 import { useTema } from '../../hooks/useTema'
 import { Button, Tooltip } from '../ui'
 import { EmpresaPicker } from './EmpresaPicker'

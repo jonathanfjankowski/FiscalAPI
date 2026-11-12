@@ -1,4 +1,4 @@
-import { createContext, useCallback, useContext, useRef, useState, type ReactNode } from 'react'
+import { useCallback, useRef, useState, type ReactNode } from 'react'
 import { CircleAlert, CircleCheck, Info, X } from 'lucide-react'
 
 // ==========================================================================
@@ -10,23 +10,11 @@ import { CircleAlert, CircleCheck, Info, X } from 'lucide-react'
 // para quem não enxerga.
 // ==========================================================================
 
-export type ToastType = 'sucesso' | 'erro' | 'info'
-
-export interface ToastPayload {
-  tipo?: ToastType
-  titulo: string
-  detalhe?: string
-}
+import { ToastContext, type ToastPayload, type ToastType } from '../../lib/toastContext'
 
 interface Toast extends ToastPayload {
   id: number
   tipo: ToastType
-}
-
-const ToastCtx = createContext<(t: ToastPayload) => void>(() => {})
-
-export function useToast() {
-  return useContext(ToastCtx)
 }
 
 const ICONES: Record<ToastType, ReactNode> = {
@@ -50,7 +38,7 @@ export function ToastProvider({ children }: { children: ReactNode }) {
   }, [])
 
   return (
-    <ToastCtx.Provider value={push}>
+    <ToastContext.Provider value={push}>
       {children}
       <div
         aria-live="polite"
@@ -79,6 +67,6 @@ export function ToastProvider({ children }: { children: ReactNode }) {
           </div>
         ))}
       </div>
-    </ToastCtx.Provider>
+    </ToastContext.Provider>
   )
 }

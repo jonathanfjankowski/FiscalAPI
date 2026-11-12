@@ -5,6 +5,7 @@ import { ArrowDownUp, Check, Copy, Search, X } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { useEmpresaContexto } from '../hooks/useEmpresaContexto'
 import { useFiltrosUrl } from '../hooks/useFiltrosUrl'
+import { useValorAdiado } from '../hooks/useValorAdiado'
 import { STATUS_LABEL, STATUS_TRANSITORIOS } from '../lib/fiscal'
 import { copiar, formatarCnpj, formatarData } from '../lib/format'
 import { cn } from '../lib/utils'
@@ -73,6 +74,8 @@ export default function Documentos() {
   const { valores, pagina, definir, definirPagina, limpar, algumAtivo } = useFiltrosUrl(CHAVES_FILTRO)
 
   const pageSize = Number.parseInt(valores.pageSize || '50', 10) || 50
+  // Busca com atraso: sem isso cada tecla dispara uma requisição.
+  const buscaAdiada = useValorAdiado(valores.q)
   const ordenarPor = valores.ordenarPor || 'criadoEm'
   const ordem = (valores.ordem || 'desc') as 'asc' | 'desc'
 
@@ -85,13 +88,13 @@ export default function Documentos() {
       // UTC-3 — monta com hora local explícita.
       de: valores.de ? new Date(valores.de + 'T00:00:00').toISOString() : undefined,
       ate: valores.ate ? new Date(valores.ate + 'T23:59:59').toISOString() : undefined,
-      q: valores.q || undefined,
+      q: buscaAdiada || undefined,
       ordenarPor,
       ordem,
       page: pagina,
       pageSize,
     }),
-    [filtroTenant, valores, ordenarPor, ordem, pagina, pageSize],
+    [filtroTenant, valores, buscaAdiada, ordenarPor, ordem, pagina, pageSize],
   )
 
   const { data, isLoading, isFetching, isError, error, refetch } = useQuery({

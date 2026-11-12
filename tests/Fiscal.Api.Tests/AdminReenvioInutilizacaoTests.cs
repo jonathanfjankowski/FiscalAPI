@@ -443,4 +443,88 @@ public class AdminReenvioInutilizacaoTests : IClassFixture<AdminIntegracaoTests.
         body.TryGetProperty("campo", out var campo).Should().BeTrue();
         campo.GetString().Should().NotBeNullOrEmpty();
     }
+
+    /// <summary>A numeração fiscal começa em 1 — a SEFAZ rejeita faixa com 0.</summary>
+    [Fact]
+    public async Task Inutilizacao_com_numero_inicial_zero_retorna_422()
+    {
+        var (_, tenantId, _) = await CriarDocumentoAsync(StatusDocumento.AUTORIZADA);
+        var client = await AdminAsync();
+
+        var resp = await client.PostAsJsonAsync("/v1/admin/inutilizacoes", new
+        {
+            tenantId,
+            modelo = 55,
+            serie = 1,
+            numeroInicial = 0,
+            numeroFinal = 10,
+            justificativa = "Faixa nao utilizada apos rejeicao de lote"
+        });
+
+        resp.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    /// <summary>
+    /// Sem a faixa no GET o operador vê que algo foi inutilizado mas não O QUÊ.
+    /// </summary>
+    [Fact]
+    public async Task Inutilizacao_consultada_devolve_a_faixa_e_a_justificativa()
+    {
+        var (_, tenantId, _) = await CriarDocumentoAsync(StatusDocumento.AUTORIZADA);
+        var client = await AdminAsync();
+
+        var create = await client.PostAsJsonAsync("/v1/admin/inutilizacoes", new
+        {
+            tenantId,
+            modelo = 65,
+            serie = 2,
+            numeroInicial = 500,
+            numeroFinal = 520,
+            justificativa = "Faixa pulada por erro de configuracao de serie"
+        });
+        create.StatusCode.Should().Be(HttpStatusCode.Accepted);
+        var eventoId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("eventoId").GetGuid();
+
+        var body = await (await client.GetAsync($"/v1/admin/inutilizacoes/{eventoId}"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+
+        body.GetProperty("modelo").GetInt16().Should().Be(65);
+        body.GetProperty("serie").GetInt16().Should().Be(2);
+        body.GetProperty("numeroInicial").GetInt64().Should().Be(500);
+        body.GetProperty("numeroFinal").GetInt64().Should().Be(520);
+        body.GetProperty("justificativa").GetString().Should().Contain("erro de configuracao");
+        body.GetProperty("tenantId").GetGuid().Should().Be(tenantId);
+    }
+
+    /// <summary>Replay da mesma Idempotency-Key devolve a mesma inutilização.</summary>
+    [Fact]
+    public async Task Inutilizacao_com_mesma_idempotency_key_e_idempotente()
+    {
+        var (_, tenantId, _) = await CriarDocumentoAsync(StatusDocumento.AUTORIZADA);
+        var client = await AdminAsync();
+        var chave = Guid.NewGuid().ToString();
+
+        async Task<Guid> Enviar()
+        {
+            using var req = new HttpRequestMessage(HttpMethod.Post, "/v1/admin/inutilizacoes");
+            req.Headers.Add("Idempotency-Key", chave);
+            req.Content = JsonContent.Create(new
+            {
+                tenantId,
+                modelo = 55,
+                serie = 1,
+                numeroInicial = 700,
+                numeroFinal = 710,
+                justificativa = "Faixa nao utilizada apos rejeicao de lote"
+            });
+            var resp = await client.SendAsync(req);
+            resp.StatusCode.Should().Be(HttpStatusCode.Accepted);
+            return (await resp.Content.ReadFromJsonAsync<JsonElement>()).GetProperty("eventoId").GetGuid();
+        }
+
+        var primeiro = await Enviar();
+        var segundo = await Enviar();
+
+        segundo.Should().Be(primeiro);
+    }
 }

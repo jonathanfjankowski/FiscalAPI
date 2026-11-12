@@ -15,7 +15,7 @@ import '@fontsource/ibm-plex-mono/latin-500.css'
 import './index.css'
 import App from './App'
 import { AuthProvider } from './hooks/useAuth'
-import { ToastProvider } from './components/toast'
+import { ToastProvider } from './components/ui'
 
 const queryClient = new QueryClient({
   defaultOptions: {

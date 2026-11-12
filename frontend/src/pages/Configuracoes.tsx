@@ -1,7 +1,7 @@
 import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { KeyRound, Moon, Sun } from 'lucide-react'
-import { api } from '../lib/api'
+import { api, ApiError } from '../lib/api'
 import { useTema } from '../hooks/useTema'
 import { formatarData } from '../lib/format'
 import {
@@ -12,6 +12,7 @@ import {
   ErrorState,
   PageLoading,
   Switch,
+  useToast,
 } from '../components/ui'
 import { PageHeader } from '../components/ui/estados'
 import { SegredoUnico } from '../components/ui/segredo'
@@ -25,6 +26,7 @@ import { SegredoUnico } from '../components/ui/segredo'
 // ==========================================================================
 
 export default function Configuracoes() {
+  const toast = useToast()
   const qc = useQueryClient()
   const { tema, alternar } = useTema()
   const [confirmar, setConfirmar] = useState(false)
@@ -37,6 +39,16 @@ export default function Configuracoes() {
 
   const mut = useMutation({
     mutationFn: api.rotacionarBootstrapKey,
+    onError: (e) => {
+      // Operação destrutiva: falha silenciosa deixaria o diálogo só parando
+      // o loading, sem dizer que a chave NÃO foi trocada.
+      setConfirmar(false)
+      toast({
+        tipo: 'erro',
+        titulo: 'Falha ao rotacionar a chave',
+        detalhe: e instanceof ApiError ? (e.detail ?? e.message) : e.message,
+      })
+    },
     onSuccess: (k) => {
       qc.invalidateQueries({ queryKey: ['bootstrap-key'] })
       setConfirmar(false)

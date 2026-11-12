@@ -84,13 +84,20 @@ public class AdminDocumentosController : ControllerBase
         if (pageSize < 1) pageSize = 50;
         if (pageSize > PageSizeMax) pageSize = PageSizeMax;
 
-        StatusDocumento? statusFiltro = null;
+        // `status` aceita um valor ou vários separados por vírgula — a fila de
+        // transmissão tem 4 estados e o "ver todos" precisa mostrar todos eles.
+        List<StatusDocumento>? statusFiltro = null;
         if (!string.IsNullOrWhiteSpace(status))
         {
-            if (!Enum.TryParse<StatusDocumento>(status, ignoreCase: true, out var parsed))
-                return Problem(statusCode: 422, title: "Status inválido.",
-                    detail: $"Use um status válido: {string.Join(", ", Enum.GetNames<StatusDocumento>())}.");
-            statusFiltro = parsed;
+            statusFiltro = new List<StatusDocumento>();
+            foreach (var parte in status.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                if (!Enum.TryParse<StatusDocumento>(parte, ignoreCase: true, out var parsed))
+                    return Problem(statusCode: 422, title: "Status inválido.",
+                        detail: $"'{parte}' não é um status. Use: {string.Join(", ", Enum.GetNames<StatusDocumento>())}.");
+                statusFiltro.Add(parsed);
+            }
+            if (statusFiltro.Count == 0) statusFiltro = null;
         }
 
         // Campos de ordenação permitidos — lista fechada, não nome de coluna
@@ -112,15 +119,14 @@ public class AdminDocumentosController : ControllerBase
 
         var query = _db.DocumentosFiscais.AsNoTracking();
         if (tenantId is not null) query = query.Where(d => d.TenantId == tenantId);
-        if (statusFiltro is not null) query = query.Where(d => d.Status == statusFiltro);
+        if (statusFiltro is not null) query = query.Where(d => statusFiltro.Contains(d.Status));
         if (modelo is not null) query = query.Where(d => d.Modelo == modelo);
         if (de is not null) query = query.Where(d => d.CriadoEm >= de);
         if (ate is not null) query = query.Where(d => d.CriadoEm <= ate);
 
         // Busca livre: chave de acesso, número ou razão social do emitente.
-        // O termo é aplicado no banco quando é numérico (chave/número) e via
-        // projeção em memória quando é texto (razão social) — o SQLite da
-        // suíte não traduz tudo, então o caminho é o mesmo do resto do repo.
+        // Roda no banco nos dois providers — Contains e Numero.ToString()
+        // traduzem tanto no Npgsql quanto no SQLite (ver TraducaoNpgsqlTests).
         var busca = q?.Trim();
         if (!string.IsNullOrEmpty(busca))
         {
@@ -306,6 +312,7 @@ public class AdminDocumentosController : ControllerBase
 
         return Ok(eventos
             .OrderByDescending(e => e.CriadoEm)
+            .ThenByDescending(e => e.Id)
             .Select(e => new
             {
                 e.Id,

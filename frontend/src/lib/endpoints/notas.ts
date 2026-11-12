@@ -1,5 +1,5 @@
 import { request } from '../http'
-import type { ManifestacaoResp, NotaRecebida, NotasRecebidasResp } from '../types'
+import type { ManifestacaoResp, NotasRecebidasResp } from '../types'
 
 export interface ListarNotasParams {
   tenantId?: string
@@ -16,8 +16,6 @@ export const notas = {
     }
     return request<NotasRecebidasResp>(`/v1/admin/notas-recebidas?${qs.toString()}`)
   },
-
-  getNotaRecebida: (id: string) => request<NotaRecebida>(`/v1/admin/notas-recebidas/${id}`),
 
   /**
    * XML completo (procNFe). 409 quando a distribuição devolveu só o resumo

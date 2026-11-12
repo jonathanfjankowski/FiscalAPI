@@ -34,32 +34,65 @@ public class AdminDashboardController : ControllerBase
         var inicio7Dias = agora.AddDays(-7);
         var validoAteLimite = DateOnly.FromDateTime(agora.AddDays(30).UtcDateTime);
 
-        // SQLite (suíte de testes) não traduz comparações/ordenação de
-        // DateTimeOffset nem GroupBy de forma uniforme com o Postgres — os
-        // agregados saem de uma projeção mínima em memória. Suficiente para o
-        // painel e é o padrão já usado aqui.
-        var docs = await _db.DocumentosFiscais.AsNoTracking()
-            .Select(d => new { d.CriadoEm, d.Status })
-            .ToListAsync(ct);
-        var certificados = await _db.Certificados.AsNoTracking()
-            .Select(c => new { c.Ativo, c.ValidoAte })
-            .ToListAsync(ct);
+        // O dashboard é a landing page e atualiza a cada 15s: em Postgres os
+        // agregados rodam no SQL (COUNT/GROUP BY), sem trazer a tabela de
+        // documentos para a memória. No SQLite da suíte o GroupBy sobre enum
+        // e a comparação de DateTimeOffset não traduzem de forma uniforme,
+        // então ali a projeção mínima em memória segue — o volume é pequeno.
+        var sqlite = _db.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite";
+
+        int documentosHoje, documentos7Dias, emContingencia, certificadosVencendo30Dias;
+        object porStatus;
+
+        if (sqlite)
+        {
+            var docs = await _db.DocumentosFiscais.AsNoTracking()
+                .Select(d => new { d.CriadoEm, d.Status })
+                .ToListAsync(ct);
+            var certs = await _db.Certificados.AsNoTracking()
+                .Select(c => new { c.Ativo, c.ValidoAte })
+                .ToListAsync(ct);
+
+            documentosHoje = docs.Count(d => d.CriadoEm >= inicioHoje);
+            documentos7Dias = docs.Count(d => d.CriadoEm >= inicio7Dias);
+            emContingencia = docs.Count(d => d.Status == StatusDocumento.CONTINGENCIA);
+            certificadosVencendo30Dias = certs.Count(c => c.Ativo && c.ValidoAte <= validoAteLimite);
+            porStatus = docs
+                .GroupBy(d => d.Status)
+                .Select(g => new { status = g.Key.ToString(), total = g.Count() })
+                .OrderBy(x => x.status)
+                .ToList();
+        }
+        else
+        {
+            var docsQuery = _db.DocumentosFiscais.AsNoTracking();
+            documentosHoje = await docsQuery.CountAsync(d => d.CriadoEm >= inicioHoje, ct);
+            documentos7Dias = await docsQuery.CountAsync(d => d.CriadoEm >= inicio7Dias, ct);
+            emContingencia = await docsQuery.CountAsync(d => d.Status == StatusDocumento.CONTINGENCIA, ct);
+            certificadosVencendo30Dias = await _db.Certificados.AsNoTracking()
+                .CountAsync(c => c.Ativo && c.ValidoAte <= validoAteLimite, ct);
+
+            var grupos = await docsQuery
+                .GroupBy(d => d.Status)
+                .Select(g => new { Status = g.Key, Total = g.Count() })
+                .ToListAsync(ct);
+            porStatus = grupos
+                .Select(g => new { status = g.Status.ToString(), total = g.Total })
+                .OrderBy(x => x.status)
+                .ToList();
+        }
 
         return Ok(new
         {
             // ---------- Contagens (compatibilidade + fita do topo) ----------
-            documentosHoje = docs.Count(d => d.CriadoEm >= inicioHoje),
-            documentos7Dias = docs.Count(d => d.CriadoEm >= inicio7Dias),
-            emContingencia = docs.Count(d => d.Status == StatusDocumento.CONTINGENCIA),
-            porStatus = docs
-                .GroupBy(d => d.Status)
-                .Select(g => new { status = g.Key.ToString(), total = g.Count() })
-                .OrderBy(x => x.status),
+            documentosHoje,
+            documentos7Dias,
+            emContingencia,
+            porStatus,
             tenantsAtivos = await _db.Tenants.AsNoTracking().CountAsync(t => t.Ativo, ct),
             apiKeysAtivas = await _db.ApiKeys.AsNoTracking()
                 .CountAsync(k => k.Ativa && k.RevogadoEm == null, ct),
-            certificadosVencendo30Dias = certificados
-                .Count(c => c.Ativo && c.ValidoAte <= validoAteLimite),
+            certificadosVencendo30Dias,
 
             // ---------- Fila de transmissão ----------
             fila = await FilaAsync(ct),
@@ -68,7 +101,89 @@ public class AdminDashboardController : ControllerBase
             certificadosVencendo = await CertificadosVencendoAsync(validoAteLimite, ct),
             webhooksEmFalha = await WebhooksEmFalhaAsync(ct),
             rejeicoesRecentes = await RejeicoesRecentesAsync(ct),
+
+            // ---------- Emissão recente ----------
+            emissaoRecente = await EmissaoRecenteAsync(ct),
         });
+    }
+
+    /// <summary>
+    /// Últimos documentos, de qualquer status — a leitura de "o que acabou de
+    /// acontecer" sem sair da landing page.
+    /// </summary>
+    private async Task<List<object>> EmissaoRecenteAsync(CancellationToken ct)
+    {
+        var query = _db.DocumentosFiscais.AsNoTracking();
+
+        // Ordenação no banco em Postgres; em memória no SQLite (OrderBy sobre
+        // DateTimeOffset não traduz). Projeta antes para não trazer payload.
+        var projecao = query.Select(d => new
+        {
+            d.Id,
+            d.TenantId,
+            TenantRazaoSocial = d.Tenant!.RazaoSocial,
+            d.Tipo,
+            d.Status,
+            Ambiente = d.Ambiente == (short)Ambiente.Producao ? "producao" : "homologacao",
+            d.Serie,
+            d.Numero,
+            d.CriadoEm,
+        });
+
+        if (_db.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+        {
+            var todos = await projecao.ToListAsync(ct);
+            return todos
+                .OrderByDescending(d => d.CriadoEm)
+                .ThenByDescending(d => d.Id)
+                .Take(LimiteAtencao)
+                .Select(d => (object)new
+                {
+                    d.Id,
+                    d.TenantId,
+                    d.TenantRazaoSocial,
+                    tipo = d.Tipo.ToString(),
+                    status = d.Status.ToString(),
+                    d.Ambiente,
+                    d.Serie,
+                    d.Numero,
+                    d.CriadoEm,
+                })
+                .ToList();
+        }
+
+        var recentes = await query
+            .OrderByDescending(d => d.CriadoEm)
+            .ThenByDescending(d => d.Id)
+            .Take(LimiteAtencao)
+            .Select(d => new
+            {
+                d.Id,
+                d.TenantId,
+                TenantRazaoSocial = d.Tenant!.RazaoSocial,
+                Tipo = d.Tipo.ToString(),
+                Status = d.Status.ToString(),
+                Ambiente = d.Ambiente == (short)Ambiente.Producao ? "producao" : "homologacao",
+                d.Serie,
+                d.Numero,
+                d.CriadoEm,
+            })
+            .ToListAsync(ct);
+
+        return recentes
+            .Select(d => (object)new
+            {
+                d.Id,
+                d.TenantId,
+                d.TenantRazaoSocial,
+                tipo = d.Tipo,
+                status = d.Status,
+                d.Ambiente,
+                d.Serie,
+                d.Numero,
+                d.CriadoEm,
+            })
+            .ToList();
     }
 
     /// <summary>Documentos em trânsito — o que está na mão do Worker agora.</summary>

@@ -478,7 +478,16 @@ function AbaCsc({ tenant }: { tenant: Tenant }) {
           />
         </Field>
         <Field label="CSC" htmlFor="csc" hint="Vazio mantém o atual">
-          <Input id="csc" type="password" value={csc} onChange={(e) => setCsc(e.target.value)} placeholder="••••••••" />
+          <Input
+            id="csc"
+            type="password"
+            value={csc}
+            onChange={(e) => setCsc(e.target.value)}
+            placeholder="••••••••"
+            autoComplete="new-password"
+            data-1p-ignore
+            data-lpignore="true"
+          />
         </Field>
       </div>
 
@@ -705,8 +714,11 @@ function AbaCertificados({ tenantId, sandbox }: { tenantId: string; sandbox: boo
     onError: (e) => toast({ tipo: 'erro', titulo: 'Falha na operação', detalhe: e.message }),
   })
 
+  // "Agora" congelado por montagem: Date.now() durante o render é impuro e
+  // faz a contagem de dias oscilar entre re-renders.
+  const [agora] = useState(() => Date.now())
   const diasRestantes = (validoAte: string) =>
-    Math.ceil((new Date(validoAte + 'T00:00:00Z').getTime() - Date.now()) / 86_400_000)
+    Math.ceil((new Date(validoAte + 'T00:00:00Z').getTime() - agora) / 86_400_000)
 
   return (
     <>
@@ -877,7 +889,15 @@ function UploadCertModal({
           />
         </Field>
         <Field label="Senha do certificado" htmlFor="senha-pfx">
-          <Input id="senha-pfx" type="password" value={senha} onChange={(e) => setSenha(e.target.value)} />
+          <Input
+            id="senha-pfx"
+            type="password"
+            value={senha}
+            onChange={(e) => setSenha(e.target.value)}
+            autoComplete="new-password"
+            data-1p-ignore
+            data-lpignore="true"
+          />
         </Field>
       </div>
     </Dialog>
@@ -1008,16 +1028,32 @@ function AbaWebhooks({ tenant }: { tenant: Tenant }) {
           retry próprio (até 8 tentativas). Fora do sandbox, a URL exige https.
         </p>
         <div className="mt-3 grid gap-3 lg:grid-cols-2">
+          {/* autoComplete desligado: um campo texto seguido de password faz o
+              navegador tratar o par como formulário de login e preencher com
+              as credenciais do operador — a URL do webhook virava o e-mail dele
+              e o secret virava a senha do painel. */}
           <Field label="Webhook URL" htmlFor="wh-url">
             <Input
               id="wh-url"
               value={urlAtual}
               onChange={(e) => setUrl(e.target.value)}
               placeholder="https://erp.exemplo.com/hooks/fiscal"
+              autoComplete="off"
+              data-1p-ignore
+              data-lpignore="true"
             />
           </Field>
           <Field label="Webhook secret" htmlFor="wh-secret" hint="Mínimo 16 caracteres. Vazio mantém o atual.">
-            <Input id="wh-secret" type="password" value={secret} onChange={(e) => setSecret(e.target.value)} placeholder="••••••••" />
+            <Input
+              id="wh-secret"
+              type="password"
+              value={secret}
+              onChange={(e) => setSecret(e.target.value)}
+              placeholder="••••••••"
+              autoComplete="new-password"
+              data-1p-ignore
+              data-lpignore="true"
+            />
           </Field>
         </div>
         {erro && <p className="mt-2 text-xs text-rejeitado">{erro}</p>}
@@ -1071,7 +1107,7 @@ function AbaWebhooks({ tenant }: { tenant: Tenant }) {
                   <tr key={w.id}>
                     <Td className="font-mono text-[11px]">{w.tipoEvento}</Td>
                     <Td>
-                      <StatusBadge status={w.status} />
+                      <StatusBadge status={w.status} dominio="entrega" />
                     </Td>
                     <Td className="text-center text-xs tabular">{w.tentativas}</Td>
                     <Td className="text-xs tabular">{w.ultimoStatusCode ?? '—'}</Td>

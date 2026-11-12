@@ -345,4 +345,60 @@ public class AdminBuscaDashboardTests : IClassFixture<AdminIntegracaoTests.Facto
         (await client.GetAsync("/v1/admin/dashboard")).StatusCode
             .Should().Be(HttpStatusCode.Unauthorized);
     }
+
+    /// <summary>
+    /// A fila de transmissão tem 4 estados. O "ver todos" do dashboard precisa
+    /// mostrar todos eles — filtrar só por PENDENTE escondia as contingências,
+    /// que são justamente as que mais precisam de atenção.
+    /// </summary>
+    [Fact]
+    public async Task Filtro_de_status_aceita_lista_separada_por_virgula()
+    {
+        var tenant = await CriarTenantAsync("Tenant Multi Status LTDA");
+        await CriarDocAsync(tenant, StatusDocumento.PENDENTE, 11001);
+        await CriarDocAsync(tenant, StatusDocumento.CONTINGENCIA, 11002);
+        await CriarDocAsync(tenant, StatusDocumento.AUTORIZADA, 11003);
+
+        var client = await AdminAsync();
+        var body = await (await client.GetAsync(
+                $"/v1/admin/documentos-fiscais?tenantId={tenant.Id}&status=PENDENTE,CONTINGENCIA"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+
+        body.GetProperty("total").GetInt32().Should().Be(2);
+        var statuses = body.GetProperty("itens").EnumerateArray()
+            .Select(d => d.GetProperty("status").GetString()).ToList();
+        statuses.Should().Contain("PENDENTE");
+        statuses.Should().Contain("CONTINGENCIA");
+        statuses.Should().NotContain("AUTORIZADA");
+    }
+
+    [Fact]
+    public async Task Filtro_de_status_com_valor_invalido_na_lista_retorna_422()
+    {
+        var client = await AdminAsync();
+        var resp = await client.GetAsync("/v1/admin/documentos-fiscais?status=PENDENTE,NAO_EXISTE");
+
+        resp.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    /// <summary>A emissão recente alimenta a tabela da landing page.</summary>
+    [Fact]
+    public async Task Dashboard_traz_emissao_recente_com_identidade_do_documento()
+    {
+        var tenant = await CriarTenantAsync("Tenant Emissao Recente LTDA");
+        await CriarDocAsync(tenant, StatusDocumento.AUTORIZADA, 12001);
+
+        var client = await AdminAsync();
+        var body = await (await client.GetAsync("/v1/admin/dashboard"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+
+        var recentes = body.GetProperty("emissaoRecente").EnumerateArray().ToList();
+        recentes.Should().NotBeEmpty();
+
+        var doTenant = recentes.First(d => d.GetProperty("tenantId").GetGuid() == tenant.Id);
+        doTenant.GetProperty("tenantRazaoSocial").GetString().Should().Be("Tenant Emissao Recente LTDA");
+        doTenant.GetProperty("numero").GetInt64().Should().Be(12001);
+        doTenant.GetProperty("tipo").GetString().Should().NotBeNullOrEmpty();
+        doTenant.GetProperty("status").GetString().Should().NotBeNullOrEmpty();
+    }
 }

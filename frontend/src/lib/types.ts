@@ -207,7 +207,8 @@ export interface NotaRecebida {
   tenantId: string
   tenantRazaoSocial: string
   chave: string
-  nsu: number
+  /** NSU da distribuição DFe — vem como string de 15 dígitos com zeros. */
+  nsu: string
   ambiente: string
   cnpjEmitente: string
   nomeEmitente: string
@@ -252,6 +253,21 @@ export interface Dashboard {
   webhooksEmFalha?: AlertaWebhook[]
   /** Rejeições recentes, com o motivo da SEFAZ. */
   rejeicoesRecentes?: AlertaRejeicao[]
+  /** Últimos documentos, de qualquer status. */
+  emissaoRecente?: EmissaoRecenteItem[]
+}
+
+/** Item da tabela de emissão recente do dashboard. */
+export interface EmissaoRecenteItem {
+  id: string
+  tenantId: string
+  tenantRazaoSocial: string
+  tipo: string
+  status: string
+  ambiente: string
+  serie: number | null
+  numero: number | null
+  criadoEm: string
 }
 
 /** Item de alerta do dashboard — sempre com o link para agir. */

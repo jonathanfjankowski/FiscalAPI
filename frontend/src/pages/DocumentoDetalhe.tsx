@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react'
+import { useMemo, useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { Link, useParams } from 'react-router-dom'
 import { ArrowLeft, Download, FileText, RefreshCw, ScrollText, XCircle } from 'lucide-react'
@@ -240,7 +240,7 @@ export default function DocumentoDetalhe() {
                     <span className="text-[13px] text-ink">
                       {e.tipo === 'CANCELAMENTO' ? 'Cancelamento' : e.tipo === 'CCE' ? 'Carta de correção' : e.tipo}
                     </span>
-                    <StatusBadge status={e.status} />
+                    <StatusBadge status={e.status} dominio="evento" />
                   </div>
                   {e.motivo && <p className="mt-1 text-[11px] text-ink-muted">{e.motivo}</p>}
                   <div className="mt-1.5 flex flex-wrap gap-x-4 gap-y-1 text-[10px] text-ink-faint">
@@ -298,6 +298,11 @@ export default function DocumentoDetalhe() {
         }}
       />
       <ModalReenviar
+        // key por documento: navegar de A para B não remonta a página, e sem
+        // isto o editor de B mostraria o payload de A — reenviar B com os
+        // itens de A é erro fiscal grave. A key remonta o modal (estado
+        // fresco) sem precisar de setState dentro de um effect.
+        key={id}
         open={modalReenviar}
         onClose={() => setModalReenviar(false)}
         documentoId={id}
@@ -473,14 +478,6 @@ function ModalReenviar({
   const [json, setJson] = useState(() => formatar(payloadOriginal))
   const [erroSintaxe, setErroSintaxe] = useState<string | null>(null)
   const [idem] = useState(() => crypto.randomUUID())
-
-  // Navegar entre documentos (/documentos/A -> /documentos/B) não remonta a
-  // página: sem isto, o editor do documento B mostraria o payload do A — e
-  // reenviar B com os itens de A é erro fiscal grave.
-  useEffect(() => {
-    setJson(formatar(payloadOriginal))
-    setErroSintaxe(null)
-  }, [payloadOriginal, documentoId])
 
   const mut = useMutation({
     mutationFn: async () => {

@@ -48,7 +48,7 @@ public interface IRepositorioAuditoria
     /// no que lê.
     /// </summary>
     Task<(int Total, IReadOnlyList<Auditoria> Itens)> ListarAsync(
-        Guid? tenantId, string? acao, Guid? recursoId,
+        Guid? tenantId, string? acao, string? recursoId,
         DateTimeOffset? de, DateTimeOffset? ate,
         int pagina, int tamanhoPagina, CancellationToken ct);
 }

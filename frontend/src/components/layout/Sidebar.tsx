@@ -14,6 +14,8 @@ import {
 import { cn } from '../../lib/utils'
 import { useSidebar } from '../../hooks/useSidebar'
 import { useTrafego } from '../../hooks/useTrafego'
+import { useQuery } from '@tanstack/react-query'
+import { api } from '../../lib/api'
 import { Tooltip } from '../ui'
 
 // ==========================================================================
@@ -43,9 +45,28 @@ export function Sidebar() {
   const { expandida, alternar } = useSidebar()
   const { registros } = useTrafego()
 
-  // Contador de falhas no destino Tráfego — o operador vê que algo quebrou
-  // sem precisar abrir a tela.
-  const falhas = registros.filter((r) => !r.ok).length
+  // Contadores nos destinos: o operador vê a fila e as falhas de qualquer
+  // tela, sem abrir o dashboard. Mesma queryKey do dashboard — o React Query
+  // deduplica, não há requisição extra.
+  const { data: resumo } = useQuery({
+    queryKey: ['dashboard'],
+    queryFn: api.dashboard,
+    refetchInterval: 15_000,
+    staleTime: 10_000,
+  })
+
+  const falhasTrafego = registros.filter((r) => !r.ok).length
+  const naFila = resumo?.fila?.length ?? 0
+  const atencao =
+    (resumo?.certificadosVencendo?.length ?? 0) +
+    (resumo?.webhooksEmFalha?.length ?? 0) +
+    (resumo?.rejeicoesRecentes?.length ?? 0)
+
+  const contadores: Record<string, { n: number; alerta: boolean }> = {
+    '/documentos': { n: naFila, alerta: false },
+    '/auditoria': { n: atencao, alerta: atencao > 0 },
+    '/trafego': { n: falhasTrafego, alerta: true },
+  }
 
   return (
     <nav
@@ -76,7 +97,9 @@ export function Sidebar() {
 
       <ul className="flex flex-1 flex-row items-center justify-around gap-0.5 overflow-x-auto px-1 sm:flex-col sm:items-stretch sm:justify-start sm:gap-0.5 sm:overflow-x-visible sm:overflow-y-auto sm:px-2 sm:py-2">
         {NAV.map((item) => {
-          const contador = item.to === '/trafego' && falhas > 0 ? falhas : undefined
+          const c = contadores[item.to]
+          const contador = c && c.n > 0 ? c.n : undefined
+          const alerta = c?.alerta ?? false
 
           const conteudo = ({ isActive }: { isActive: boolean }) => (
             <>
@@ -93,7 +116,10 @@ export function Sidebar() {
                 <item.icone className="h-4 w-4" aria-hidden />
                 {contador !== undefined && (
                   <span
-                    className="absolute -top-1.5 -right-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full bg-rejeitado px-1 text-[9px] font-semibold text-white tabular"
+                    className={cn(
+                      'absolute -top-1.5 -right-1.5 flex h-3.5 min-w-3.5 items-center justify-center rounded-full px-1 text-[9px] font-semibold text-white tabular',
+                      alerta ? 'bg-rejeitado' : 'bg-carimbo',
+                    )}
                     aria-hidden
                   >
                     {contador > 99 ? '99+' : contador}
@@ -113,12 +139,14 @@ export function Sidebar() {
               >
                 {item.label}
                 {contador !== undefined && expandida && (
-                  <span className="ml-1.5 text-[10px] text-rejeitado tabular">{contador}</span>
+                  <span className={cn('ml-1.5 text-[10px] tabular', alerta ? 'text-rejeitado' : 'text-carimbo')}>
+                    {contador}
+                  </span>
                 )}
               </span>
               <span className="sr-only">
                 {item.label}
-                {contador !== undefined ? ` — ${contador} falha(s)` : ''}
+                {contador !== undefined ? ` — ${contador} pendência(s)` : ''}
               </span>
             </>
           )

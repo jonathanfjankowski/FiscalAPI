@@ -160,14 +160,21 @@ public class RepositorioAuditoria : IRepositorioAuditoria
         await _db.Auditoria.AddAsync(auditoria, ct);
 
     public async Task<(int Total, IReadOnlyList<Auditoria> Itens)> ListarAsync(
-        Guid? tenantId, string? acao, Guid? recursoId,
+        Guid? tenantId, string? acao, string? recursoId,
         DateTimeOffset? de, DateTimeOffset? ate,
         int pagina, int tamanhoPagina, CancellationToken ct)
     {
         var query = _db.Auditoria.AsNoTracking();
 
         if (tenantId is not null) query = query.Where(a => a.TenantId == tenantId);
-        if (recursoId is not null) query = query.Where(a => a.RecursoId == recursoId);
+        // Prefixo do GUID: a tabela mostra só os 8 primeiros caracteres, então
+        // exigir o GUID completo tornaria o filtro inútil a partir do que se vê.
+        var prefixoRecurso = recursoId?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrEmpty(prefixoRecurso))
+        {
+            query = query.Where(a => a.RecursoId != null &&
+                a.RecursoId.ToString()!.StartsWith(prefixoRecurso));
+        }
         if (de is not null) query = query.Where(a => a.CriadoEm >= de);
         if (ate is not null) query = query.Where(a => a.CriadoEm <= ate);
 

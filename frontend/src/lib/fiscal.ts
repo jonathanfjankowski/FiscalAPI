@@ -192,3 +192,68 @@ const ESTAGIOS: Record<string, EstagioTrilho> = {
 export function estagioTrilho(status: string): EstagioTrilho {
   return ESTAGIOS[status] ?? ESTAGIO_PADRAO
 }
+
+// ==========================================================================
+// Status de EVENTO fiscal e de ENTREGA de webhook.
+//
+// São máquinas de estado diferentes da do documento: o evento tem
+// PENDENTE → PROCESSANDO → PROCESSADO/REJEITADO/ERRO, e a entrega tem
+// PENDENTE → ENTREGANDO → ENTREGUE/FALHA. Reaproveitar STATUS_LABEL (que é
+// do documento) deixava "FALHA" de webhook cinza e sem rótulo — o operador
+// não distinguia uma entrega falhada de uma pendente.
+// ==========================================================================
+
+export const STATUS_EVENTO_LABEL: Record<string, string> = {
+  PENDENTE: 'Pendente',
+  PROCESSANDO: 'Processando',
+  PROCESSADO: 'Processado',
+  REJEITADO: 'Rejeitado',
+  ERRO: 'Erro',
+}
+
+export const STATUS_EVENTO_COR: Record<string, string> = {
+  PENDENTE: 'text-carimbo bg-carimbo-soft border-carimbo/25',
+  PROCESSANDO: 'text-carimbo bg-carimbo-soft border-carimbo/25',
+  PROCESSADO: 'text-aprovado bg-aprovado-soft border-aprovado/25',
+  REJEITADO: 'text-rejeitado bg-rejeitado-soft border-rejeitado/25',
+  ERRO: 'text-rejeitado bg-rejeitado-soft border-rejeitado/25',
+}
+
+export const STATUS_ENTREGA_LABEL: Record<string, string> = {
+  PENDENTE: 'Pendente',
+  ENTREGANDO: 'Entregando',
+  ENTREGUE: 'Entregue',
+  FALHA: 'Falha',
+}
+
+export const STATUS_ENTREGA_COR: Record<string, string> = {
+  PENDENTE: 'text-carimbo bg-carimbo-soft border-carimbo/25',
+  ENTREGANDO: 'text-carimbo bg-carimbo-soft border-carimbo/25',
+  ENTREGUE: 'text-aprovado bg-aprovado-soft border-aprovado/25',
+  FALHA: 'text-rejeitado bg-rejeitado-soft border-rejeitado/25',
+}
+
+/** Manifestação do destinatário — o nome que o Worker grava, não o código. */
+export const MANIFESTACAO_LABEL: Record<string, string> = {
+  confirmacao: 'Confirmada',
+  ciencia: 'Ciência',
+  desconhecimento: 'Desconhecida',
+  nao_realizacao: 'Não realizada',
+}
+
+/**
+ * Estados finais da manifestação: a SEFAZ não aceita outra depois destes.
+ * "ciencia" NÃO é final — pode ser confirmada ou desconhecida depois.
+ */
+export const MANIFESTACOES_FINAIS = ['confirmacao', 'desconhecimento', 'nao_realizacao']
+
+/**
+ * Cor da manifestação. Confirmada é sucesso; desconhecida e não realizada
+ * são alertas (o destinatário contesta a nota) — nunca verde.
+ */
+export const MANIFESTACAO_COR: Record<string, string> = {
+  confirmacao: 'border-aprovado/30 bg-aprovado-soft text-aprovado',
+  ciencia: 'border-carimbo/25 bg-carimbo-soft text-carimbo',
+  desconhecimento: 'border-contingencia/30 bg-contingencia-soft text-contingencia',
+  nao_realizacao: 'border-rejeitado/30 bg-rejeitado-soft text-rejeitado',
+}

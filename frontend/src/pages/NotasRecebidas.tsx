@@ -2,6 +2,11 @@ import { useState } from 'react'
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query'
 import { FileCode2 } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
+import {
+  MANIFESTACAO_COR,
+  MANIFESTACAO_LABEL,
+  MANIFESTACOES_FINAIS,
+} from '../lib/fiscal'
 import { useEmpresaContexto } from '../hooks/useEmpresaContexto'
 import { formatarCnpj, formatarData, formatarDecimal } from '../lib/format'
 import {
@@ -38,13 +43,6 @@ const MANIFESTACOES: Record<string, { nome: string; exigeJustificativa: boolean 
   '210210': { nome: 'Ciência da operação', exigeJustificativa: false },
   '210220': { nome: 'Desconhecimento da operação', exigeJustificativa: false },
   '210240': { nome: 'Operação não realizada', exigeJustificativa: true },
-}
-
-const NOME_MANIFESTACAO: Record<string, string> = {
-  confirmacao: 'Confirmada',
-  ciencia: 'Ciência',
-  desconhecimento: 'Desconhecida',
-  nao_realizacao: 'Não realizada',
 }
 
 export default function NotasRecebidas() {
@@ -119,8 +117,8 @@ export default function NotasRecebidas() {
                     </Td>
                     <Td>
                       {n.manifestacaoAtual ? (
-                        <Badge className="border-aprovado/30 bg-aprovado-soft text-aprovado">
-                          {NOME_MANIFESTACAO[n.manifestacaoAtual] ?? n.manifestacaoAtual}
+                        <Badge className={MANIFESTACAO_COR[n.manifestacaoAtual]}>
+                          {MANIFESTACAO_LABEL[n.manifestacaoAtual] ?? n.manifestacaoAtual}
                         </Badge>
                       ) : (
                         <span className="text-xs text-ink-faint">pendente</span>
@@ -142,7 +140,17 @@ export default function NotasRecebidas() {
                         >
                           <FileCode2 className="h-3.5 w-3.5" aria-hidden />
                         </Button>
-                        <Button variant="ghost" size="sm" onClick={() => setManifestar({ id: n.id, chave: n.chave })}>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          disabled={!!n.manifestacaoAtual && MANIFESTACOES_FINAIS.includes(n.manifestacaoAtual)}
+                          title={
+                            n.manifestacaoAtual && MANIFESTACOES_FINAIS.includes(n.manifestacaoAtual)
+                              ? 'Nota já manifestada em estado final — a SEFAZ não aceita outra'
+                              : 'Manifestar em nome do destinatário'
+                          }
+                          onClick={() => setManifestar({ id: n.id, chave: n.chave })}
+                        >
                           Manifestar
                         </Button>
                       </div>
@@ -267,11 +275,15 @@ function ModalXml({ notaId, onClose }: { notaId: string; onClose: () => void }) 
         <PageLoading mensagem="Carregando XML…" />
       ) : isError ? (
         <ErrorState
-          titulo="XML completo ainda não sincronizado"
+          titulo={
+            error instanceof ApiError && error.status === 409
+              ? 'XML completo ainda não sincronizado'
+              : 'Não foi possível carregar o XML'
+          }
           detalhe={
             error instanceof ApiError
               ? (error.detail ?? error.message)
-              : 'A distribuição DFe devolveu apenas o resumo. O procNFe chega em ciclos posteriores.'
+              : 'Verifique se a API está rodando.'
           }
         />
       ) : (

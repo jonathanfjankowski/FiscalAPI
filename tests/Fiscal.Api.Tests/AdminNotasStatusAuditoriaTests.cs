@@ -344,4 +344,44 @@ public class AdminNotasStatusAuditoriaTests : IClassFixture<AdminIntegracaoTests
         body.GetProperty("total").GetInt32().Should().Be(0);
         body.GetProperty("itens").GetArrayLength().Should().Be(0);
     }
+
+    /// <summary>
+    /// A tabela mostra só os 8 primeiros caracteres do recurso. Exigir o GUID
+    /// completo tornaria o filtro inútil a partir do que o operador vê.
+    /// </summary>
+    [Fact]
+    public async Task Auditoria_filtra_por_prefixo_do_recurso()
+    {
+        var tenant = await CriarTenantAsync();
+        var recurso = Guid.NewGuid();
+        var prefixo = recurso.ToString()[..8];
+
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<FiscalDbContext>();
+            db.Auditoria.Add(new Auditoria
+            {
+                TenantId = tenant.Id,
+                Acao = "TESTE_PREFIXO",
+                RecursoId = recurso,
+                Detalhe = "{}",
+            });
+            // Outro recurso, com prefixo diferente — não deve aparecer.
+            db.Auditoria.Add(new Auditoria
+            {
+                TenantId = tenant.Id,
+                Acao = "TESTE_PREFIXO",
+                RecursoId = Guid.NewGuid(),
+                Detalhe = "{}",
+            });
+            await db.SaveChangesAsync();
+        }
+
+        var client = await AdminAsync();
+        var body = await (await client.GetAsync($"/v1/admin/auditoria?recursoId={prefixo}"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+
+        body.GetProperty("total").GetInt32().Should().Be(1);
+        body.GetProperty("itens")[0].GetProperty("recursoId").GetGuid().Should().Be(recurso);
+    }
 }

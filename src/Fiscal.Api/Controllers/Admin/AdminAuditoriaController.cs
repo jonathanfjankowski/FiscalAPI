@@ -35,7 +35,7 @@ public class AdminAuditoriaController : ControllerBase
     public async Task<IActionResult> Listar(
         [FromQuery] Guid? tenantId,
         [FromQuery] string? acao,
-        [FromQuery] Guid? recursoId,
+        [FromQuery] string? recursoId,
         [FromQuery] DateTimeOffset? de,
         [FromQuery] DateTimeOffset? ate,
         [FromQuery] int page = 1,

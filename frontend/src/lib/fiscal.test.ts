@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest'
 import {
+  MANIFESTACAO_COR,
+  MANIFESTACAO_LABEL,
+  MANIFESTACOES_FINAIS,
+  STATUS_ENTREGA_COR,
+  STATUS_ENTREGA_LABEL,
+  STATUS_EVENTO_COR,
+  STATUS_EVENTO_LABEL,
   STATUS_COLOR,
   STATUS_LABEL,
   STATUS_TERMINAIS,
@@ -132,5 +139,50 @@ describe('estagioTrilho', () => {
     const est = estagioTrilho('STATUS_INEXISTENTE')
     expect(est.posicao).toBe(3)
     expect(est.cor).toBe('neutro')
+  })
+})
+
+describe('status de evento e de entrega de webhook', () => {
+  it('rotula e colore os estados do evento fiscal', () => {
+    for (const s of ['PENDENTE', 'PROCESSANDO', 'PROCESSADO', 'REJEITADO', 'ERRO']) {
+      expect(STATUS_EVENTO_LABEL[s], `rótulo ausente: ${s}`).toBeTruthy()
+      expect(STATUS_EVENTO_COR[s], `cor ausente: ${s}`).toBeTruthy()
+    }
+  })
+
+  it('FALHA de entrega é vermelha, não neutra', () => {
+    expect(STATUS_ENTREGA_COR.FALHA).toContain('rejeitado')
+    expect(STATUS_ENTREGA_LABEL.FALHA).toBe('Falha')
+  })
+
+  it('ENTREGUE é verde e ENTREGANDO é o acento', () => {
+    expect(STATUS_ENTREGA_COR.ENTREGUE).toContain('aprovado')
+    expect(STATUS_ENTREGA_COR.ENTREGANDO).toContain('carimbo')
+  })
+
+  it('não confunde PROCESSADO (evento) com AUTORIZADA (documento)', () => {
+    expect(STATUS_LABEL.PROCESSADO).toBeUndefined()
+    expect(STATUS_EVENTO_LABEL.PROCESSADO).toBe('Processado')
+  })
+})
+
+describe('manifestação do destinatário', () => {
+  it('só confirmada é verde — contestação nunca', () => {
+    expect(MANIFESTACAO_COR.confirmacao).toContain('aprovado')
+    expect(MANIFESTACAO_COR.desconhecimento).toContain('contingencia')
+    expect(MANIFESTACAO_COR.nao_realizacao).toContain('rejeitado')
+    expect(MANIFESTACAO_COR.ciencia).not.toContain('aprovado')
+  })
+
+  it('ciência não é estado final — pode virar confirmação depois', () => {
+    expect(MANIFESTACOES_FINAIS).not.toContain('ciencia')
+    expect(MANIFESTACOES_FINAIS).toContain('confirmacao')
+    expect(MANIFESTACOES_FINAIS).toContain('desconhecimento')
+    expect(MANIFESTACOES_FINAIS).toContain('nao_realizacao')
+  })
+
+  it('usa o nome que o Worker grava, não o código do evento', () => {
+    expect(MANIFESTACAO_LABEL.confirmacao).toBe('Confirmada')
+    expect(MANIFESTACAO_LABEL['210200']).toBeUndefined()
   })
 })

@@ -68,6 +68,10 @@ public class AdminInutilizacoesController : ControllerBase
             return Problem(statusCode: 422, title: "Modelo inválido",
                 detail: "Inutilização aplica-se apenas a NF-e (55) e NFC-e (65).");
 
+        if (req.NumeroInicial < 1)
+            return Problem(statusCode: 422, title: "Faixa inválida",
+                detail: "numeroInicial deve ser >= 1 — a numeração fiscal começa em 1.");
+
         if (req.NumeroFinal < req.NumeroInicial)
             return Problem(statusCode: 422, title: "Faixa inválida",
                 detail: "numeroFinal deve ser >= numeroInicial.");
@@ -106,7 +110,19 @@ public class AdminInutilizacoesController : ControllerBase
             CriadoEm = DateTimeOffset.UtcNow
         };
         await _eventoRepo.AdicionarAsync(evento, ct);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Corrida: outra request com a mesma Idempotency-Key gravou
+            // primeiro — devolve a vencedora (replay) em vez de 500.
+            var vencedora = await _eventoRepo.ObterPorIdempotencyAsync(
+                tenant.Id, null, EventoInutilizacao, idempotencyKey, ct);
+            if (vencedora is null) throw;
+            return Accepted($"/v1/admin/inutilizacoes/{vencedora.Id}", ParaResponse(vencedora));
+        }
 
         _jobs.Enqueue<ProcessarEventoJob>(j => j.ExecutarAsync(evento.Id, CancellationToken.None));
 
@@ -134,14 +150,34 @@ public class AdminInutilizacoesController : ControllerBase
         return Ok(ParaResponse(evento));
     }
 
-    private static object ParaResponse(EventoFiscal e) => new
+    private static object ParaResponse(EventoFiscal e)
     {
-        eventoId = e.Id,
-        tipo = e.TipoEvento,
-        e.Status,
-        e.CriadoEm,
-        e.MotivoStatus,
-        e.Tentativas,
-        e.ProximaTentativaEm,
-    };
+        // DadosEvento guarda a faixa como JSON. Sem devolvê-la o operador não
+        // consegue ver O QUE foi inutilizado — só que algo foi.
+        InutilizacaoDados? faixa = null;
+        if (!string.IsNullOrWhiteSpace(e.DadosEvento))
+        {
+            try { faixa = JsonSerializer.Deserialize<InutilizacaoDados>(e.DadosEvento); }
+            catch (JsonException) { faixa = null; }
+        }
+
+        return new
+        {
+            eventoId = e.Id,
+            tipo = e.TipoEvento,
+            e.Status,
+            e.CriadoEm,
+            motivo = e.MotivoStatus,
+            e.Tentativas,
+            e.ProximaTentativaEm,
+            e.Protocolo,
+            tenantId = e.TenantId,
+            justificativa = e.Justificativa,
+            modelo = faixa?.Modelo,
+            serie = faixa?.Serie,
+            numeroInicial = faixa?.NumeroInicial,
+            numeroFinal = faixa?.NumeroFinal,
+            ambiente = faixa?.Ambiente,
+        };
+    }
 }

@@ -1,6 +1,14 @@
 import { type ReactNode } from 'react'
 import { cn } from '../../lib/utils'
-import { STATUS_COLOR, STATUS_LABEL, STATUS_PONTO } from '../../lib/fiscal'
+import {
+  STATUS_COLOR,
+  STATUS_ENTREGA_COR,
+  STATUS_ENTREGA_LABEL,
+  STATUS_EVENTO_COR,
+  STATUS_EVENTO_LABEL,
+  STATUS_LABEL,
+  STATUS_PONTO,
+} from '../../lib/fiscal'
 
 // ==========================================================================
 // Etiquetas e ponto de status
@@ -35,11 +43,30 @@ export function Badge({
   )
 }
 
-/** Etiqueta de status com a cor semântica do desfecho. */
-export function StatusBadge({ status }: { status: string }) {
+/**
+ * Etiqueta de status.
+ *
+ * `dominio` escolhe a máquina de estados: documento (padrão), evento fiscal
+ * ou entrega de webhook. São máquinas diferentes — usar a do documento para
+ * uma entrega deixava "FALHA" cinza e sem rótulo.
+ */
+export function StatusBadge({
+  status,
+  dominio = 'documento',
+}: {
+  status: string
+  dominio?: 'documento' | 'evento' | 'entrega'
+}) {
+  const [rotulos, cores] =
+    dominio === 'evento'
+      ? [STATUS_EVENTO_LABEL, STATUS_EVENTO_COR]
+      : dominio === 'entrega'
+        ? [STATUS_ENTREGA_LABEL, STATUS_ENTREGA_COR]
+        : [STATUS_LABEL, STATUS_COLOR]
+
   return (
-    <Badge className={cn('border', STATUS_COLOR[status] ?? 'border-line-strong bg-surface-sunken text-ink-muted')}>
-      {STATUS_LABEL[status] ?? status}
+    <Badge className={cn('border', cores[status] ?? 'border-line-strong bg-surface-sunken text-ink-muted')}>
+      {rotulos[status] ?? status}
     </Badge>
   )
 }

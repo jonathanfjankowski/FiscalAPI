@@ -303,13 +303,15 @@ function NovaEmpresaModal({
         <>
           {erro && <p className="mr-auto text-xs text-rejeitado">{erro}</p>}
           <Button onClick={onClose}>Cancelar</Button>
-          <Button variant="primary" loading={mut.isPending} onClick={() => mut.mutate()}>
+          {/* type=submit + form: o clique passa pela mesma validação do Enter.
+              Chamar mut.mutate() direto pulava as checagens de CNPJ/UF. */}
+          <Button type="submit" form="form-nova-empresa" variant="primary" loading={mut.isPending}>
             Criar empresa
           </Button>
         </>
       }
     >
-      <form onSubmit={submeter} className="grid grid-cols-2 gap-3">
+      <form id="form-nova-empresa" onSubmit={submeter} className="grid grid-cols-2 gap-3">
         <Field label="CNPJ" htmlFor="cnpj" required>
           <Input
             id="cnpj"

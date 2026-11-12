@@ -1033,22 +1033,22 @@ da API key), e o ambiente é derivado de `Tenant.AmbientePadrao`.
 
 | Método | Rota | Função |
 |---|---|---|
-| `GET` | `/v1/admin/documentos-fiscais` | Listagem cross-tenant. Filtros: `tenantId`, `status`, `modelo`, `de`, `ate`, **`q`** (chave/número/razão social), **`ordenarPor`** (`criadoEm`\|`atualizadoEm`\|`numero`\|`serie`), **`ordem`** (`asc`\|`desc`), `page`, `pageSize` (máx 200) |
+| `GET` | `/v1/admin/documentos-fiscais` | Listagem cross-tenant. Filtros: `tenantId`, **`status`** (um valor ou vários separados por vírgula — ex.: `PENDENTE,PROCESSANDO,CONTINGENCIA`), `modelo`, `de`, `ate`, **`q`** (chave/número/razão social), **`ordenarPor`** (`criadoEm`\|`atualizadoEm`\|`numero`\|`serie`), **`ordem`** (`asc`\|`desc`), `page`, `pageSize` (máx 200) |
 | `GET` | `/v1/admin/documentos-fiscais/{id}` | Detalhe, incluindo `payloadEntrada` (base do reenvio) |
 | `GET` | `/v1/admin/documentos-fiscais/{id}/pdf` | **DANFE/DANFCe/DANFSe.** `409` se o status não for `AUTORIZADA`/`CANCELADA` |
 | `GET` | `/v1/admin/documentos-fiscais/{id}/eventos` | Eventos do documento (cancelamento, CC-e) com `status`, `motivo`, `protocolo`, `tentativas`, `xmlDisponivel` |
 | `POST` | `/v1/admin/documentos-fiscais/{id}/reenviar` | Reenvio com payload corrigido — **mantém o número**. `409` se não for `REJEITADA`/`DENEGADA`/`ERRO_INTERNO`/`FALHA_EMISSAO`. Não se aplica a NFS-e (payload DPS) |
 | `POST` | `/v1/admin/documentos-fiscais/{id}/cancelamento` | Cancelamento (exige `AUTORIZADA`, modelo 55/65) |
 | `POST` | `/v1/admin/documentos-fiscais/{id}/carta-correcao` | CC-e (só modelo 55) |
-| `POST` | `/v1/admin/inutilizacoes` | Inutiliza faixa. Body: `tenantId`, `modelo`, `serie`, `numeroInicial`, `numeroFinal`, `justificativa` (15–1000). Ambiente derivado do tenant |
-| `GET` | `/v1/admin/inutilizacoes/{id}` | Estado da inutilização |
+| `POST` | `/v1/admin/inutilizacoes` | Inutiliza faixa. Body: `tenantId`, `modelo` (55\|65), `serie`, `numeroInicial` (**≥ 1**), `numeroFinal` (≥ inicial), `justificativa` (15–1000). Ambiente derivado do tenant. `Idempotency-Key` recomendada — replay devolve o mesmo evento |
+| `GET` | `/v1/admin/inutilizacoes/{id}` | Estado da inutilização **com a faixa** (`modelo`, `serie`, `numeroInicial`, `numeroFinal`, `ambiente`), `justificativa`, `protocolo` e `motivo` |
 | `GET` | `/v1/admin/notas-recebidas` | Distribuição DFe cross-tenant (`tenantId`, `page`, `pageSize`) |
 | `GET` | `/v1/admin/notas-recebidas/{id}` | Detalhe da nota recebida |
 | `GET` | `/v1/admin/notas-recebidas/{id}/xml-completo` | procNFe. `409` se só o resumo foi sincronizado |
 | `POST` | `/v1/admin/notas-recebidas/{id}/manifestacao` | Manifestação do destinatário (210200/210210/210220/210240) |
 | `GET` | `/v1/admin/status-servico?tenantId=` | Status do serviço SEFAZ da UF da empresa (`modelo`, `ambiente` opcionais) |
-| `GET` | `/v1/admin/auditoria` | **Trilha de auditoria, somente leitura.** Filtros: `tenantId`, `acao` (parcial), `recursoId`, `de`, `ate`, `page`, `pageSize`. A tabela é append-only por trigger |
-| `GET` | `/v1/admin/dashboard` | Contagens + listas de atenção: `fila`, `certificadosVencendo`, `webhooksEmFalha`, `rejeicoesRecentes` |
+| `GET` | `/v1/admin/auditoria` | **Trilha de auditoria, somente leitura.** Filtros: `tenantId`, `acao` (parcial), **`recursoId`** (aceita **prefixo** do GUID — a UI mostra só os 8 primeiros caracteres), `de`, `ate`, `page`, `pageSize`. A tabela é append-only por trigger |
+| `GET` | `/v1/admin/dashboard` | Contagens + listas de atenção: `fila`, `certificadosVencendo`, `webhooksEmFalha`, `rejeicoesRecentes`, **`emissaoRecente`**. Em Postgres os agregados rodam no SQL (COUNT/GROUP BY) |
 
 Rotas administrativas de empresa, API keys, certificados e chave master já
 existiam e seguem inalteradas (`/v1/admin/tenants`, `…/api-keys`,

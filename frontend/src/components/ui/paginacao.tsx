@@ -10,7 +10,7 @@ import { Button, Select } from '../ui'
 // anterior fixava 50 sem opção.
 // ==========================================================================
 
-export const TAMANHOS_PAGINA = [25, 50, 100, 200] as const
+const TAMANHOS_PAGINA = [25, 50, 100, 200] as const
 
 export function Paginacao({
   total,

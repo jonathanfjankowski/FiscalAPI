@@ -1,11 +1,12 @@
 import { useQuery } from '@tanstack/react-query'
-import { Link } from 'react-router-dom'
+import { Link, useNavigate } from 'react-router-dom'
 import { ArrowRight, CircleAlert, FileText, ShieldAlert, Webhook } from 'lucide-react'
 import { api, ApiError } from '../lib/api'
 import { STATUS_LABEL } from '../lib/fiscal'
 import { formatarData, formatarDataCurta } from '../lib/format'
 import { cn } from '../lib/utils'
 import {
+  AmbienteBadge,
   Badge,
   Button,
   ErrorState,
@@ -25,10 +26,12 @@ import { PageHeader } from '../components/ui/estados'
 // precisa de ação (certificados, webhooks, rejeições) e a emissão recente.
 // As contagens viram uma fita compacta no topo.
 //
-// Cada seção falha sozinha — uma consulta que cai não derruba a página.
+// Uma única consulta alimenta a página: se ela cai, a tela inteira mostra
+// ErrorState com retry, em vez de meia página vazia sem explicação.
 // ==========================================================================
 
 export default function VisaoGeral() {
+  const navigate = useNavigate()
   const { data, isLoading, isError, error, refetch } = useQuery({
     queryKey: ['dashboard'],
     queryFn: api.dashboard,
@@ -88,7 +91,7 @@ export default function VisaoGeral() {
             {fila.length > 0 && <Badge className="border-carimbo/25 bg-carimbo-soft text-carimbo">{fila.length}</Badge>}
           </div>
           <Button asChild variant="ghost" size="sm">
-            <Link to="/documentos?status=PENDENTE">
+            <Link to="/documentos?status=PENDENTE,PROCESSANDO,CONTINGENCIA,CANCELAMENTO_PENDENTE">
               Ver todos
               <ArrowRight className="h-3 w-3" aria-hidden />
             </Link>
@@ -218,6 +221,66 @@ export default function VisaoGeral() {
           </div>
         )}
       </section>
+
+      {/* ---------- Emissão recente ---------- */}
+      {(data.emissaoRecente?.length ?? 0) > 0 && (
+        <section className="mb-4 rounded-lg border border-line bg-surface">
+          <header className="flex items-center justify-between gap-3 border-b border-line px-4 py-2.5">
+            <h2 className="text-[13px] font-semibold text-ink">Emissão recente</h2>
+            <Button asChild variant="ghost" size="sm">
+              <Link to="/documentos">
+                Ver todos
+                <ArrowRight className="h-3 w-3" aria-hidden />
+              </Link>
+            </Button>
+          </header>
+          <Table label="Documentos emitidos recentemente">
+            <thead>
+              <tr>
+                <Th className="w-52">Documento</Th>
+                <Th>Empresa</Th>
+                <Th className="w-40">Situação</Th>
+                <Th className="w-32">Ambiente</Th>
+                <Th className="w-36">Criado em</Th>
+              </tr>
+            </thead>
+            <tbody>
+              {data.emissaoRecente!.map((d) => (
+                <tr
+                  key={d.id}
+                  onClick={() => navigate(`/documentos/${d.id}`)}
+                  className="group cursor-pointer transition-colors hover:bg-surface-sunken/60"
+                >
+                  <Td>
+                    <div className="flex items-center gap-2">
+                      <Link
+                        to={`/documentos/${d.id}`}
+                        onClick={(e) => e.stopPropagation()}
+                        className="font-mono text-[13px] font-semibold text-ink tabular group-hover:text-carimbo hover:underline"
+                      >
+                        {d.serie !== null ? `${d.serie}/${String(d.numero ?? 0).padStart(9, '0')}` : '—'}
+                      </Link>
+                      <span className="shrink-0 rounded border border-line-strong bg-surface-sunken px-1.5 py-0.5 text-[10px] text-ink-muted">
+                        {d.tipo === 'NFE' ? 'NF-e' : d.tipo === 'NFCE' ? 'NFC-e' : d.tipo === 'NFSE' ? 'NFS-e' : d.tipo}
+                      </span>
+                    </div>
+                  </Td>
+                  <Td className="max-w-64 truncate text-xs" title={d.tenantRazaoSocial}>
+                    {d.tenantRazaoSocial}
+                  </Td>
+                  <Td>
+                    <StatusDot status={d.status} withLabel />
+                  </Td>
+                  <Td>
+                    <AmbienteBadge ambiente={d.ambiente} />
+                  </Td>
+                  <Td className="text-xs text-ink-muted tabular">{formatarData(d.criadoEm)}</Td>
+                </tr>
+              ))}
+            </tbody>
+          </Table>
+        </section>
+      )}
 
       {/* ---------- Distribuição por status ---------- */}
       {data.porStatus.length > 0 && (

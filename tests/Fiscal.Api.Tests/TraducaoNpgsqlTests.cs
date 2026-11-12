@@ -182,6 +182,73 @@ public class TraducaoNpgsqlTests
     }
 
     [Fact]
+    public void Auditoria_filtro_por_prefixo_de_guid_traduz()
+    {
+        using var db = ContextoNpgsql();
+
+        // A tabela mostra só os 8 primeiros caracteres do recurso, então o
+        // filtro aceita prefixo. Precisa traduzir: Guid -> texto no Npgsql.
+        var prefixo = "b3016deb";
+        var query = db.Auditoria.AsNoTracking()
+            .Where(a => a.RecursoId != null && a.RecursoId.ToString()!.StartsWith(prefixo));
+
+        query.ToQueryString().Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public void Documentos_filtro_por_lista_de_status_traduz()
+    {
+        using var db = ContextoNpgsql();
+
+        // A fila tem 4 estados; "ver todos" filtra por todos de uma vez.
+        var statuses = new List<StatusDocumento>
+        {
+            StatusDocumento.PENDENTE,
+            StatusDocumento.PROCESSANDO,
+            StatusDocumento.CONTINGENCIA,
+            StatusDocumento.CANCELAMENTO_PENDENTE,
+        };
+        var query = db.DocumentosFiscais.AsNoTracking()
+            .Where(d => statuses.Contains(d.Status));
+
+        query.ToQueryString().Should().NotBeNullOrEmpty();
+    }
+
+    [Fact]
+    public void Dashboard_agregados_no_sql_traduzem()
+    {
+        using var db = ContextoNpgsql();
+        var inicio = DateTimeOffset.UtcNow.Date;
+
+        // O dashboard é a landing page e polla a cada 15s: os agregados têm
+        // que rodar no banco, não trazer a tabela para a memória.
+        db.DocumentosFiscais.AsNoTracking()
+            .Where(d => d.CriadoEm >= new DateTimeOffset(inicio, TimeSpan.Zero))
+            .ToQueryString().Should().NotBeNullOrEmpty();
+
+        var grupos = db.DocumentosFiscais.AsNoTracking()
+            .GroupBy(d => d.Status)
+            .Select(g => new { Status = g.Key, Total = g.Count() });
+        grupos.ToQueryString().Should().Contain("GROUP BY");
+    }
+
+    [Fact]
+    public void Dashboard_emissao_recente_ordena_e_limita_no_sql()
+    {
+        using var db = ContextoNpgsql();
+
+        var sql = db.DocumentosFiscais.AsNoTracking()
+            .OrderByDescending(d => d.CriadoEm)
+            .ThenByDescending(d => d.Id)
+            .Take(20)
+            .Select(d => new { d.Id, d.Numero, Nome = d.Tenant!.RazaoSocial })
+            .ToQueryString();
+
+        sql.Should().Contain("ORDER BY");
+        sql.Should().Contain("LIMIT");
+    }
+
+    [Fact]
     public void Certificados_vencendo_por_DateOnly_traduz()
     {
         using var db = ContextoNpgsql();
