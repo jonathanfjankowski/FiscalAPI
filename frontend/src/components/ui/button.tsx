@@ -43,28 +43,35 @@ export const Button = forwardRef<HTMLButtonElement, ButtonProps>(function Button
   { variant = 'secondary', size = 'md', loading, className, children, disabled, asChild, icon, ...rest },
   ref,
 ) {
-  const Comp = asChild ? Slot : 'button'
+  const classes = cn(
+    'inline-flex shrink-0 items-center justify-center rounded font-medium transition-colors',
+    'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-carimbo',
+    'disabled:pointer-events-none disabled:opacity-50',
+    BUTTON_SIZES[size],
+    BUTTON_VARIANTS[variant],
+    className,
+  )
+
+  // Com asChild o Slot exige UM único filho: não injeta spinner/ícone, que
+  // virariam um segundo nó e quebrariam o Slot ("Expected a single React
+  // element child").
+  if (asChild) {
+    return (
+      <Slot ref={ref} className={classes} {...rest}>
+        {children}
+      </Slot>
+    )
+  }
 
   return (
-    <Comp
+    <button
       ref={ref}
-      className={cn(
-        'inline-flex shrink-0 items-center justify-center rounded font-medium transition-colors',
-        'focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-carimbo',
-        'disabled:pointer-events-none disabled:opacity-50',
-        BUTTON_SIZES[size],
-        BUTTON_VARIANTS[variant],
-        className,
-      )}
+      className={classes}
       disabled={disabled || loading}
       {...rest}
     >
-      {loading ? (
-        <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden />
-      ) : (
-        icon
-      )}
+      {loading ? <Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> : icon}
       {children}
-    </Comp>
+    </button>
   )
 })

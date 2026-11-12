@@ -153,22 +153,30 @@ public class AdminDocumentosController : ControllerBase
         }
         else
         {
-            // Postgres: ordenação e paginação no banco.
-            var ordenada = (campoOrdenacao, descendente) switch
+            // Postgres: ordenar TEM que ser sobre as colunas da entidade, antes
+            // da projeção para record — o EF não traduz OrderBy sobre um
+            // record construído (tentar gerava 500 "could not be translated").
+            IOrderedQueryable<DocumentoFiscal> ordenada = (campoOrdenacao, descendente) switch
             {
-                ("atualizadoEm", true) => projecao.OrderByDescending(d => d.AtualizadoEm),
-                ("atualizadoEm", false) => projecao.OrderBy(d => d.AtualizadoEm),
-                ("numero", true) => projecao.OrderByDescending(d => d.Numero),
-                ("numero", false) => projecao.OrderBy(d => d.Numero),
-                ("serie", true) => projecao.OrderByDescending(d => d.Serie),
-                ("serie", false) => projecao.OrderBy(d => d.Serie),
-                (_, false) => projecao.OrderBy(d => d.CriadoEm),
-                _ => projecao.OrderByDescending(d => d.CriadoEm),
+                ("atualizadoEm", true) => query.OrderByDescending(d => d.AtualizadoEm),
+                ("atualizadoEm", false) => query.OrderBy(d => d.AtualizadoEm),
+                ("numero", true) => query.OrderByDescending(d => d.Numero),
+                ("numero", false) => query.OrderBy(d => d.Numero),
+                ("serie", true) => query.OrderByDescending(d => d.Serie),
+                ("serie", false) => query.OrderBy(d => d.Serie),
+                (_, false) => query.OrderBy(d => d.CriadoEm),
+                _ => query.OrderByDescending(d => d.CriadoEm),
             };
 
             itens = await ordenada
                 .Skip((page - 1) * pageSize)
                 .Take(pageSize)
+                .Select(d => new AdminDocListItem(
+                    d.Id, d.TenantId, d.Tenant!.RazaoSocial,
+                    d.Tipo.ToString(), d.Status.ToString(),
+                    d.Ambiente == (short)Ambiente.Producao ? "producao" : "homologacao",
+                    d.Modelo, d.Serie, d.Numero, d.ChaveAcesso, d.MotivoStatus,
+                    d.CriadoEm, d.AtualizadoEm))
                 .ToListAsync(ct);
         }
 
@@ -225,7 +233,10 @@ public class AdminDocumentosController : ControllerBase
             doc.ModoContingencia,
             doc.ProximaTentativaEm,
             doc.CriadoEm,
-            doc.AtualizadoEm
+            doc.AtualizadoEm,
+            // Payload original: base do reenvio com correção (o operador
+            // ajusta o que a SEFAZ rejeitou, não redigita a nota inteira).
+            payloadEntrada = doc.PayloadEntrada
         });
     }
 
