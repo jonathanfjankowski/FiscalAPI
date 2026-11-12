@@ -3,8 +3,8 @@ import { AppShell } from './components/layout/AppShell'
 import { useAuth } from './hooks/useAuth'
 import Login from './pages/Login'
 import Dashboard from './pages/Dashboard'
-import Tenants from './pages/Tenants'
-import TenantDetail from './pages/TenantDetail'
+import Empresas from './pages/Empresas'
+import EmpresaDetalhe from './pages/EmpresaDetalhe'
 import Documentos from './pages/Documentos'
 import DocumentoDetalhe from './pages/DocumentoDetalhe'
 import Playground from './pages/Playground'
@@ -32,11 +32,11 @@ export default function App() {
         }
       >
         <Route path="/" element={<Dashboard />} />
-        <Route path="/empresas" element={<Tenants />} />
-        <Route path="/empresas/:id" element={<TenantDetail />} />
+        <Route path="/empresas" element={<Empresas />} />
+        <Route path="/empresas/:id" element={<EmpresaDetalhe />} />
         {/* Alias mantido: links antigos usavam /tenants. */}
-        <Route path="/tenants" element={<Tenants />} />
-        <Route path="/tenants/:id" element={<TenantDetail />} />
+        <Route path="/tenants" element={<Empresas />} />
+        <Route path="/tenants/:id" element={<EmpresaDetalhe />} />
         <Route path="/documentos" element={<Documentos />} />
         <Route path="/documentos/:id" element={<DocumentoDetalhe />} />
         <Route path="/playground" element={<Playground />} />
