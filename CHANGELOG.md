@@ -3,6 +3,35 @@
 ## [Não released]
 
 ### Adicionado
+- **Painel admin refeito (design system próprio)** — React 19 + Radix Primitives,
+  tipografia IBM Plex, paleta "tinta sobre papel" com acento único (azul de carimbo)
+  e três famílias semânticas de status. Rail expansível (60↔232px, preferência
+  persistida), conteúdo em toda a largura disponível, responsivo até 360px (rail
+  vira barra inferior), skip link e navegação por teclado.
+- **7 endpoints admin** que expõem capacidades que só existiam na API:
+  `GET /v1/admin/documentos-fiscais/{id}/pdf` (DANFE/DANFCe/DANFSe),
+  `GET .../{id}/eventos`, `POST .../{id}/reenviar`,
+  `POST/GET /v1/admin/inutilizacoes`, `GET /v1/admin/notas-recebidas` (+ XML
+  completo e manifestação), `GET /v1/admin/status-servico?tenantId=`,
+  `GET /v1/admin/auditoria` (trilha append-only, somente leitura).
+- **Contexto de empresa na URL** (`?empresa=`) compartilhado entre Documentos,
+  Notas recebidas, Auditoria e Playground; filtros, ordenação, paginação e abas
+  também na URL — deep-linkável e sobrevive a F5.
+- **Dashboard de atenção primeiro** — fila de transmissão, certificados vencendo
+  (com dias restantes), webhooks em falha (com HTTP e tentativas), rejeições com o
+  motivo da SEFAZ e emissão recente. Cada item linka para onde agir.
+- **Tráfego HTTP (`/trafego`)** — inspetor de requests/responses do painel com
+  busca, filtros, pausa, exportação JSON e "copiar cURL". Buffer de 300 chamadas em
+  memória; segredos (Authorization, senha, CSC, webhook secret, chave, token)
+  redigidos antes de entrar no buffer. Nada é persistido nem enviado ao backend.
+- **Elementos de assinatura** — chave de acesso decomposta nos 9 campos da SEFAZ
+  (série, CNPJ e DV legíveis de relance) e trilho de status com a cor do desfecho.
+- **Playground** — split-pane request/response, pré-visualização do DANFE **sem
+  transmitir**, NFS-e pela rota DPS, "gerar chave de teste", "copiar cURL" e
+  Idempotency-Key visível/reutilizável.
+- **`TraducaoNpgsqlTests`** — compila as queries dos endpoints admin contra o
+  provider Npgsql sem conectar. A suíte de integração roda em SQLite e era
+  estruturalmente cega para erros de tradução que só aparecem em Postgres.
 - **Reenvio manual de webhooks** — `GET /v1/webhooks` (lista paginada da outbox
   do tenant, filtro por status) e `POST /v1/webhooks/{id}/reenviar` (FALHA volta
   a PENDENTE com ciclo novo de tentativas; PENDENTE tem a tentativa adiantada
@@ -69,6 +98,35 @@
   TLS o rate limit por IP volta a discriminar clientes.
 
 ### Corrigido
+- **`cscId` não era gravado na criação do tenant** — `POST /v1/admin/tenants`
+  validava o par `cscId`+`csc` (422 se só um viesse) e depois não gravava nenhum
+  dos dois: o CSC informado era descartado em silêncio e a NFC-e real falharia.
+  O campo também não voltava no response, então o painel dizia "não cadastrado"
+  mesmo com CSC gravado.
+- **Manifestação do destinatário podia ser repetida** — `ManifestacaoAtual` guarda
+  o nome (`confirmacao`), não o código (`210200`), e a guarda comparava com o
+  código: nunca disparava, nos dois controllers.
+- **`dotnet test` na raiz rodava zero testes** — a `FiscalApi.slnx` não listava os
+  projetos de teste e o CI roda exatamente esse comando: estava verde sem
+  verificar nada. Agora 336 testes rodam na raiz.
+- **Reset de CSS matava todo o espaçamento** — `* { margin:0; padding:0 }` fora de
+  `@layer` vence as utilities do Tailwind v4 (que vivem em `@layer utilities`):
+  `p-4`, `px-14`, `m-2` computavam 0px em todo o projeto. Movido para `@layer base`.
+- **`OrderBy` sobre record projetado dava 500 em Postgres** — o EF não traduz
+  ordenação sobre um record nomeado construído; a suíte SQLite não pegava porque
+  materializa em memória. Corrigido nos dois controllers e travado por teste.
+- **Par CSC/IdCSC sem validação no `PUT`** — enviar só o `csc` estourava com
+  NullReferenceException (500); só o `cscId` deixava o par inconsistente.
+- **Auditoria paginava em memória também em Postgres** — carregava a tabela
+  inteira (append-only, cresce para sempre) a cada page view. `Skip/Take` agora
+  vão para o SQL.
+- **Navegador preenchia URL e secret de webhook com as credenciais do operador** —
+  campo texto seguido de password é lido como formulário de login; a URL do
+  webhook virava o e-mail do operador. `autoComplete` desligado em webhook, CSC e
+  senha do .pfx.
+- **`FALHA_EMISSAO` não existia no frontend** — aparecia cru na tela e, por não
+  constar em `STATUS_TERMINAIS`, fazia o Playground pollar 90s um documento já
+  terminal. Agora é terminal e aceita reenvio (o número nunca foi consumido).
 - **Cancelamento/CC-e via painel admin não transmitiam** — o evento era criado PENDENTE sem
   enfileirar `ProcessarEventoJob` e o varredor ignorava eventos sem agenda (`ProximaTentativaEm`
   nula): documento ficava em `CANCELAMENTO_PENDENTE` para sempre. O admin enfileira o job e o
