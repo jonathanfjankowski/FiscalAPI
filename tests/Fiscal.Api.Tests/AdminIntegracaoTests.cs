@@ -490,4 +490,172 @@ public class AdminIntegracaoTests : IClassFixture<AdminIntegracaoTests.Factory>
         (await admin2.PostAsync($"/v1/admin/tenants/{outro}/certificados/{id1}/ativar", null))
             .StatusCode.Should().Be(HttpStatusCode.NotFound);
     }
+
+    /// <summary>
+    /// O painel lê `tenant.cscId` para mostrar se a NFC-e está configurada, mas
+    /// o record de resposta não expunha o campo — o card CSC dizia "Não
+    /// cadastrado" mesmo com CSC gravado. O identificador é dado não-sensível
+    /// (o CSC em si continua cifrado e nunca volta).
+    /// </summary>
+    [Fact]
+    public async Task Obter_tenant_devolve_cscId_configurado_sem_expor_o_csc()
+    {
+        var client = AdminClient();
+        UsarToken(client, await LoginAsync(client));
+
+        var cnpj = string.Concat(Enumerable.Range(0, 14).Select(_ => Random.Shared.Next(10)));
+        var create = await client.PostAsJsonAsync("/v1/admin/tenants", new
+        {
+            cnpj,
+            razaoSocial = "Tenant CSC Admin LTDA",
+            uf = "PR",
+            cscId = "000001",
+            csc = "csc-secreto-da-sefaz"
+        });
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var tenantId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetGuid();
+
+        var resp = await client.GetAsync($"/v1/admin/tenants/{tenantId}");
+        resp.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await resp.Content.ReadFromJsonAsync<JsonElement>();
+
+        // O identificador volta (é o que a UI mostra).
+        body.GetProperty("cscId").GetString().Should().Be("000001");
+
+        // O segredo NUNCA volta — nem o campo em claro, nem o cifrado.
+        var json = body.GetRawText();
+        json.Should().NotContain("csc-secreto-da-sefaz");
+        json.Should().NotContain("cscCriptografado");
+        body.TryGetProperty("csc", out _).Should().BeFalse();
+    }
+
+    /// <summary>Tenant sem CSC devolve `cscId: null` — a UI distingue "não configurado".</summary>
+    [Fact]
+    public async Task Obter_tenant_sem_csc_devolve_cscId_nulo()
+    {
+        var client = AdminClient();
+        UsarToken(client, await LoginAsync(client));
+
+        var cnpj = string.Concat(Enumerable.Range(0, 14).Select(_ => Random.Shared.Next(10)));
+        var create = await client.PostAsJsonAsync("/v1/admin/tenants", new
+        {
+            cnpj,
+            razaoSocial = "Tenant Sem CSC LTDA",
+            uf = "PR"
+        });
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var tenantId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetGuid();
+
+        var body = await (await client.GetAsync($"/v1/admin/tenants/{tenantId}"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+
+        body.GetProperty("cscId").ValueKind.Should().Be(JsonValueKind.Null);
+    }
+
+    /// <summary>A listagem também precisa do campo — a tela de empresas usa a mesma projeção.</summary>
+    [Fact]
+    public async Task Listar_tenants_inclui_cscId()
+    {
+        var client = AdminClient();
+        UsarToken(client, await LoginAsync(client));
+
+        var cnpj = string.Concat(Enumerable.Range(0, 14).Select(_ => Random.Shared.Next(10)));
+        var create = await client.PostAsJsonAsync("/v1/admin/tenants", new
+        {
+            cnpj,
+            razaoSocial = "Tenant CSC na Lista LTDA",
+            uf = "PR",
+            cscId = "000042",
+            csc = "outro-segredo"
+        });
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var tenantId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetGuid();
+
+        var lista = await (await client.GetAsync("/v1/admin/tenants"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+
+        var item = lista.EnumerateArray().Single(t => t.GetProperty("id").GetGuid() == tenantId);
+        item.GetProperty("cscId").GetString().Should().Be("000042");
+        item.GetRawText().Should().NotContain("outro-segredo");
+    }
+
+    /// <summary>
+    /// O par CSC/IdCSC é atômico. Enviar só o `csc` sem `cscId` estourava com
+    /// NullReferenceException (500) no PUT — o POST já validava, o PUT não.
+    /// </summary>
+    [Fact]
+    public async Task Atualizar_tenant_com_csc_sem_cscId_retorna_422()
+    {
+        var client = AdminClient();
+        UsarToken(client, await LoginAsync(client));
+
+        var cnpj = string.Concat(Enumerable.Range(0, 14).Select(_ => Random.Shared.Next(10)));
+        var create = await client.PostAsJsonAsync("/v1/admin/tenants", new
+        {
+            cnpj,
+            razaoSocial = "Tenant CSC Par LTDA",
+            uf = "PR"
+        });
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var tenantId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetGuid();
+
+        var resp = await client.PutAsJsonAsync($"/v1/admin/tenants/{tenantId}", new
+        {
+            csc = "segredo-sem-identificador"
+        });
+
+        resp.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    /// <summary>
+    /// Só o `cscId`, sem CSC gravado, deixaria o par inconsistente (NFC-e
+    /// rejeitada na emissão real). Precisa do segredo junto.
+    /// </summary>
+    [Fact]
+    public async Task Atualizar_tenant_com_cscId_sem_csc_gravado_retorna_422()
+    {
+        var client = AdminClient();
+        UsarToken(client, await LoginAsync(client));
+
+        var cnpj = string.Concat(Enumerable.Range(0, 14).Select(_ => Random.Shared.Next(10)));
+        var create = await client.PostAsJsonAsync("/v1/admin/tenants", new
+        {
+            cnpj,
+            razaoSocial = "Tenant CSC So Id LTDA",
+            uf = "PR"
+        });
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var tenantId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetGuid();
+
+        var resp = await client.PutAsJsonAsync($"/v1/admin/tenants/{tenantId}", new { cscId = "000009" });
+
+        resp.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity);
+    }
+
+    /// <summary>Corrigir só o IdCSC quando já há CSC gravado é permitido.</summary>
+    [Fact]
+    public async Task Atualizar_tenant_com_cscId_quando_csc_existe_e_permitido()
+    {
+        var client = AdminClient();
+        UsarToken(client, await LoginAsync(client));
+
+        var cnpj = string.Concat(Enumerable.Range(0, 14).Select(_ => Random.Shared.Next(10)));
+        var create = await client.PostAsJsonAsync("/v1/admin/tenants", new
+        {
+            cnpj,
+            razaoSocial = "Tenant CSC Correcao Id LTDA",
+            uf = "PR",
+            cscId = "000001",
+            csc = "segredo-original"
+        });
+        create.StatusCode.Should().Be(HttpStatusCode.Created);
+        var tenantId = (await create.Content.ReadFromJsonAsync<JsonElement>()).GetGuid();
+
+        var resp = await client.PutAsJsonAsync($"/v1/admin/tenants/{tenantId}", new { cscId = "000002" });
+        resp.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+        var body = await (await client.GetAsync($"/v1/admin/tenants/{tenantId}"))
+            .Content.ReadFromJsonAsync<JsonElement>();
+        body.GetProperty("cscId").GetString().Should().Be("000002");
+    }
 }

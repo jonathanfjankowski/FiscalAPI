@@ -158,6 +158,74 @@ public class RepositorioAuditoria : IRepositorioAuditoria
 
     public async Task RegistrarAsync(Auditoria auditoria, CancellationToken ct) =>
         await _db.Auditoria.AddAsync(auditoria, ct);
+
+    public async Task<(int Total, IReadOnlyList<Auditoria> Itens)> ListarAsync(
+        Guid? tenantId, string? acao, string? recursoId,
+        DateTimeOffset? de, DateTimeOffset? ate,
+        int pagina, int tamanhoPagina, CancellationToken ct)
+    {
+        var query = _db.Auditoria.AsNoTracking();
+
+        if (tenantId is not null) query = query.Where(a => a.TenantId == tenantId);
+        // Prefixo do GUID: a tabela mostra só os 8 primeiros caracteres, então
+        // exigir o GUID completo tornaria o filtro inútil a partir do que se vê.
+        var prefixoRecurso = recursoId?.Trim().ToLowerInvariant();
+        if (!string.IsNullOrEmpty(prefixoRecurso))
+        {
+            query = query.Where(a => a.RecursoId != null &&
+                a.RecursoId.ToString()!.StartsWith(prefixoRecurso));
+        }
+        if (de is not null) query = query.Where(a => a.CriadoEm >= de);
+        if (ate is not null) query = query.Where(a => a.CriadoEm <= ate);
+
+        // No SQLite (suíte de testes) a busca textual com ToUpperInvariant não
+        // traduz e o ORDER BY sobre DateTimeOffset lança. Nesse provider o
+        // conjunto é materializado e filtrado/ordenado/paginado em memória —
+        // o volume da suíte é pequeno por definição.
+        //
+        // Em Postgres TUDO roda no banco, inclusive Skip/Take: a auditoria é
+        // append-only e cresce para sempre, então carregar a tabela inteira
+        // para paginar em memória não é opção.
+        var sqlite = _db.Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite";
+
+        if (sqlite)
+        {
+            var todos = await query.ToListAsync(ct);
+            if (!string.IsNullOrWhiteSpace(acao))
+            {
+                var termo = acao.Trim();
+                todos = todos
+                    .Where(a => a.Acao.Contains(termo, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+            }
+            todos = todos
+                .OrderByDescending(a => a.CriadoEm)
+                .ThenByDescending(a => a.Id)
+                .ToList();
+
+            var totalMemoria = todos.Count;
+            var paginaMemoria = todos.Skip((pagina - 1) * tamanhoPagina).Take(tamanhoPagina).ToList();
+            return (totalMemoria, paginaMemoria);
+        }
+
+        if (!string.IsNullOrWhiteSpace(acao))
+        {
+            // Busca parcial: o operador digita "CERTIFICADO" e vê todas as
+            // ações daquele assunto.
+            var termo = acao.Trim().ToUpperInvariant();
+            query = query.Where(a => a.Acao.Contains(termo));
+        }
+
+        var total = await query.CountAsync(ct);
+        var itens = await query
+            .OrderByDescending(a => a.CriadoEm)
+            .ThenByDescending(a => a.Id)
+            .Skip((pagina - 1) * tamanhoPagina)
+            .Take(tamanhoPagina)
+            .ToListAsync(ct);
+
+        return (total, itens);
+    }
 }
 
 public class RepositorioEventoFiscal : IRepositorioEventoFiscal

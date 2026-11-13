@@ -1,34 +1,20 @@
+/* ==========================================================================
+   Entry point de estilos.
+
+   Tudo em UM arquivo de entrada: o Tailwind v4 compila cada CSS
+   importado como uma unidade separada, e o `@theme` de tokens.css só
+   registra as utilidades de cor na mesma unidade que contém
+   `@import "tailwindcss"`. Se tokens.css fosse importado separado (como
+   em main.tsx), o tema não alcançaria o contexto de geração das
+   utilities — e `text-aprovado` simplesmente não existiria no bundle.
+   ========================================================================== */
+
 @import "tailwindcss";
+
+/* Tokens: paleta, tipografia, raios — antes do base para que o base possa
+   referenciar as custom properties. */
+@import "./styles/tokens.css";
+@import "./styles/base.css";
 
 /* Tema claro por padrão; escuro via classe .dark no <html> (toggle do topbar). */
 @custom-variant dark (&:where(.dark, .dark *));
-
-:root {
-  color-scheme: light;
-}
-.dark {
-  color-scheme: dark;
-}
-
-body {
-  @apply bg-zinc-100 text-zinc-800 antialiased dark:bg-zinc-950 dark:text-zinc-200;
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
-}
-
-code, pre, .font-mono {
-  font-family: ui-monospace, "Cascadia Code", "JetBrains Mono", Menlo, monospace;
-}
-
-::-webkit-scrollbar {
-  width: 10px;
-  height: 10px;
-}
-::-webkit-scrollbar-track {
-  background: transparent;
-}
-::-webkit-scrollbar-thumb {
-  @apply bg-zinc-300 rounded-full border-2 border-solid border-transparent bg-clip-content dark:bg-zinc-800;
-}
-::-webkit-scrollbar-thumb:hover {
-  @apply bg-zinc-400 dark:bg-zinc-700;
-}

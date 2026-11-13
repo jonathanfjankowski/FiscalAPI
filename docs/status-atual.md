@@ -115,22 +115,112 @@ As principais:
 - Homologação real exige certificado A1 válido (não existe certificado
   "de teste" separado na SEFAZ).
 
-## Painel admin (out/2026)
+## Painel admin (redesign — nov/2026)
 
-- Frontend refatorado: desktop-first, tema claro/escuro (toggle), acento azul,
-  ícones lucide-react, tabelas densas estilo ERP.
+O painel foi refeito do zero: design system próprio sobre Radix Primitives,
+tipografia IBM Plex, paleta "tinta sobre papel" com acento único (azul de
+carimbo) e três famílias semânticas de status. Direção visual de **registro
+fiscal**, não de dashboard genérico.
+
+**Cobertura da API.** Antes o painel consumia 23 das 89 rotas. Agora expõe
+toda a capacidade da API — incluindo o que só existia no backend:
+
+- **DANFE em PDF** (`GET /v1/admin/documentos-fiscais/{id}/pdf`) — antes só XML cru.
+- **Pré-visualização do DANFE sem transmitir** (Playground, `POST /preview-pdf`).
+- **Reenvio com payload corrigido** mantendo o número (`POST /{id}/reenviar`).
+- **Inutilização de faixa** (`POST /v1/admin/inutilizacoes`), com modal na aba
+  de dados da empresa.
+- **Eventos do documento** com protocolo e motivo (`GET /{id}/eventos`).
+- **Notas recebidas (DFe) e manifestação do destinatário** — seção inteira nova.
+- **Status do serviço SEFAZ** por UF, na barra de comando.
+- **Trilha de auditoria** (`GET /v1/admin/auditoria`) — a tabela era gravada em
+  ~77 pontos e nunca lida.
+- **NFS-e (DPS)** no Playground (rota `nfse/dps`, payload `NfseDpsRequest`);
+  ativar/desativar certificado; editar dados fiscais; reativar empresa.
+
+**UX.** Contexto de empresa na URL (`?empresa=`) compartilhado entre telas;
+filtros, ordenação, paginação e abas também na URL (deep-linkável, sobrevive a
+F5). Dashboard de **atenção primeiro** (fila de transmissão, certificados
+vencendo, webhooks em falha, rejeições com motivo) em vez de contagens.
+Erro e vazio são estados distintos — quando a API cai, a tela diz o que houve
+e oferece repetir.
+
+**Elementos de assinatura:** a chave de acesso decomposta nos 9 campos da
+SEFAZ (série, CNPJ e DV legíveis de relance) e o trilho de status com a cor do
+desfecho — a única animação do produto, que respeita `prefers-reduced-motion`.
+
+**Acessibilidade:** Radix dá focus trap, `role="dialog"`, roving tabindex e
+`aria-*`; skip link, `aria-live` nos toasts, foco visível, navegação por
+teclado, responsivo até 360px (rail vira barra inferior).
+
+**Navegação e layout.** O rail é expansível (60px ↔ 232px, preferência
+persistida) e o conteúdo ocupa **toda** a largura disponível — um console de
+operação é lido em monitor largo. Na listagem de documentos, **número e
+empresa são os elementos dominantes**: número em 15px semibold com o selo do
+modelo (NF-e 55 / NFC-e 65 / NFS-e 115) ao lado, empresa com CNPJ e UF abaixo.
+A numeração é por (empresa, modelo, série, ambiente), então o número sozinho
+é ambíguo — cinco documentos podem ser `1/000000001`. A linha inteira abre o
+detalhe, o número tem copiar, e clicar na empresa troca o contexto do painel.
+
+**Semântica de status por domínio.** Documento, evento fiscal e entrega de
+webhook são máquinas de estado diferentes: `PROCESSADO`/`REJEITADO` são do
+evento, `ENTREGUE`/`FALHA` da entrega. Cada uma tem rótulo e cor próprios —
+antes "Falha" de webhook aparecia cinza, indistinguível de uma pendente.
+Manifestação também: só *confirmada* é verde; *desconhecida* e *não realizada*
+são alerta e contestação, e o botão de manifestar fica desabilitado em estado
+final (a SEFAZ não aceita outra).
+
+**Tráfego HTTP (`/trafego`).** Inspetor de requests/responses do painel: método,
+rota, status, duração, tamanho, headers e corpos, com busca, filtros, pausa,
+exportação JSON e "copiar cURL". Buffer de 300 chamadas em memória; corpos
+acima de 64 KB são truncados. **Segredos são redigidos antes de entrar no
+buffer** — `Authorization`, senha, CSC, webhook secret, chave e token — com
+14 testes unitários travando a redação (inclusive em objetos aninhados e
+arrays). Nada é persistido nem enviado ao backend. O item do menu mostra o
+contador de falhas.
+
+**Bugs corrigidos no caminho** (todos pré-existentes):
+- `cscId` não era exposto no response **nem gravado na criação** do tenant —
+  o CSC informado era silenciosamente descartado.
+- Manifestação do destinatário podia ser repetida: `ManifestacaoAtual` guarda
+  o nome (`confirmacao`), não o código (`210200`), e a guarda comparava com o código.
+- `FALHA_EMISSAO` não existia no frontend — aparecia cru e fazia o Playground
+  pollar 90s um documento já terminal.
+- O reset de CSS fora de `@layer` matava **todo** o espaçamento do Tailwind v4.
+- `dotnet test` na raiz rodava **zero** testes (a `.slnx` não listava os
+  projetos de teste) — o CI estava verde sem verificar nada.
+- `OrderBy` sobre record projetado não traduz no Npgsql (500 em produção);
+  a suíte SQLite não pegava. Corrigido nos dois controllers e travado por teste.
+- O par CSC/IdCSC não era validado no `PUT` — enviar só o `csc` dava 500.
+- A paginação da auditoria carregava a tabela inteira em memória também em
+  Postgres; agora `Skip/Take` vão para o SQL.
+- O navegador preenchia **URL e secret de webhook com as credenciais do
+  operador** (campo texto + password é lido como formulário de login). A URL
+  do webhook virava o e-mail do operador. `autoComplete` desligado nos campos
+  de webhook, CSC e senha do .pfx.
+
+**Desempenho.** Rotas em `lazy` + `Suspense`: o bundle inicial caiu de 504 KB
+para 282 KB, e cada página carrega sob demanda. Busca com atraso de 300 ms
+(uma requisição por palavra, não por tecla). O dashboard agrega no SQL em
+Postgres — era a landing page pollando a cada 15 s e materializando a tabela
+de documentos inteira.
+
+**Testes:** 336 no backend (140 Core + 196 Api) e 50 no frontend (Vitest,
+lógica pura de `lib/`). Inclui `TraducaoNpgsqlTests`, que compila as queries
+dos endpoints admin contra o provider **Npgsql** sem conectar — a suíte de
+integração roda em SQLite e é estruturalmente cega para erros de tradução
+que só aparecem em Postgres. O CI roda build + testes + format + lint + build/test
+do frontend.
+
+### Histórico (out/2026)
+
 - **Sandbox por empresa**: `Tenant.Sandbox` controla mock vs SEFAZ por tenant
   (toggle no painel, `PUT /v1/admin/tenants/{id}` com `sandbox`). Novos tenants
-  herdam de `Fiscal:ModoSandbox`. Mocks de emissor/eventos/DFe ficam sempre
-  registrados; a escolha é em runtime.
+  herdam de `Fiscal:ModoSandbox`.
 - **Chave master no banco**: o `X-Bootstrap-Key` do provisionamento do ERP
   (`POST /v1/empresas`) passou a ser validado contra `chave_bootstrap`
   (hash PBKDF2), com fallback ao config `Fiscal:BootstrapToken`. Rotação via
-  painel (`GET/POST /v1/admin/bootstrap-key[/rotacionar]`) — a chave em claro
-  aparece uma única vez.
-- Painel cobre: empresas (dados fiscais, CSC, API keys, certificados, sandbox,
-  webhooks + outbox com reenvio), documentos (cancelamento/CC-e), playground,
-  dashboard, chave master.
+  painel — a chave em claro aparece uma única vez.
 - Migration `20261006000000_TenantSandboxChaveBootstrap` (tenants.sandbox
   default true + tabela chave_bootstrap).
 

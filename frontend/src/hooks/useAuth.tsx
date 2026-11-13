@@ -1,20 +1,9 @@
-import { createContext, useContext, useEffect, useMemo, useState, type ReactNode } from 'react'
-import { api, clearAuth, getAuth, setAuth, UNAUTHORIZED_EVENT, type AuthInfo } from '../lib/api'
-
-interface AuthCtx {
-  auth: AuthInfo | null
-  login: (email: string, senha: string) => Promise<void>
-  logout: () => void
-}
-
-const Ctx = createContext<AuthCtx>({ auth: null, login: async () => {}, logout: () => {} })
-
-export function useAuth() {
-  return useContext(Ctx)
-}
+import { useEffect, useMemo, useState, type ReactNode } from 'react'
+import { api, clearAuth, getAuth, setAuth, UNAUTHORIZED_EVENT } from '../lib/api'
+import { AuthContext, type AuthCtx } from '../lib/authContext'
 
 export function AuthProvider({ children }: { children: ReactNode }) {
-  const [auth, setAuthState] = useState<AuthInfo | null>(() => getAuth())
+  const [auth, setAuthState] = useState(() => getAuth())
 
   // 401 global: qualquer resposta 401 da API limpa a sessão em memória também
   // (RequireAuth então redireciona para /login sem precisar de F5).
@@ -40,5 +29,5 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     [auth],
   )
 
-  return <Ctx.Provider value={value}>{children}</Ctx.Provider>
+  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>
 }

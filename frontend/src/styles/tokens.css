@@ -1,0 +1,134 @@
+/* ==========================================================================
+   Tokens — direção "Cartório Digital"
+   --------------------------------------------------------------------------
+   Tinta sobre papel: base fria e institucional, um único acento (azul de
+   carimbo) e três famílias semânticas de status. O status NÃO usa classes
+   Tailwind literais — usa custom properties, para que claro/escuro troque
+   sem repetir o par de classes em cada componente.
+
+   As variantes dark são redefined no bloco `.dark` (o toggle em useTema
+   alterna a classe no <html>).
+   ========================================================================== */
+
+:root {
+  color-scheme: light;
+
+  /* --- Superfícies e tinta --- */
+  --paper: #f2f3f5;
+  --surface: #ffffff;
+  --surface-sunken: #eceef1;
+  --ink: #1a1d23;
+  --ink-muted: #71767f;
+  --ink-faint: #9aa0aa;
+  --line: #e3e5ea;
+  --line-strong: #cfd3da;
+
+  /* --- Acento único (carimbo) --- */
+  --carimbo: #0c5a63;
+  --carimbo-hover: #0a4a52;
+  --carimbo-soft: #e2f0f1;
+  --on-carimbo: #ffffff;
+
+  /* --- Famílias semânticas de status --- */
+  --aprovado: #1d7a4c;
+  --aprovado-soft: #e4f2ea;
+  --rejeitado: #b3261e;
+  --rejeitado-soft: #fbe9e8;
+  --contingencia: #b26a00;
+  --contingencia-soft: #fbf0df;
+  --neutro: #71767f;
+  --neutro-soft: #eef0f3;
+
+  /* --- Tokens por status (consumidos via lib/fiscal.ts) --- */
+  --status-PENDENTE: var(--carimbo);
+  --status-PROCESSANDO: var(--carimbo);
+  --status-AUTORIZADA: var(--aprovado);
+  --status-REJEITADA: var(--rejeitado);
+  --status-DENEGADA: var(--rejeitado);
+  --status-ERRO_INTERNO: var(--rejeitado);
+  --status-ERRO_CANCELAMENTO: var(--rejeitado);
+  --status-CONTINGENCIA: var(--contingencia);
+  --status-CANCELAMENTO_PENDENTE: var(--contingencia);
+  --status-CANCELADA: var(--neutro);
+  --status-FALHA_EMISSAO: var(--rejeitado);
+
+  /* --- Tipografia --- */
+  --fonte-sans: "IBM Plex Sans", ui-sans-serif, system-ui, sans-serif;
+  --fonte-mono: "IBM Plex Mono", ui-monospace, "Cascadia Code", Menlo, monospace;
+
+  /* --- Raios (documento fiscal tem canto reto) --- */
+  --raio-sm: 2px;
+  --raio: 4px;
+  --raio-lg: 6px;
+
+  /* --- Sombra: só em overlay (dialog, popover, dropdown) --- */
+  --sombra-overlay: 0 12px 32px -8px rgb(10 13 18 / 0.28), 0 2px 8px -2px rgb(10 13 18 / 0.16);
+}
+
+.dark {
+  color-scheme: dark;
+
+  --paper: #111318;
+  --surface: #171a20;
+  --surface-sunken: #0d0f13;
+  --ink: #e9ebef;
+  --ink-muted: #9aa0aa;
+  --ink-faint: #6f7681;
+  --line: #262a32;
+  --line-strong: #363b45;
+
+  --carimbo: #4fb3bf;
+  --carimbo-hover: #6ac3cd;
+  --carimbo-soft: #14313a;
+  --on-carimbo: #06222a;
+
+  --aprovado: #4cb782;
+  --aprovado-soft: #12301f;
+  --rejeitado: #f2837c;
+  --rejeitado-soft: #351717;
+  --contingencia: #e0a03c;
+  --contingencia-soft: #33240d;
+  --neutro: #9aa0aa;
+  --neutro-soft: #22262e;
+
+  --sombra-overlay: 0 12px 32px -8px rgb(0 0 0 / 0.6), 0 2px 8px -2px rgb(0 0 0 / 0.4);
+}
+
+/* ==========================================================================
+   @theme — expõe os tokens acima ao Tailwind v4.
+   Cores: `bg-paper`, `text-ink`, `border-line`, `text-carimbo`…
+   ========================================================================== */
+
+@theme inline {
+  --color-paper: var(--paper);
+  --color-surface: var(--surface);
+  --color-surface-sunken: var(--surface-sunken);
+  --color-ink: var(--ink);
+  --color-ink-muted: var(--ink-muted);
+  --color-ink-faint: var(--ink-faint);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+
+  --color-carimbo: var(--carimbo);
+  --color-carimbo-hover: var(--carimbo-hover);
+  --color-carimbo-soft: var(--carimbo-soft);
+  --color-on-carimbo: var(--on-carimbo);
+
+  --color-aprovado: var(--aprovado);
+  --color-aprovado-soft: var(--aprovado-soft);
+  --color-rejeitado: var(--rejeitado);
+  --color-rejeitado-soft: var(--rejeitado-soft);
+  --color-contingencia: var(--contingencia);
+  --color-contingencia-soft: var(--contingencia-soft);
+  --color-neutro: var(--neutro);
+  --color-neutro-soft: var(--neutro-soft);
+
+  --font-sans: var(--fonte-sans);
+  --font-mono: var(--fonte-mono);
+
+  --radius-sm: var(--raio-sm);
+  --radius: var(--raio);
+  --radius-lg: var(--raio-lg);
+
+  --shadow-overlay: var(--sombra-overlay);
+}
