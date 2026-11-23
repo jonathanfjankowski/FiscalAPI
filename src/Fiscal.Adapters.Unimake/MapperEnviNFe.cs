@@ -529,17 +529,23 @@ public static class MapperEnviNFe
             return new PIS { PISNT = new PISNT { CST = cst } };
         }
 
-        if (cst is "99")
+        if (cst is "49" or "99")
         {
-            var outr = new PISOutr { CST = cst };
-            if (pis.BaseCalculo is { } bc) outr.VBC = (double)bc;
-            if (pis.Aliquota is { } p) outr.PPIS = (double)p;
-            if (pis.Valor is { } v) outr.VPIS = (double)v;
-            return new PIS { PISOutr = outr };
+            // Schema SEFAZ para PISOutr exige vBC + pPIS + vPIS (zerados quando sem incidência no Simples).
+            return new PIS
+            {
+                PISOutr = new PISOutr
+                {
+                    CST = cst,
+                    VBC = (double)(pis.BaseCalculo ?? 0m),
+                    PPIS = (double)(pis.Aliquota ?? 0m),
+                    VPIS = (double)(pis.Valor ?? 0m),
+                },
+            };
         }
 
         throw new ErroNaoRecuperavelException(
-            $"Item {numeroItem} ('{codigoItem}'): PIS CST '{cst}' fora do contrato (01, 02, 04–09, 99).");
+            $"Item {numeroItem} ('{codigoItem}'): PIS CST '{cst}' fora do contrato (01, 02, 04–09, 49, 99).");
     }
 
     private static COFINS MapearCofins(CofinsDto cofins, int numeroItem, string codigoItem)
@@ -575,17 +581,23 @@ public static class MapperEnviNFe
             return new COFINS { COFINSNT = new COFINSNT { CST = cst } };
         }
 
-        if (cst is "99")
+        if (cst is "49" or "99")
         {
-            var outr = new COFINSOutr { CST = cst };
-            if (cofins.BaseCalculo is { } bc) outr.VBC = (double)bc;
-            if (cofins.Aliquota is { } p) outr.PCOFINS = (double)p;
-            if (cofins.Valor is { } v) outr.VCOFINS = (double)v;
-            return new COFINS { COFINSOutr = outr };
+            // Schema SEFAZ para COFINSOutr exige vBC + pCOFINS + vCOFINS (zerados quando sem incidência no Simples).
+            return new COFINS
+            {
+                COFINSOutr = new COFINSOutr
+                {
+                    CST = cst,
+                    VBC = (double)(cofins.BaseCalculo ?? 0m),
+                    PCOFINS = (double)(cofins.Aliquota ?? 0m),
+                    VCOFINS = (double)(cofins.Valor ?? 0m),
+                },
+            };
         }
 
         throw new ErroNaoRecuperavelException(
-            $"Item {numeroItem} ('{codigoItem}'): COFINS CST '{cst}' fora do contrato (01, 02, 04–09, 99).");
+            $"Item {numeroItem} ('{codigoItem}'): COFINS CST '{cst}' fora do contrato (01, 02, 04–09, 49, 99).");
     }
 
     private static IBSCBS MapearIbsCbs(IbsCbsDto dto, int numeroItem, string codigoItem)

@@ -148,11 +148,11 @@ public class ValidadorImpostosV2
             return;
         }
 
-        if (cst is "99")
+        if (cst is "49" or "99")
             Conferir($"{campo}.valor", baseCalculo, aliquota, valor, erros);
         else
             erros.Add(new InconsistenciaFiscal($"{campo}.cst",
-                $"{grupo.ToUpperInvariant()} CST '{cst}' fora do contrato (01, 02, 04–09, 99)."));
+                $"{grupo.ToUpperInvariant()} CST '{cst}' fora do contrato (01, 02, 04–09, 49, 99)."));
     }
 
     private static void ValidarIcms(IcmsDto icms, int indice, string codigo, List<InconsistenciaFiscal> erros)
