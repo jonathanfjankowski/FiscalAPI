@@ -109,7 +109,11 @@ public class EmissorNFe : IEmissorFiscal
             }
 
             if (ret.ProtNFe?.InfProt is not null)
-                return RetornoUnimake.InterpretarProt(ret.ProtNFe.InfProt, xmlAssinado, xmlRetorno, xmlGerado);
+            {
+                // nfeProc (NFe assinada + protNFe) é o XML legal de distribuição.
+                var nfeProc = servico.NfeProcResult?.GerarXML().OuterXml ?? xmlAssinado;
+                return RetornoUnimake.InterpretarProt(ret.ProtNFe.InfProt, nfeProc, xmlRetorno, xmlGerado);
+            }
 
             if (ret.CStat >= 200)
             {
@@ -235,6 +239,8 @@ public class EmissorNFe : IEmissorFiscal
                 Motivo: $"Lote processado (cStat {ret.CStat}) sem protNFe: {ret.XMotivo}");
         }
 
-        return RetornoUnimake.InterpretarProt(prot.InfProt, xmlAssinado: null, xmlRetorno, xmlGerado: null);
+        var xmlProt = MontadorNfeProc.ExtrairProtNFe(xmlRetorno);
+        var nfeProc = MontadorNfeProc.Montar(doc.XmlAssinado, xmlProt);
+        return RetornoUnimake.InterpretarProt(prot.InfProt, xmlAssinado: nfeProc ?? doc.XmlAssinado, xmlRetorno, xmlGerado: null);
     }
 }

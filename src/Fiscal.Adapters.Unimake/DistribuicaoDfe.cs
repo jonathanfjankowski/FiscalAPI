@@ -81,8 +81,28 @@ public static class MontadorNfeProc
     {
         if (string.IsNullOrEmpty(xmlProtNFe)) return null;
         if (string.IsNullOrEmpty(xmlNfeAssinada)) return xmlProtNFe;
+        var nfe = ExtrairElemento(xmlNfeAssinada, "NFe") ?? xmlNfeAssinada;
+        var prot = ExtrairElemento(xmlProtNFe, "protNFe") ?? xmlProtNFe;
         return "<nfeProc versao=\"4.00\" xmlns=\"http://www.portalfiscal.inf.br/nfe\">"
-            + xmlNfeAssinada + xmlProtNFe + "</nfeProc>";
+            + nfe + prot + "</nfeProc>";
+    }
+
+    public static string? ExtrairProtNFe(string? xmlRetorno) =>
+        ExtrairElemento(xmlRetorno, "protNFe");
+
+    private static string? ExtrairElemento(string? xml, string localName)
+    {
+        if (string.IsNullOrWhiteSpace(xml)) return null;
+        try
+        {
+            var doc = new System.Xml.XmlDocument { PreserveWhitespace = true };
+            doc.LoadXml(xml);
+            return doc.SelectSingleNode($"//*[local-name()='{localName}']")?.OuterXml;
+        }
+        catch (System.Xml.XmlException)
+        {
+            return null;
+        }
     }
 }
 

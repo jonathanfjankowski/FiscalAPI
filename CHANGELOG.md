@@ -2,6 +2,31 @@
 
 ## [Não released]
 
+### Corrigido
+- **Distribuição `nfeProc` na NF-e** (`EmissorNFe` + `MontadorNfeProc`) — no retorno
+  síncrono (`indSinc=1`) passa a gravar `servico.NfeProcResult` (NFe assinada +
+  `protNFe`, mesmo padrão da NFC-e) em vez de apenas o XML assinado; na consulta
+  de recibo (`ConsultarReciboAsync`) monta o `nfeProc` extraindo `<NFe>` e
+  `<protNFe>`.
+- **Async sem bloqueio no `EmissorNFCe`** — `EmitirAsync` agora usa `await` ao
+  decifrar o CSC em vez de `.GetAwaiter().GetResult()`.
+- **Totais `impostosV2` e chave no DANFE** (`Fiscal.Pdf`) — corrigido
+  `SomaBaseIcms` (antes `SelectMany(...) ?? ...` zerava a BC ICMS para payloads
+  `impostosV2`) e `SomaIcms` (antes ignorava `ImpostosV2.Icms.Valor`);
+  `FormatarChave` agora é seguro para chaves com tamanho ≠ 44.
+- **Faixa de `serie` alinhada à SEFAZ e à FiscalLIB** — `EmissaoRequest.Serie` e
+  `InutilizacaoRequest.Serie` passam a aceitar `0..999` (antes `1..999`; série 0
+  é válida na SEFAZ).
+- **`global.json`** — ajustado de `10.0.400` para `10.0.100` (`rollForward: latestFeature`)
+  para compatibilidade com SDKs 10.0.x de pacotes Linux e CI.
+
+### Refatorado
+- **Modularização do `Fiscal.Pdf`** — `GeradorPdfQuestPdf.cs` (1.024 linhas)
+  fatiado em `DanfeDocument`, `DanfceDocument`, `DanfseDocument`, `PdfFormatters`
+  e `PdfBarcodes`, mantendo `GeradorPdfQuestPdf` como fachada de `IGeradorPdf`.
+  DANFE passa a destacar `tipoOperacao` (entrada/saída), FCP, PIS/COFINS,
+  IBS/CBS/IS, `informacoesComplementares` (`infCpl`) e `nfesReferenciadas`.
+
 ### Adicionado
 - **Painel admin refeito (design system próprio)** — React 19 + Radix Primitives,
   tipografia IBM Plex, paleta "tinta sobre papel" com acento único (azul de carimbo)

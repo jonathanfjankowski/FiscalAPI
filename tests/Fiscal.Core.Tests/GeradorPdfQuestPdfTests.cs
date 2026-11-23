@@ -157,4 +157,78 @@ public class GeradorPdfQuestPdfTests
         bytes.Should().NotBeEmpty();
         Encoding.ASCII.GetString(bytes, 0, 5).Should().StartWith("%PDF-");
     }
+
+    [Fact]
+    public void SomaBaseIcms_e_SomaIcms_leem_impostosV2_corretamente()
+    {
+        var req = new Fiscal.Core.Contracts.EmissaoRequest(
+            Ambiente: "homologacao",
+            Serie: 1,
+            Destinatario: null,
+            Itens:
+            [
+                new Fiscal.Core.Contracts.ItemDto(
+                    Codigo: "SKU1",
+                    Descricao: "Produto V2",
+                    Ncm: "12345678",
+                    Cfop: "5102",
+                    Quantidade: 2,
+                    ValorUnitario: 50,
+                    ValorTotal: 100,
+                    Impostos: null,
+                    ImpostosV2: new Fiscal.Core.Contracts.ItemImpostosDtoV2(
+                        Icms: new Fiscal.Core.Contracts.IcmsDto(
+                            Origem: 0,
+                            Cst: "00",
+                            BaseCalculo: 100m,
+                            Aliquota: 18m,
+                            Valor: 18m))),
+            ],
+            Totais: new Fiscal.Core.Contracts.TotaisDto(100m, 100m),
+            Pagamento: null);
+
+        PdfFormatters.SomaBaseIcms(req).Should().Be(100m);
+        PdfFormatters.SomaIcms(req).Should().Be(18m);
+    }
+
+    [Fact]
+    public void FormatarChave_nao_falha_quando_tamanho_diferente_de_44()
+    {
+        PdfFormatters.FormatarChave(null).Should().Be("-");
+        PdfFormatters.FormatarChave("").Should().Be("-");
+        PdfFormatters.FormatarChave("123456").Should().Be("1234 56");
+        PdfFormatters.FormatarChave(new string('1', 44)).Should().HaveLength(44 + 10);
+    }
+
+    [Fact]
+    public async Task Danfe_com_impostosV2_e_infCpl_gera_pdf_valido()
+    {
+        var doc = Documento(55, "AUTORIZADA");
+        doc.PayloadEntrada = """
+            {
+              "ambiente": "homologacao",
+              "serie": 1,
+              "tipoOperacao": "entrada",
+              "informacoesComplementares": "Devolução referente ao pedido 123.",
+              "nfesReferenciadas": [{ "chaveAcesso": "41260912345678000199550010000000011000000010" }],
+              "destinatario": { "cnpjCpf": "12345678000199", "nome": "Dest Teste" },
+              "itens": [{
+                "codigo": "SKU1", "descricao": "Produto V2", "ncm": "12345678", "cfop": "1202",
+                "quantidade": 2, "valorUnitario": 50, "valorTotal": 100,
+                "impostosV2": {
+                  "icms": { "origem": 0, "cst": "00", "baseCalculo": 100, "aliquota": 18, "valor": 18 },
+                  "pis": { "cst": "01", "baseCalculo": 100, "aliquota": 1.65, "valor": 1.65 },
+                  "cofins": { "cst": "01", "baseCalculo": 100, "aliquota": 7.60, "valor": 7.60 }
+                }
+              }],
+              "totais": { "valorProdutos": 100, "valorNota": 100, "valorIbs": 0.10, "valorCbs": 0.90 },
+              "pagamento": [{ "forma": "03", "valor": 100, "tipoIntegracao": "1", "bandeira": "01", "autorizacao": "AUT123" }]
+            }
+            """;
+
+        var bytes = await new GeradorPdfQuestPdf().GerarDanfeAsync(doc, Tenant(), CancellationToken.None);
+
+        bytes.Should().NotBeEmpty();
+        Encoding.ASCII.GetString(bytes, 0, 4).Should().Be("%PDF");
+    }
 }

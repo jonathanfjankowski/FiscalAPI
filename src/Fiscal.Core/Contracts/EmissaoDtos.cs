@@ -162,7 +162,7 @@ public record PagamentoDto(
 
 public record EmissaoRequest(
     [Required] string Ambiente,
-    [Range(1, 999)] short Serie,
+    [Range(0, 999)] short Serie,
     DestinatarioDto? Destinatario,
     [Required, MinLength(1)] List<ItemDto> Itens,
     [Required] TotaisDto Totais,

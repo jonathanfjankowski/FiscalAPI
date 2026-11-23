@@ -39,7 +39,7 @@ public class EmissorNFCe : IEmissorFiscal
         _respTec = EmissorNFe.LerRespTec(configuration);
     }
 
-    public Task<ResultadoEmissao> EmitirAsync(
+    public async Task<ResultadoEmissao> EmitirAsync(
         DocumentoFiscal documento,
         Tenant tenant,
         X509Certificate2 certificado,
@@ -51,13 +51,13 @@ public class EmissorNFCe : IEmissorFiscal
 
         var csc = tenant.CscCriptografado is null
             ? null
-            : _cscStore.DecifrarTextoAsync(tenant.CscCriptografado, cancellationToken).GetAwaiter().GetResult();
+            : await _cscStore.DecifrarTextoAsync(tenant.CscCriptografado, cancellationToken);
         var config = ConfiguracaoUnimakeFactory.Criar(
             modelo: 65, tenant, certificado, ambiente,
             csc: csc, cscId: tenant.CscId,
             modoContingencia: documento.ModoContingencia);
 
-        return EmitirSincrono(documento, tenant, request, certificado, ambiente, config, cancellationToken);
+        return await EmitirSincrono(documento, tenant, request, certificado, ambiente, config, cancellationToken);
     }
 
     private async Task<ResultadoEmissao> EmitirSincrono(
