@@ -1,5 +1,6 @@
 using Fiscal.Api.Authentication;
 using Fiscal.Api.Contracts;
+using Fiscal.Api.Services;
 using Fiscal.Core.Contracts;
 using Fiscal.Core.Entities;
 using Fiscal.Core.Enums;
@@ -28,19 +29,22 @@ public class EventosController : ControllerBase
     private readonly IRepositorioAuditoria _auditoria;
     private readonly FiscalDbContext _db;
     private readonly IBackgroundJobClient _jobs;
+    private readonly PrazoCancelamentoService _prazos;
 
     public EventosController(
         IRepositorioDocumentoFiscal docRepo,
         IRepositorioEventoFiscal eventoRepo,
         IRepositorioAuditoria auditoria,
         FiscalDbContext db,
-        IBackgroundJobClient jobs)
+        IBackgroundJobClient jobs,
+        PrazoCancelamentoService prazos)
     {
         _docRepo = docRepo;
         _eventoRepo = eventoRepo;
         _auditoria = auditoria;
         _db = db;
         _jobs = jobs;
+        _prazos = prazos;
     }
 
     [HttpPost("documentos-fiscais/{id:guid}/cancelamento")]
@@ -61,6 +65,10 @@ public class EventosController : ControllerBase
         if (doc!.Modelo is not (55 or 65))
             return Problem(statusCode: 409, title: "Cancelamento por evento não se aplica a NFS-e.",
                 detail: "A NFS-e Nacional usa substituição de DPS (endpoint de substituição, próxima sprint).");
+
+        var erroPrazo = await _prazos.ValidarDentroDoPrazoAsync(doc, ct);
+        if (erroPrazo is not null)
+            return Problem(statusCode: 422, title: "Fora do prazo de cancelamento.", detail: erroPrazo);
 
         var evento = await RegistrarOuObterEventoAsync(
             doc!, EventoCancelamento, idempotencyKey, req.Justificativa, ct);

@@ -30,6 +30,7 @@ public class AdminDocumentosController : ControllerBase
     private readonly IBackgroundJobClient _jobs;
     private readonly IGeradorPdf _geradorPdf;
     private readonly ServicoReenvioDocumento _servicoReenvio;
+    private readonly PrazoCancelamentoService _prazos;
 
     public AdminDocumentosController(
         FiscalDbContext db,
@@ -37,7 +38,8 @@ public class AdminDocumentosController : ControllerBase
         IRepositorioAuditoria auditoria,
         IBackgroundJobClient jobs,
         IGeradorPdf geradorPdf,
-        ServicoReenvioDocumento servicoReenvio)
+        ServicoReenvioDocumento servicoReenvio,
+        PrazoCancelamentoService prazos)
     {
         _db = db;
         _eventoRepo = eventoRepo;
@@ -45,6 +47,7 @@ public class AdminDocumentosController : ControllerBase
         _jobs = jobs;
         _geradorPdf = geradorPdf;
         _servicoReenvio = servicoReenvio;
+        _prazos = prazos;
     }
 
     public record AdminDocListItem(
@@ -390,6 +393,10 @@ public class AdminDocumentosController : ControllerBase
         if (doc.Modelo is not (55 or 65))
             return Problem(statusCode: 409, title: "Cancelamento por evento não se aplica a NFS-e.",
                 detail: "A NFS-e Nacional usa substituição de DPS (endpoint de substituição).");
+
+        var erroPrazo = await _prazos.ValidarDentroDoPrazoAsync(doc, ct);
+        if (erroPrazo is not null)
+            return Problem(statusCode: 422, title: "Fora do prazo de cancelamento.", detail: erroPrazo);
 
         idempotencyKey = string.IsNullOrWhiteSpace(idempotencyKey) ? Guid.NewGuid().ToString() : idempotencyKey;
         var evento = await RegistrarEventoAsync(doc, EventoCancelamento, idempotencyKey, req.Justificativa.Trim(), ct);

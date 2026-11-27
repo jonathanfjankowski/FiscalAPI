@@ -20,6 +20,7 @@ public class FiscalDbContext : DbContext
     public DbSet<ManifestacaoDestinatario> Manifestacoes => Set<ManifestacaoDestinatario>();
     public DbSet<NsuDistribuicao> NsuDistribuicao => Set<NsuDistribuicao>();
     public DbSet<Auditoria> Auditoria => Set<Auditoria>();
+    public DbSet<PrazoCancelamento> PrazosCancelamento => Set<PrazoCancelamento>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -280,6 +281,17 @@ public class FiscalDbContext : DbContext
             b.Property(x => x.Ambiente).HasColumnName("ambiente");
             b.Property(x => x.UltimoNsu).HasColumnName("ultimo_nsu").HasMaxLength(15).IsRequired();
             b.HasOne<Tenant>().WithMany().HasForeignKey(x => x.TenantId);
+        });
+
+        modelBuilder.Entity<PrazoCancelamento>(b =>
+        {
+            b.ToTable("prazos_cancelamento");
+            b.HasKey(x => new { x.Uf, x.Modelo });
+            b.Property(x => x.Uf).HasColumnName("uf").HasMaxLength(2).IsRequired();
+            b.Property(x => x.Modelo).HasColumnName("modelo");
+            b.Property(x => x.PrazoMinutos).HasColumnName("prazo_minutos");
+            b.Property(x => x.Observacao).HasColumnName("observacao").HasMaxLength(300);
+            b.Property(x => x.AtualizadoEm).HasColumnName("atualizado_em");
         });
     }
 }

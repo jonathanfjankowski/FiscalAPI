@@ -16,6 +16,7 @@ import {
 } from '../components/ui'
 import { PageHeader } from '../components/ui/estados'
 import { SegredoUnico } from '../components/ui/segredo'
+import { PrazosCancelamentoSection } from '../components/fiscal/PrazosCancelamentoSection'
 
 // ==========================================================================
 // Configurações da plataforma.
@@ -121,6 +122,9 @@ export default function Configuracoes() {
             </div>
           )}
         </section>
+
+        {/* ---------- Prazos de cancelamento (UF × modelo) ---------- */}
+        <PrazosCancelamentoSection />
 
         {/* ---------- Aparência ---------- */}
         <section className="rounded-lg border border-line bg-surface p-4">

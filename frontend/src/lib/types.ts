@@ -385,3 +385,15 @@ export interface EmissaoResponse {
   criadoEm: string
   atualizadoEm: string
 }
+
+// ---------- Prazos de cancelamento (UF × modelo) ----------
+
+export interface PrazoCancelamentoItem {
+  uf: string
+  modelo: 55 | 65
+  prazoMinutos: number
+  prazoPadraoMinutos: number
+  customizado: boolean
+  observacao: string | null
+  atualizadoEm: string | null
+}
