@@ -18,6 +18,7 @@ import { documentos } from './documentos'
 import { empresas } from './empresas'
 import { notas } from './notas'
 import { playground } from './playground'
+import { prazosCancelamento } from './prazosCancelamento'
 import { statusServico } from './statusServico'
 
 export const api = {
@@ -74,6 +75,11 @@ export const api = {
   // ---------- Chave master ----------
   getBootstrapKey: bootstrap.getBootstrapKey,
   rotacionarBootstrapKey: bootstrap.rotacionarBootstrapKey,
+
+  // ---------- Prazos de cancelamento (UF × modelo) ----------
+  listPrazosCancelamento: prazosCancelamento.listar,
+  updatePrazoCancelamento: prazosCancelamento.atualizar,
+  resetPrazoCancelamento: prazosCancelamento.restaurarPadrao,
 
   // ---------- Playground (caminho do integrador) ----------
   emitir: playground.emitir,

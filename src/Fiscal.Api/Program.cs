@@ -176,6 +176,7 @@ builder.Services.AddScoped<ProcessarWebhookJob>();
 builder.Services.AddScoped<ProcessarManifestacaoJob>();
 builder.Services.AddScoped<SincronizarDistribuicaoDFeJob>();
 builder.Services.AddScoped<AlertarCertificadosVencendoJob>();
+builder.Services.AddScoped<Fiscal.Api.Services.PrazoCancelamentoService>();
 builder.Services.AddMemoryCache();
 
 // --- Auth ---
